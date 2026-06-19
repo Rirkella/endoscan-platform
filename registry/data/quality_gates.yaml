@@ -1,0 +1,31 @@
+# EndoScan dataset quality-gate thresholds.
+#
+# These are the configurable thresholds the quality gate compares a dataset
+# quality report against. The gate emits ONLY a pass/fail verdict — it never
+# triggers training (PROJECT_RULES.md §3.2/§3.3). Thresholds are starting
+# defaults and are expected to be tuned against real overlap later.
+
+thresholds:
+  # Minimum compounds in the smaller class — enough positives AND negatives for
+  # a stable compound-level CV split.
+  min_compounds_per_class: 20
+
+  # Minimum total labeled∩signature compounds below which modeling is not worth
+  # attempting.
+  min_overlap: 40
+
+  # Maximum fraction of duplicate signatures (same compound+cell+dose+time);
+  # high duplication inflates effective N and risks leakage.
+  max_duplicate_signature_rate: 0.10
+
+  # Maximum fraction of compounds with unresolved cross-source label conflicts;
+  # too many means unreliable supervision.
+  max_label_conflict_rate: 0.05
+
+  # Minimum fraction of rows with full assay metadata (cell line, dose, time);
+  # needed to interpret/QC signatures.
+  min_metadata_coverage: 0.90
+
+  # Hard requirement: a leakage-free compound-level split must exist (each class
+  # present in >= 2 groups, and no compound spanning groups).
+  require_compound_level_split_feasible: true

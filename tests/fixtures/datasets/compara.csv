@@ -1,0 +1,3 @@
+casrn,chemical_name,inchikey,target,consensus_call,consensus_score
+200-00-1,cpdAR1,HHHHHHHHHHHHHH-HHHHHHHHHH-H,AR,active,0.92
+200-00-2,cpdAR2,IIIIIIIIIIIIII-IIIIIIIIII-I,AR,inactive,0.80

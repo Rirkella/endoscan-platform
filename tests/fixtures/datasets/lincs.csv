@@ -1,0 +1,10 @@
+sig_id,pert_id,pert_iname,cell_id,pert_dose,pert_dose_unit,pert_time,pert_time_unit,GENE_A,GENE_B,GENE_C,GENE_D,GENE_E
+S1,BRD-C1,cpd1,MCF7,10,uM,24,h,1.5,-0.3,0.8,0.1,-1.2
+S1b,BRD-C1,cpd1,MCF7,10,uM,24,h,1.5,-0.3,0.8,0.1,-1.2
+S1c,BRD-C1,cpd1,A375,10,uM,24,h,1.1,-0.1,0.6,0.4,-0.9
+S2,BRD-C2,cpd2,MCF7,10,uM,24,h,1.2,-0.5,0.9,0.2,-1.0
+S3,BRD-C3,cpd3,MCF7,10,uM,24,h,0.9,-0.2,1.1,0.0,-0.8
+S4,BRD-C4,cpd4,MCF7,10,uM,24,h,-1.0,0.4,-0.7,-0.2,1.1
+S5,BRD-C5,cpd5,MCF7,10,uM,24,h,-1.2,0.6,-0.9,-0.1,1.3
+S6,BRD-C6,cpd6,MCF7,10,uM,24,h,-0.8,0.3,-0.6,-0.3,0.9
+S7,BRD-C7,cpd7,MCF7,10,uM,24,h,0.2,0.1,0.0,0.2,-0.1
