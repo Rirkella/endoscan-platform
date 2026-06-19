@@ -162,7 +162,11 @@ def _write_dataset_card(
         "dataset_id": target,
         "biological_target": target,
         "sources": ", ".join(sources) if sources else "none",
-        "compound_counts": f"overlap={report.n_overlap}, per_class={report.per_class_counts}",
+        "compound_counts": (
+            f"overlap={report.n_overlap}, "
+            f"compounds_per_class={report.per_class_compound_counts}, "
+            f"signatures_per_class={report.per_class_counts}"
+        ),
         "overlap_summary": (
             f"labeled={report.n_labeled}, with_signature={report.n_with_signature}, "
             f"overlap={report.n_overlap}"
