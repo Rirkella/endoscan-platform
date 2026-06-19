@@ -852,6 +852,12 @@ wheels = [
 name = "endoscan-core"
 version = "0.0.0"
 source = { editable = "packages/endoscan_core" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.6" }]
 
 [[package]]
 name = "entrypoints"

@@ -1,0 +1,4 @@
+{
+  "features": ["GENE_A", "GENE_B", "GENE_C"],
+  "schema_version": "0.1"
+}
