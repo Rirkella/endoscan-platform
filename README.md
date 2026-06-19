@@ -1,1 +1,0 @@
-# endoscan-platform
