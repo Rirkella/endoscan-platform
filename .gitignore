@@ -39,3 +39,8 @@ Thumbs.db
 
 # Node (frontend, wired up in a later milestone)
 node_modules/
+
+# Never ignore small committed test fixtures, even if they match the binary
+# patterns above (M1/M2 commit dummy .pkl and data fixtures under here).
+!tests/fixtures/
+!tests/fixtures/**
