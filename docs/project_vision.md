@@ -224,6 +224,19 @@ signatures; basic pathway interpretation; SHAP plots. **Roadmap, not MVP:** a va
 SMILES-to-transcriptomics model; regulatory-grade validation; large-scale commercial API; full toxicological
 coverage; production security/billing.
 
+## 16a. Roadmap note — Source Discovery Agent (propose-only, post-M6)
+
+A future milestone (after M6) may add a **Source Discovery Agent** that operates
+in a strictly **propose-only** mode: it searches for and evaluates candidate
+public data sources — capturing relevance, license, provenance, identifier
+coverage, endpoint coverage, and likely overlap — and emits **source proposals**
+for human review. A human approves a proposal before any source enters
+`registry/data/sources.yaml`; discovery never ingests data into dataset
+construction, is never used for training, and never writes to the allow-list, so
+construction stays fully reproducible (PROJECT_RULES.md §3.1a). The proposal store
+`registry/data/source_proposals/` and a `SourceProposal` schema will be added by
+that future milestone — **not now**.
+
 ## 17. Business model
 
 Value is **risk prioritization and biological interpretation**, not raw per-molecule compute. Potential models:
