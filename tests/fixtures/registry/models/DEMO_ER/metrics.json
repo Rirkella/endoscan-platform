@@ -1,0 +1,6 @@
+{
+  "auroc": null,
+  "auprc": null,
+  "balanced_accuracy": null,
+  "note": "placeholder — no real metrics at M1; real metrics arrive with M3 training"
+}

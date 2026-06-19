@@ -1,0 +1,13 @@
+# EndoScan endpoint config (TEMPLATE).
+#
+# Consumed by later config-driven pipeline runners (e.g. pipelines/endpoints/ER/).
+# This is a template with {{ placeholders }} — fill in per endpoint.
+
+endpoint_id: "{{ endpoint_id }}"
+biological_target: "{{ biological_target }}"
+input_type: "transcriptomics"   # EndoScan is transcriptomics-first; do not change.
+version: "{{ version }}"
+
+# Opaque provenance tags at M1; a typed source contract arrives with the M2
+# sources.yaml allow-list. Fill with strings like "ToxCast:<assay>" later.
+source_refs: []
