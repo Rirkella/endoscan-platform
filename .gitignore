@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Secrets / local env
+.env
+.env.local
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# DVC-tracked binary model artifacts.
+# The .dvc metadata files and .gitkeep ARE committed; the binaries are NOT.
+/models/**
+!/models/.gitkeep
+!/models/**/.gitkeep
+!/models/**/*.dvc
+
+# Raw / large data (never committed to raw git)
+/data/
+*.h5
+*.h5ad
+*.parquet
+*.pkl
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Node (frontend, wired up in a later milestone)
+node_modules/
+
+# Never ignore small committed test fixtures, even if they match the binary
+# patterns above (M1/M2 commit dummy .pkl and data fixtures under here).
+!tests/fixtures/
+!tests/fixtures/**
