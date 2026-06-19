@@ -28,6 +28,9 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["endoscan_core"]
+
 # --- Tests -------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages"]

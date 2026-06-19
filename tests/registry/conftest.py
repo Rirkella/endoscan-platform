@@ -11,6 +11,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+
 from endoscan_core.registry import EndpointEntry
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "registry"

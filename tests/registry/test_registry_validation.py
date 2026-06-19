@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
+
 from endoscan_core.registry import (
     EndpointEntry,
     EndpointNotFoundError,
@@ -15,7 +17,6 @@ from endoscan_core.registry import (
     register_endpoint,
     update_status,
 )
-from pydantic import ValidationError
 
 
 def _entry_kwargs(**overrides: Any) -> dict[str, Any]:
