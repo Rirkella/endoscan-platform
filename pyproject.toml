@@ -1,0 +1,41 @@
+# EndoScan — uv workspace root.
+#
+# This file is a PURE WORKSPACE ORCHESTRATOR. It is intentionally NOT a
+# distributable package (no [project] table). The science library lives in
+# packages/endoscan_core and is installed editable as a workspace member.
+#
+# Tooling config (ruff, pytest, mypy) is centralized here so every member
+# shares one source of truth. Dependency management is via `uv`.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+# Dev tooling (installed by `uv sync`; uv installs the `dev` group by default).
+[dependency-groups]
+dev = [
+    "ruff>=0.8,<0.9",
+    "pytest>=8.0",
+    "pre-commit>=3.7",
+    "mypy>=1.10",
+    "dvc>=3.50",
+]
+
+# --- Lint + format -----------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+# --- Tests -------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests", "packages"]
+addopts = "-q"
+
+# --- Types (minimal, NON-blocking; CI does not gate on mypy) -----------------
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_return_any = false
