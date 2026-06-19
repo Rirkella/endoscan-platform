@@ -1,0 +1,70 @@
+# EndoScan data-source allow-list (PROJECT_RULES.md §3.1).
+#
+# This file is the APPROVED, CURATED allow-list of sources the dataset-
+# construction pipeline may ingest from. It is intentionally NOT the universe of
+# all possible sources — only sources a human has explicitly reviewed and
+# approved. The construction tools never pull from the open web. New sources enter
+# this list ONLY by explicit human approval. (A future, propose-only Source
+# Discovery mode may emit candidate-source proposals for review, but it never
+# ingests data and never writes here — see PROJECT_RULES.md §3.1a.)
+#
+# Schema per entry:
+#   id            unique short identifier (used to resolve adapters/fixtures)
+#   name          human-readable name
+#   type          one of: labels | signatures | mapping
+#   access_method describes the REAL access method (fixtures stand in for it at M2)
+#   provenance    origin / citation
+#   version       dataset/release version
+#   targets       optional list of endpoint ids the source is specific to;
+#                 empty/omitted means broad (applies to all targets)
+
+sources:
+  - id: toxcast
+    name: ToxCast (invitroDB)
+    type: labels
+    access_method: bulk_csv
+    provenance: US EPA ToxCast / invitroDB
+    version: invitrodb_v4.1
+    targets: []
+
+  - id: tox21
+    name: Tox21 qHTS
+    type: labels
+    access_method: bulk_csv
+    provenance: NIH/NCATS/EPA/FDA Tox21
+    version: "2015q1"
+    targets: []
+
+  - id: cerapp
+    name: CERAPP
+    type: labels
+    access_method: bulk_csv
+    provenance: Mansouri et al. 2016 (estrogen receptor consensus)
+    version: "2016"
+    targets:
+      - ER
+
+  - id: compara
+    name: CoMPARA
+    type: labels
+    access_method: bulk_csv
+    provenance: Mansouri et al. 2020 (androgen receptor consensus)
+    version: "2020"
+    targets:
+      - AR
+
+  - id: lincs
+    name: LINCS L1000
+    type: signatures
+    access_method: gctx_api
+    provenance: Broad LINCS / CMap (GSE92742)
+    version: phase1_2017
+    targets: []
+
+  - id: pubchem
+    name: PubChem identifier mapping
+    type: mapping
+    access_method: rest_pug
+    provenance: NCBI PubChem
+    version: "2024"
+    targets: []

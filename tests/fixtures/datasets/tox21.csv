@@ -1,0 +1,4 @@
+sample_id,casrn,pubchem_cid,assay_name,target,activity,potency
+T2,100-00-2,1002,tox21-er-bla-agonist,ER,active,2.0
+T6,100-00-6,1006,tox21-er-bla-agonist,ER,inactive,
+T10,100-00-10,1010,tox21-er-bla-agonist,ER,inconclusive,

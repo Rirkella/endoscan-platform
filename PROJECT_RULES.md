@@ -21,7 +21,9 @@ Do not change these rules without an explicit human decision recorded in a PR.
 
 ## 3. Data discovery and the human-in-the-loop gate
 
-3.1 Source discovery uses **only** the allow-list in `registry/data/sources.yaml` (e.g. ToxCast, Tox21, CERAPP, CoMPARA, LINCS). **No open-web scraping.**
+3.1 Dataset construction ingests data ONLY from sources approved in `registry/data/sources.yaml`; the construction tools never pull from the open web. `registry/data/sources.yaml` is the approved, curated allow-list of usable sources — intentionally NOT the universe of all possible sources.
+
+3.1a (Future, propose-only) A separate Source Discovery mode may search for and evaluate candidate public sources (relevance, license, provenance, identifier coverage, endpoint coverage, likely overlap) and emit source proposals for human review. It MUST NOT ingest data into dataset construction, MUST NOT be used for training, and MUST NOT write to `registry/data/sources.yaml`. A source enters the allow-list only by explicit human approval of a proposal. This mode is NOT implemented yet.
 3.2 Dataset *discovery and assembly* may run automatically. **Training and registration are gated**: they proceed only when automated quality thresholds pass **and** (optionally) a human approves.
 3.3 The gate is a hard boundary. Never bypass it, weaken its thresholds, or trigger training before a `pass` verdict.
 3.4 ER and TR are built **through the dataset-construction toolchain** (the same code path the agent uses), never by ad-hoc manual assembly.
