@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -23,21 +23,51 @@ from .evaluate_endpoint import EvalMetrics, evaluate_endpoint
 from .splits import grouped_cv_splits, n_splits_for_groups
 
 SEED = 0
-MODEL_NAMES = ("elastic_net_logreg", "gradient_boosting")
+
+#: All sklearn candidate models (no neural nets; no XGBoost/LightGBM). The three
+#: logistic-regression variants differ only by their L1/L2 mix (l1_ratio).
+MODEL_NAMES = (
+    "ridge_logreg",  # l1_ratio=0 (L2)
+    "lasso_logreg",  # l1_ratio=1 (L1)
+    "elastic_net_logreg",  # l1_ratio=0.5
+    "random_forest",
+    "gradient_boosting",
+)
+
+_L1_RATIO = {"ridge_logreg": 0.0, "lasso_logreg": 1.0, "elastic_net_logreg": 0.5}
+
+#: Static (interpretability_tier, simplicity_tier) per model; lower = simpler /
+#: more interpretable / cheaper to deploy. Used by the simplicity-aware selector.
+_MODEL_TIERS = {
+    "ridge_logreg": (1, 1),
+    "lasso_logreg": (1, 1),
+    "elastic_net_logreg": (1, 1),
+    "random_forest": (3, 2),
+    "gradient_boosting": (3, 3),
+}
+
+
+def model_tiers(name: str) -> tuple[int, int]:
+    """Return ``(interpretability_tier, simplicity_tier)`` for a model."""
+    if name not in _MODEL_TIERS:
+        raise ValueError(f"Unknown model {name!r}; supported: {MODEL_NAMES}")
+    return _MODEL_TIERS[name]
 
 
 def build_model(name: str, seed: int = SEED) -> Pipeline:
-    """Build a scaler+classifier pipeline for one of the two supported models."""
-    if name == "elastic_net_logreg":
-        # Elastic-net via saga: l1_ratio mixes L1/L2 (penalty= is deprecated in
-        # recent scikit-learn; l1_ratio alone selects elastic-net).
+    """Build a scaler+classifier pipeline for one of the supported models."""
+    if name in _L1_RATIO:
+        # LR family via saga: l1_ratio mixes L1/L2 (penalty= is deprecated in
+        # recent scikit-learn; l1_ratio alone selects the elastic-net family).
         clf = LogisticRegression(
             solver="saga",
-            l1_ratio=0.5,
+            l1_ratio=_L1_RATIO[name],
             C=1.0,
             max_iter=5000,
             random_state=seed,
         )
+    elif name == "random_forest":
+        clf = RandomForestClassifier(n_estimators=200, random_state=seed)
     elif name == "gradient_boosting":
         clf = GradientBoostingClassifier(random_state=seed)
     else:

@@ -1,10 +1,10 @@
-# ER endpoint pipeline config (PATH A: fixtures only at M3).
+# ER endpoint pipeline config — committed default (intentionally BLOCKED).
 #
-# This committed config uses the fixture adapter, the STRICT real quality gate,
-# and approved: false. Running it on fixtures is intentionally BLOCKED (the tiny
-# fixture set fails the strict gate and no human has approved). The real
-# validated_mvp ER on real data is a separate later issue; the train path is
-# proven only by the relaxed-gate TEST config under tests/fixtures/training/.
+# Uses the fixture adapter, the STRICT real quality gate, and approved: false, so
+# running it on fixtures is blocked (the tiny fixture set fails the strict gate
+# and no human has approved). The real ER on staged data is Phase 2: copy
+# config.real.example.yaml, point it at staged extracts, confirm floors, and have
+# a human set approved: true only after reviewing the gate verdict + dataset card.
 
 endpoint_id: ER
 biological_target: Estrogen Receptor
@@ -12,7 +12,7 @@ version: "0.1.0"
 
 data:
   target: ER
-  adapter: fixture                 # path A: fixture only (real adapter is a later issue)
+  adapter: fixture                 # "fixture" (CI) | "staged" (real, local extracts)
   fixtures_dir: tests/fixtures/datasets
   n_groups: 2
   seed: 0
@@ -25,13 +25,23 @@ approval:
   approved_by: ""
   note: ""
 
-cv:
-  n_splits: 5                      # clamped to the number of compound groups
+evaluation:
+  mode: nested                     # honest estimate: "nested" | "holdout"
+  outer_splits: 5
+  inner_splits: 3
+  test_size: 0.25                  # held-out mode only
 
 training:
   models:
+    - ridge_logreg
+    - lasso_logreg
     - elastic_net_logreg
+    - random_forest
     - gradient_boosting
-  selection_metric: auroc
+  selection_tolerance: 0.02
   validated_mvp_floors:
     auroc: 0.75
+    auprc: 0.50
+    balanced_accuracy: 0.65
+  validated_mvp_ceilings:
+    brier_score: 0.20

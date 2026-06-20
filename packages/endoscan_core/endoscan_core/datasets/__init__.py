@@ -8,7 +8,13 @@ No training, registration, inference, or agent orchestration lives here. The
 quality gate emits a verdict only; it never triggers training.
 """
 
-from .adapters import FixtureSourceAdapter, RawTable, RealDownloadAdapter, SourceAdapter
+from .adapters import (
+    FixtureSourceAdapter,
+    RawTable,
+    RealDownloadAdapter,
+    SourceAdapter,
+    StagedSourceAdapter,
+)
 from .candidate_table import CandidateTable, SplitPlan, candidate_table_builder
 from .compound_mapper import (
     CompoundMapping,
@@ -55,6 +61,7 @@ __all__ = [
     "SourceAdapter",
     "RawTable",
     "FixtureSourceAdapter",
+    "StagedSourceAdapter",
     "RealDownloadAdapter",
     # tools
     "source_selector",

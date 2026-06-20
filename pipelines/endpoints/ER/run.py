@@ -1,14 +1,18 @@
 """Config-driven ER endpoint pipeline runner (NOT a notebook).
 
-End-to-end flow (path A — fixtures only at M3):
+End-to-end flow:
   M2 tools (build candidate table) -> dataset_quality_report -> quality_gates
   verdict -> train ONLY if the verdict PASSES and an explicit human-approval flag
-  is set -> evaluate -> write artifacts -> register into the M1 registry.
+  is set -> HONEST evaluation (nested grouped CV or compound-level held-out) ->
+  scorecard model selection -> write artifacts -> register into the M1 registry.
 
-The committed ``config.yaml`` uses the fixture adapter, the strict real gate
-(``registry/data/quality_gates.yaml``) and ``approved: false``, so running it on
-fixtures is intentionally BLOCKED. The train path is exercised only by the
-relaxed-gate TEST config under ``tests/fixtures/training/``.
+Data is read through the adapter seam: ``fixture`` (CSV fixtures, CI) or
+``staged`` (local Parquet/CSV extracts staged by a human for the one-time real
+run). There are no live downloads; ``RealDownloadAdapter`` stays a stub.
+
+metrics.json reports the HONEST nested-outer (or held-out) estimate for the chosen
+model — never resubstitution/inner-CV — and the validated_mvp floors are checked
+against that estimate. No regulatory-grade claims are made anywhere.
 
 Run:  uv run python pipelines/endpoints/ER/run.py [--config <path>]
 """
@@ -28,7 +32,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from endoscan_core.datasets import (
     FixtureSourceAdapter,
     GateThresholds,
+    SourceAdapter,
     SourcesAllowList,
+    StagedSourceAdapter,
     candidate_table_builder,
     compound_mapper,
     dataset_quality_report,
@@ -43,8 +49,17 @@ from endoscan_core.features import build_feature_schema
 from endoscan_core.registry import EndpointEntry, EndpointStatus, register_endpoint
 from endoscan_core.registry.store import find_repo_root
 from endoscan_core.registry.templates import render_template
-from endoscan_core.training import train_endpoint
-from endoscan_core.training.train_endpoint import TrainResult
+from endoscan_core.training import (
+    EvalMetrics,
+    build_model,
+    holdout_group_eval,
+    nested_group_cv,
+    render_selection_markdown,
+    score_candidates,
+    select_model,
+    selection_report,
+)
+from endoscan_core.training.train_endpoint import MODEL_NAMES
 
 
 # --------------------------------------------------------------------------- config
@@ -52,9 +67,10 @@ class DataConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     target: str
-    adapter: str = "fixture"  # path A: fixture only (real adapter is a later issue)
-    fixtures_dir: str
-    n_groups: int = 2
+    adapter: str = "fixture"  # "fixture" (CI) | "staged" (real, local extracts)
+    fixtures_dir: str | None = None
+    staged_dir: str | None = None
+    n_groups: int = 5
     seed: int = 0
 
 
@@ -72,21 +88,27 @@ class ApprovalConfig(BaseModel):
     note: str = ""
 
 
-class CVConfig(BaseModel):
+class EvaluationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    n_splits: int = 5
+    mode: str = "nested"  # "nested" | "holdout"
+    outer_splits: int = 5
+    inner_splits: int = 3
+    test_size: float = 0.25  # held-out mode only
 
 
 class TrainingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    models: list[str] = Field(
-        default_factory=lambda: list(("elastic_net_logreg", "gradient_boosting"))
+    models: list[str] = Field(default_factory=lambda: list(MODEL_NAMES))
+    selection_tolerance: float = 0.02
+    # Multi-metric floors (>=) and optional ceilings (<=), checked against the
+    # HONEST estimate. Values are configurable defaults; finalize vs real
+    # prevalence in Phase 2 (AUPRC baseline = positive prevalence).
+    validated_mvp_floors: dict[str, float] = Field(
+        default_factory=lambda: {"auroc": 0.75, "auprc": 0.50, "balanced_accuracy": 0.65}
     )
-    selection_metric: str = "auroc"
-    # Structured metric floors for validated_mvp; AUROC-only at M3 (extensible).
-    validated_mvp_floors: dict[str, float] = Field(default_factory=lambda: {"auroc": 0.75})
+    validated_mvp_ceilings: dict[str, float] = Field(default_factory=lambda: {"brier_score": 0.20})
 
 
 class PipelineConfig(BaseModel):
@@ -98,7 +120,7 @@ class PipelineConfig(BaseModel):
     data: DataConfig
     gate: GateConfig
     approval: ApprovalConfig
-    cv: CVConfig = Field(default_factory=CVConfig)
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     training: TrainingConfig = Field(default_factory=TrainingConfig)
 
 
@@ -112,11 +134,13 @@ class PipelineResult(BaseModel):
     registered: bool
     status: str | None = None
     selected_model: str | None = None
+    evaluation_mode: str | None = None
     n_overlap: int = 0
     gate_summary: str = ""
     metrics_path: str | None = None
     model_card_path: str | None = None
     dataset_card_path: str | None = None
+    model_selection_path: str | None = None
 
 
 # --------------------------------------------------------------------------- helpers
@@ -129,14 +153,28 @@ def load_thresholds(path: Path) -> GateThresholds:
     return GateThresholds.model_validate(raw["thresholds"])
 
 
-def _status_for(metrics, floors: dict[str, float]) -> EndpointStatus:
-    """validated_mvp iff every configured metric floor is met, else experimental."""
-    meets_all = all(getattr(metrics, name) >= floor for name, floor in floors.items())
-    return EndpointStatus.validated_mvp if meets_all else EndpointStatus.experimental
+def make_adapter(config: PipelineConfig, data_dir: Path) -> SourceAdapter:
+    if config.data.adapter == "staged":
+        return StagedSourceAdapter(data_dir)
+    if config.data.adapter == "fixture":
+        return FixtureSourceAdapter(data_dir)
+    raise ValueError(f"Unknown data.adapter {config.data.adapter!r}")
 
 
-def _write_metrics(result: TrainResult, n_compounds: int) -> dict:
-    metrics = result.metrics
+def _status_for(
+    metrics: EvalMetrics, floors: dict[str, float], ceilings: dict[str, float]
+) -> EndpointStatus:
+    """validated_mvp iff every floor (>=) and ceiling (<=) is met, else experimental."""
+    meets_floors = all(getattr(metrics, name) >= value for name, value in floors.items())
+    meets_ceilings = all(getattr(metrics, name) <= value for name, value in ceilings.items())
+    if meets_floors and meets_ceilings:
+        return EndpointStatus.validated_mvp
+    return EndpointStatus.experimental
+
+
+def _metrics_dict(
+    metrics: EvalMetrics, n_compounds: int, selected_model: str, evaluation: dict
+) -> dict:
     return {
         "auroc": metrics.auroc,
         "auprc": metrics.auprc,
@@ -146,21 +184,23 @@ def _write_metrics(result: TrainResult, n_compounds: int) -> dict:
         "confusion_matrix": metrics.confusion_matrix.model_dump(),
         "n_samples": metrics.n_samples,
         "n_compounds": n_compounds,
-        "cv": {"strategy": "GroupKFold", "n_splits": result.n_splits},
-        "selected_model": result.selected_model_name,
+        "selected_model": selected_model,
         "threshold": metrics.threshold,
+        "evaluation": evaluation,
+        "estimate": "honest (nested-outer or held-out); not resubstitution/inner-CV",
     }
 
 
 def _render_model_card(
     config: PipelineConfig,
     status: EndpointStatus,
-    result: TrainResult,
+    selected_model: str,
+    metrics: EvalMetrics,
     report,
-    sources: list[str],
     n_features: int,
+    evaluation_mode: str,
+    sources: list[str],
 ) -> str:
-    metrics = result.metrics
     return render_template(
         "model_card.md",
         {
@@ -175,14 +215,15 @@ def _render_model_card(
                 f"compounds_per_class={report.per_class_compound_counts}"
             ),
             "feature_summary": f"{n_features} landmark genes",
-            "model_type": result.selected_model_name,
+            "model_type": selected_model,
             "training_summary": (
-                f"GroupKFold (compound-level), n_splits={result.n_splits}; selected by OOF AUROC"
+                f"compound-level {evaluation_mode} evaluation; model chosen by a "
+                f"simplicity-aware scorecard over {len(config.training.models)} sklearn models"
             ),
             "metrics_summary": (
                 f"AUROC={metrics.auroc:.3f}, AUPRC={metrics.auprc:.3f}, "
                 f"balanced_acc={metrics.balanced_accuracy:.3f}, F1={metrics.f1:.3f}, "
-                f"Brier={metrics.brier_score:.3f}"
+                f"Brier={metrics.brier_score:.3f} (honest {evaluation_mode} estimate)"
             ),
             "recommended_use": (
                 "Research prioritization of estrogen-receptor activity from signatures."
@@ -190,7 +231,7 @@ def _render_model_card(
             "not_recommended_use": "Any regulatory, clinical, or diagnostic decision.",
             "limitations": (
                 "Pre-screening / prioritization only. Built from a curated allow-list; "
-                "metrics are cross-validated on a limited compound-level dataset and are NOT "
+                "metrics are the honest compound-level cross-validated estimate and are NOT "
                 "regulatory-grade validation."
             ),
         },
@@ -202,13 +243,13 @@ def run_pipeline(
     config: PipelineConfig,
     *,
     allow_list: SourcesAllowList,
-    fixtures_dir: Path,
+    data_dir: Path,
     thresholds: GateThresholds,
     output_root: Path,
 ) -> PipelineResult:
     """Run the ER pipeline end-to-end. Trains only on gate-PASS and approval."""
     target = config.data.target
-    adapter = FixtureSourceAdapter(fixtures_dir)
+    adapter = make_adapter(config, data_dir)
 
     label_sources = source_selector(target, allow_list, types=["labels"])
     sig_sources = source_selector(target, allow_list, types=["signatures"])
@@ -253,34 +294,102 @@ def run_pipeline(
     if not (verdict.passed and config.approval.approved):
         return base
 
-    result = train_endpoint(
-        table.X,
-        table.y,
-        table.metadata["split_group"].tolist(),
-        model_names=config.training.models,
-        n_splits_requested=config.cv.n_splits,
-        seed=config.data.seed,
-    )
-    status = _status_for(result.metrics, config.training.validated_mvp_floors)
+    X, y = table.X, table.y
+    groups = table.metadata["split_group"].tolist()
+    seed = config.data.seed
+    tol = config.training.selection_tolerance
+    models = config.training.models
 
+    # 1) HONEST estimate of the selection procedure (removes selection optimism).
+    if config.evaluation.mode == "holdout":
+        ho = holdout_group_eval(
+            X,
+            y,
+            groups,
+            models,
+            test_size=config.evaluation.test_size,
+            inner_splits=config.evaluation.inner_splits,
+            seed=seed,
+            tolerance=tol,
+        )
+        honest = ho.metrics
+        evaluation = {
+            "mode": "holdout",
+            "test_size": config.evaluation.test_size,
+            "n_test": ho.n_test,
+            "holdout_selected_model": ho.selected_model,
+        }
+    else:
+        nested = nested_group_cv(
+            X,
+            y,
+            groups,
+            models,
+            outer_splits=config.evaluation.outer_splits,
+            inner_splits=config.evaluation.inner_splits,
+            seed=seed,
+            tolerance=tol,
+        )
+        honest = nested.outer_metrics
+        evaluation = {
+            "mode": "nested",
+            "outer_splits": nested.outer_splits,
+            "inner_splits": nested.inner_splits,
+            "per_fold_selected": nested.selected_models,
+        }
+
+    # 2) Final model: scorecard over ALL data + simplicity-aware selection, refit.
+    full_scores = score_candidates(X, y, groups, models, config.evaluation.inner_splits, seed)
+    final_model_name = select_model(full_scores, tol)
+    final_model = build_model(final_model_name, seed=seed)
+    final_model.fit(X, y)
+
+    status = _status_for(
+        honest, config.training.validated_mvp_floors, config.training.validated_mvp_ceilings
+    )
+
+    # 3) Write artifacts. Binary model.pkl is DVC-tracked; the rest is git text.
     model_dir = output_root / "models" / config.endpoint_id
     model_dir.mkdir(parents=True, exist_ok=True)
     with (model_dir / "model.pkl").open("wb") as handle:
-        pickle.dump(result.fitted_model, handle, protocol=5)
-    schema = build_feature_schema(table.X)
+        pickle.dump(final_model, handle, protocol=5)
+
+    schema = build_feature_schema(X)
     (model_dir / "feature_schema.json").write_text(
         schema.model_dump_json(indent=2), encoding="utf-8"
     )
     n_compounds = int(table.metadata["compound_key"].nunique())
     (model_dir / "metrics.json").write_text(
-        json.dumps(_write_metrics(result, n_compounds), indent=2), encoding="utf-8"
-    )
-    shutil.copyfile(report.dataset_card_path, model_dir / "dataset_card.md")
-    sources = [s.id for s in [*label_sources, *sig_sources, map_source]]
-    (model_dir / "model_card.md").write_text(
-        _render_model_card(config, status, result, report, sources, len(table.feature_names)),
+        json.dumps(_metrics_dict(honest, n_compounds, final_model_name, evaluation), indent=2),
         encoding="utf-8",
     )
+    shutil.copyfile(report.dataset_card_path, model_dir / "dataset_card.md")
+
+    report_dict = selection_report(
+        full_scores,
+        final_model_name,
+        tol,
+        extra={"nested_per_fold_selected": evaluation.get("per_fold_selected")},
+    )
+    (model_dir / "model_selection.json").write_text(
+        json.dumps(report_dict, indent=2), encoding="utf-8"
+    )
+    (model_dir / "model_selection.md").write_text(
+        render_selection_markdown(report_dict), encoding="utf-8"
+    )
+
+    sources = [s.id for s in [*label_sources, *sig_sources, map_source]]
+    card = _render_model_card(
+        config,
+        status,
+        final_model_name,
+        honest,
+        report,
+        len(table.feature_names),
+        evaluation["mode"],
+        sources,
+    )
+    (model_dir / "model_card.md").write_text(card, encoding="utf-8")
 
     rel = f"models/{config.endpoint_id}"
     entry = EndpointEntry(
@@ -305,9 +414,11 @@ def run_pipeline(
             "trained": True,
             "registered": True,
             "status": status.value,
-            "selected_model": result.selected_model_name,
+            "selected_model": final_model_name,
+            "evaluation_mode": evaluation["mode"],
             "metrics_path": entry.metrics_path,
             "model_card_path": entry.model_card_path,
+            "model_selection_path": f"{rel}/model_selection.json",
         }
     )
 
@@ -320,13 +431,21 @@ def main(argv: list[str] | None = None) -> None:
     repo_root = find_repo_root()
     config = load_config(Path(args.config))
     allow_list = load_sources(repo_root=repo_root)
-    fixtures_dir = repo_root / config.data.fixtures_dir
-    thresholds = load_thresholds(repo_root / config.gate.thresholds_path)
 
+    if config.data.adapter == "staged":
+        if not config.data.staged_dir:
+            raise ValueError("data.staged_dir is required when data.adapter == 'staged'")
+        data_dir = repo_root / config.data.staged_dir
+    else:
+        if not config.data.fixtures_dir:
+            raise ValueError("data.fixtures_dir is required when data.adapter == 'fixture'")
+        data_dir = repo_root / config.data.fixtures_dir
+
+    thresholds = load_thresholds(repo_root / config.gate.thresholds_path)
     result = run_pipeline(
         config,
         allow_list=allow_list,
-        fixtures_dir=fixtures_dir,
+        data_dir=data_dir,
         thresholds=thresholds,
         output_root=repo_root,
     )

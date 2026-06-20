@@ -1,7 +1,7 @@
-# TEST-ONLY ER pipeline config: relaxed gate + approved=true so the train path
-# runs on fixtures. The committed pipelines/endpoints/ER/config.yaml stays strict
-# + unapproved. fixtures_dir points at the training-only weak-signal dataset so
-# the result is deterministically `experimental`.
+# TEST-ONLY ER pipeline config: staged weak-signal nested fixture + relaxed gate
+# + approved=true so the train path runs offline in CI. The committed
+# pipelines/endpoints/ER/config.yaml stays strict + unapproved. The weak-signal
+# staged dataset yields a deterministically `experimental` result.
 
 endpoint_id: ER
 biological_target: Estrogen Receptor
@@ -9,9 +9,9 @@ version: "0.1.0"
 
 data:
   target: ER
-  adapter: fixture
-  fixtures_dir: tests/fixtures/training/datasets
-  n_groups: 2
+  adapter: staged
+  staged_dir: tests/fixtures/training/staged/er
+  n_groups: 5
   seed: 0
 
 gate:
@@ -20,15 +20,25 @@ gate:
 approval:
   approved: true
   approved_by: test-suite
-  note: "offline fixture run (path A)"
+  note: "offline staged fixture run"
 
-cv:
-  n_splits: 5
+evaluation:
+  mode: nested
+  outer_splits: 5
+  inner_splits: 3
+  test_size: 0.25
 
 training:
   models:
+    - ridge_logreg
+    - lasso_logreg
     - elastic_net_logreg
+    - random_forest
     - gradient_boosting
-  selection_metric: auroc
+  selection_tolerance: 0.02
   validated_mvp_floors:
     auroc: 0.75
+    auprc: 0.50
+    balanced_accuracy: 0.65
+  validated_mvp_ceilings:
+    brier_score: 0.20
