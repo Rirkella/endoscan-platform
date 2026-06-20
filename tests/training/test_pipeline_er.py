@@ -66,6 +66,45 @@ def test_end_to_end_registers_experimental_in_tmp_registry(
     assert "not regulatory-grade" in card.lower()
 
 
+def test_end_to_end_promotes_validated_mvp_with_permissive_floor(
+    er_run: ModuleType, allow_list: SourcesAllowList, tmp_output_root: Path
+) -> None:
+    # Permissive floor (auroc >= 0.0) so the weak-signal metrics clear it; this
+    # exercises the validated_mvp status branch + the registry's artifact gate.
+    raw = yaml.safe_load((TRAINING_FIXTURES / "er_pipeline.test.yaml").read_text())
+    raw["approval"]["approved"] = True
+    raw["training"]["validated_mvp_floors"] = {"auroc": 0.0}
+    config = er_run.PipelineConfig.model_validate(raw)
+
+    result = er_run.run_pipeline(
+        config,
+        allow_list=allow_list,
+        fixtures_dir=TRAINING_DATASETS,
+        thresholds=er_run.load_thresholds(RELAXED_GATES),
+        output_root=tmp_output_root,
+    )
+
+    assert result.trained is True
+    assert result.registered is True
+    assert result.status == "validated_mvp"
+
+    entry = get_endpoint("ER", repo_root=tmp_output_root)
+    assert entry.status is EndpointStatus.validated_mvp
+    # validated_mvp registered => the registry artifact-existence gate passed.
+    for rel in (
+        entry.model_path,
+        entry.feature_schema_path,
+        entry.metrics_path,
+        entry.model_card_path,
+        entry.dataset_card_path,
+    ):
+        assert (tmp_output_root / rel).is_file()
+
+    # The real registry is untouched.
+    real = json.loads((REPO_ROOT / "registry" / "models" / "endpoints.json").read_text())
+    assert real == {"endpoints": []}
+
+
 def test_strict_gate_blocks_training(
     er_run: ModuleType, allow_list: SourcesAllowList, tmp_output_root: Path
 ) -> None:
