@@ -1,0 +1,15 @@
+# RELAXED quality-gate thresholds — TESTS ONLY.
+#
+# This is NOT a gate weakening. The real registry/data/quality_gates.yaml and the
+# committed pipelines/endpoints/ER/config.yaml stay strict + unapproved. This file
+# exists solely so the tiny offline fixtures can exercise the gate-PASS -> train
+# path deterministically. The strict gate-blocks-training path is also tested
+# (using the real strict thresholds).
+
+thresholds:
+  min_compounds_per_class: 2
+  min_overlap: 4
+  max_duplicate_signature_rate: 0.2
+  max_label_conflict_rate: 0.2
+  min_metadata_coverage: 0.9
+  require_compound_level_split_feasible: true

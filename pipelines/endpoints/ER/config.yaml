@@ -1,0 +1,37 @@
+# ER endpoint pipeline config (PATH A: fixtures only at M3).
+#
+# This committed config uses the fixture adapter, the STRICT real quality gate,
+# and approved: false. Running it on fixtures is intentionally BLOCKED (the tiny
+# fixture set fails the strict gate and no human has approved). The real
+# validated_mvp ER on real data is a separate later issue; the train path is
+# proven only by the relaxed-gate TEST config under tests/fixtures/training/.
+
+endpoint_id: ER
+biological_target: Estrogen Receptor
+version: "0.1.0"
+
+data:
+  target: ER
+  adapter: fixture                 # path A: fixture only (real adapter is a later issue)
+  fixtures_dir: tests/fixtures/datasets
+  n_groups: 2
+  seed: 0
+
+gate:
+  thresholds_path: registry/data/quality_gates.yaml   # strict, real thresholds
+
+approval:
+  approved: false                  # a human must explicitly approve
+  approved_by: ""
+  note: ""
+
+cv:
+  n_splits: 5                      # clamped to the number of compound groups
+
+training:
+  models:
+    - elastic_net_logreg
+    - gradient_boosting
+  selection_metric: auroc
+  validated_mvp_floors:
+    auroc: 0.75

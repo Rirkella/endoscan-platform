@@ -1,0 +1,3 @@
+casrn,chemical_name,inchikey,target,consensus_call,consensus_score
+100-00-3,cpd3,CCCCCCCCCCCCCC-CCCCCCCCCC-C,ER,active,0.95
+100-00-7,cpd7,GGGGGGGGGGGGGG-GGGGGGGGGG-G,ER,active,0.90
