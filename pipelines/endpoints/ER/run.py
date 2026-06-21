@@ -52,6 +52,7 @@ from endoscan_core.registry.templates import render_template
 from endoscan_core.training import (
     EvalMetrics,
     build_model,
+    fit_balanced,
     holdout_group_eval,
     nested_group_cv,
     render_selection_markdown,
@@ -342,7 +343,7 @@ def run_pipeline(
     full_scores = score_candidates(X, y, groups, models, config.evaluation.inner_splits, seed)
     final_model_name = select_model(full_scores, tol)
     final_model = build_model(final_model_name, seed=seed)
-    final_model.fit(X, y)
+    fit_balanced(final_model, X, y)  # final refit on all rows (balanced)
 
     status = _status_for(
         honest, config.training.validated_mvp_floors, config.training.validated_mvp_ceilings

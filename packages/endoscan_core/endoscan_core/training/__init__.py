@@ -23,6 +23,7 @@ from .train_endpoint import (
     CandidateModelResult,
     TrainResult,
     build_model,
+    fit_balanced,
     model_tiers,
     train_endpoint,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "CandidateModelResult",
     "TrainResult",
     "build_model",
+    "fit_balanced",
     "model_tiers",
     "train_endpoint",
     "ModelScore",

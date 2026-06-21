@@ -18,12 +18,17 @@ dev = [
     "pre-commit>=3.7",
     "mypy>=1.10",
     "dvc>=3.50",
+    # Staging-layer / CI helper only (NOT an endoscan_core runtime dependency):
+    # the gctx slicer + its synthetic-gctx test use h5py (NumPy-2 compatible).
+    "h5py>=3.11",
 ]
 
 # --- Lint + format -----------------------------------------------------------
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Notebooks are cloud-run artifacts (Colab), not linted production code.
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
