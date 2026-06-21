@@ -1,0 +1,49 @@
+# ER endpoint pipeline config — REAL run TEMPLATE (Phase 2). Copy this, do NOT
+# commit a filled-in real config with approved: true until the run is reviewed.
+#
+# Phase 2 is run by a human on their machine (where the OneDrive-synced DVC remote
+# lives). Stage the real extracts under data/staged/er/ first (see
+# docs/er_real_data_phase2.md), then set approved: true ONLY after reviewing the
+# gate verdict + dataset card. No regulatory-grade claims are made anywhere.
+
+endpoint_id: ER
+biological_target: Estrogen Receptor
+version: "0.1.0"
+
+data:
+  target: ER
+  adapter: staged                  # reads local Parquet/CSV extracts (no downloads)
+  staged_dir: data/staged/er
+  n_groups: 10                     # compound groups for the split plan
+  seed: 0
+
+gate:
+  thresholds_path: registry/data/quality_gates.yaml   # strict, real thresholds
+
+approval:
+  approved: false                  # set true by a human AFTER reviewing the gate + card
+  approved_by: ""
+  note: ""
+
+evaluation:
+  mode: nested                     # nested grouped CV (honest estimate); "holdout" if N large
+  outer_splits: 5
+  inner_splits: 3
+  test_size: 0.25
+
+training:
+  models:
+    - ridge_logreg
+    - lasso_logreg
+    - elastic_net_logreg
+    - random_forest
+    - gradient_boosting
+  selection_tolerance: 0.02
+  # Starting values — FINALIZE against real positive prevalence in Phase 2.
+  # AUPRC floor should be sized to prevalence (random-baseline AUPRC = prevalence).
+  validated_mvp_floors:
+    auroc: 0.75
+    auprc: 0.50
+    balanced_accuracy: 0.65
+  validated_mvp_ceilings:
+    brier_score: 0.20

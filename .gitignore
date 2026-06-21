@@ -19,15 +19,22 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
-# DVC-tracked binary model artifacts.
-# The .dvc metadata files and .gitkeep ARE committed; the binaries are NOT.
+# Model artifacts: SMALL TEXT is git-tracked; the binary model.pkl is DVC-tracked.
+# (Re-include directories first so git can traverse into them, then track text.)
 /models/**
+!/models/**/
 !/models/.gitkeep
 !/models/**/.gitkeep
 !/models/**/*.dvc
+!/models/**/*.json
+!/models/**/*.md
 
-# Raw / large data (never committed to raw git)
-/data/
+# Raw / large data (never committed to raw git). The staged-data root keeps a
+# .gitkeep; staged extracts under data/staged/<endpoint>/ are DVC-tracked.
+/data/*
+!/data/staged/
+/data/staged/*
+!/data/staged/.gitkeep
 *.h5
 *.h5ad
 *.parquet

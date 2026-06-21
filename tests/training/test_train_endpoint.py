@@ -13,7 +13,7 @@ def test_selects_a_model_and_refits(candidate_table: CandidateTable) -> None:
     )
     assert result.selected_model_name in MODEL_NAMES
     assert result.n_splits == 2
-    assert len(result.candidates) == 2
+    assert len(result.candidates) == len(MODEL_NAMES)
     # The selected pipeline is refit on all rows and can predict.
     assert hasattr(result.fitted_model, "predict_proba")
     assert result.fitted_model.predict_proba(candidate_table.X).shape == (len(candidate_table.y), 2)
