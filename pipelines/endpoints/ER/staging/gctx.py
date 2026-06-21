@@ -51,8 +51,21 @@ def _decode(values) -> list[str]:
     return [v.decode() if isinstance(v, bytes) else str(v) for v in values]
 
 
+#: The h5py fallback loads the FULL matrix into memory, so it is only safe for
+#: small/sliced files and the synthetic fixture — never the ~12k x 473k real
+#: matrix. Guard well below that (cells = n_rows * n_cols).
+_MAX_H5PY_CELLS = 5_000_000
+
+
 def _slice_h5py(path: Path, row_ids: Sequence[str], col_ids: Sequence[str]) -> pd.DataFrame:
     with h5py.File(path, "r") as handle:
+        n_cols, n_rows = handle[_MATRIX].shape  # stored as (n_cols, n_rows)
+        if n_rows * n_cols > _MAX_H5PY_CELLS:
+            raise RuntimeError(
+                f"gctx matrix is too large for the h5py fallback "
+                f"({n_rows} x {n_cols}); use cmapPy (NumPy<2) for the real file. "
+                "The h5py path is for the synthetic CI fixture only."
+            )
         all_rows = _decode(handle[_ROW_ID][:])
         all_cols = _decode(handle[_COL_ID][:])
         matrix = handle[_MATRIX][:]  # (n_cols, n_rows)
@@ -63,12 +76,13 @@ def _slice_h5py(path: Path, row_ids: Sequence[str], col_ids: Sequence[str]) -> p
 def slice_gctx_landmark(path: Path, row_ids: Sequence[str], col_ids: Sequence[str]) -> pd.DataFrame:
     """Return a (genes x signatures) DataFrame for the requested rows/cols.
 
-    Prefers cmapPy (authoritative, used in the Colab run); falls back to the
-    h5py reader (CI / synthetic fixture).
+    Uses cmapPy (authoritative) when it is installed (the Colab run, NumPy<2). The
+    h5py fallback runs ONLY when cmapPy is **absent** (``ImportError`` — CI /
+    synthetic fixture). A cmapPy PARSE failure on the real file must surface
+    loudly rather than silently fall through to the full-matrix h5py path.
     """
     try:
         from cmapPy.pandasGEXpress.parse_gctx import parse  # noqa: PLC0415
-
-        return parse(str(path), rid=list(row_ids), cid=list(col_ids)).data_df
-    except Exception:
+    except ImportError:
         return _slice_h5py(path, row_ids, col_ids)
+    return parse(str(path), rid=list(row_ids), cid=list(col_ids)).data_df

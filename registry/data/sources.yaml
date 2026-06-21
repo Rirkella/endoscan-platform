@@ -52,10 +52,10 @@ sources:
       # ~32k chemicals. Training on predicted labels would make EndoScan mimic a
       # structure-based QSAR model and violate the transcriptomics-first thesis.
       - name: cerapp_experimental_training_set
-        url: https://figshare.com/articles/dataset/CERAPP_Training_Set/6062563
+        url: https://epa.figshare.com/articles/dataset/CERAPP_Training_Set/6062563
         note: EPA figshare article 6062563 — experimental ER activity (training)
       - name: cerapp_experimental_evaluation_set
-        url: https://figshare.com/articles/dataset/CERAPP_Evaluation_Set/6062554
+        url: https://epa.figshare.com/articles/dataset/CERAPP_Evaluation_Set/6062554
         note: EPA figshare article 6062554 — experimental ER activity (evaluation)
       - name: cerapp_epa_gaftp_mirror
         url: https://gaftp.epa.gov/COMPTOX/Sustainable_Chemistry_Data/CERAPP_QSAR_Models/

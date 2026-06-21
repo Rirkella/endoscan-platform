@@ -5,6 +5,7 @@ from __future__ import annotations
 import gctx  # noqa: E402 — resolved via tests/staging/conftest.py sys.path
 import numpy as np
 import pandas as pd
+import pytest
 
 
 def test_write_then_slice_landmark_and_signatures(tmp_path) -> None:
@@ -21,3 +22,15 @@ def test_write_then_slice_landmark_and_signatures(tmp_path) -> None:
     assert list(out.index) == landmark
     assert list(out.columns) == selected_cols
     np.testing.assert_allclose(out.to_numpy(), data.loc[landmark, selected_cols].to_numpy())
+
+
+def test_h5py_fallback_refuses_oversized_matrix(tmp_path, monkeypatch) -> None:
+    data = pd.DataFrame(
+        np.zeros((6, 4)), index=[f"g{i}" for i in range(6)], columns=[f"SIG_{i}" for i in range(4)]
+    )
+    path = tmp_path / "tiny.gctx"
+    gctx.write_synthetic_gctx(path, data)
+    # Drop the guard threshold below the 24-cell synthetic matrix.
+    monkeypatch.setattr(gctx, "_MAX_H5PY_CELLS", 4)
+    with pytest.raises(RuntimeError, match="too large for the h5py fallback"):
+        gctx.slice_gctx_landmark(path, ["g0"], ["SIG_0"])
