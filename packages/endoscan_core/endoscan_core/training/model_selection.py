@@ -23,7 +23,7 @@ from sklearn.metrics import roc_auc_score
 
 from .evaluate_endpoint import evaluate_endpoint
 from .splits import grouped_cv_splits, n_splits_for_groups
-from .train_endpoint import build_model, model_tiers
+from .train_endpoint import build_model, fit_balanced, model_tiers
 
 # Primary metrics used to define "near-best" candidates.
 PRIMARY_METRICS = ("auroc", "auprc")
@@ -59,7 +59,8 @@ def _score_one(
     for train_idx, test_idx in folds:
         model = build_model(name, seed=seed)
         start = perf_counter()
-        model.fit(X.iloc[train_idx], y.iloc[train_idx])
+        # Imbalance handled per-fit from the fold's TRAINING labels (no leakage).
+        fit_balanced(model, X.iloc[train_idx], y.iloc[train_idx])
         train_seconds += perf_counter() - start
 
         start = perf_counter()

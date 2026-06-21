@@ -1,0 +1,55 @@
+# ER staging layer (offline prep — cloud-run, never the laptop)
+
+This directory is the **explicit offline prep layer** that fetches from the
+**approved** locators in `registry/data/sources.yaml` and writes small **staged
+local files** that the toolchain then reads via `StagedSourceAdapter`. It is
+**separate from the toolchain**: the pipeline never downloads, and
+`RealDownloadAdapter` stays a stub.
+
+## What runs where
+- **CI (this repo):** the pure transforms are unit-tested on tiny fixtures /
+  a synthetic `.gctx` — `gctx.py` (h5py slicer), `condition.py` (10 µM/24 h
+  selection + MCF7/A549 early fusion), `cerapp.py` (experimental-call parser),
+  `pubchem.py` (mapping normalizer). **No real data, no network.**
+- **Cloud (Colab "Run all"):** `fetch.py` downloads the real sources, `stage_er.py`
+  wires the confirmed real columns and writes `data/staged/er/`, then the ER
+  pipeline runs. See `colab_run_er_phase2.ipynb`.
+
+## Key rules
+- **CERAPP = EXPERIMENTAL ER activity calls only** — never the consensus-model
+  *predictions* for the ~32k chemicals (that would make EndoScan mimic a
+  structure-based QSAR model; transcriptomics-first violation). See `cerapp.py`.
+- **Condition rule:** prefer 10 µM / 24 h; if a compound+cell lacks it, fall back
+  to the nearest available dose/time (documented order) — compounds are **not**
+  dropped (ER-labelled compounds are scarce). See `condition.py`.
+- **Early fusion:** mean MCF7+A549 landmark profiles → one **978-vector per
+  compound**; `group = compound` (InChIKey). Hackathon late fusion is the noted
+  alternative. **FLAGGED for confirmation.**
+- **Imbalance:** the models use `class_weight="balanced"` (GB via per-fit
+  `sample_weight`) — handled in `endoscan_core.training`, not here.
+
+## cmapPy vs h5py (dependency placement)
+- **cmapPy is NOT a repo dependency.** It is incompatible with NumPy ≥ 2 (its
+  writer/parser use the removed `numpy.string_`), and this repo is locked on
+  NumPy 2.x. cmapPy is `pip install`ed **inside the Colab notebook** with
+  **NumPy < 2**, where it is the authoritative gctx reader.
+- **`gctx.slice_gctx_landmark` prefers cmapPy when importable, else uses an
+  `h5py` fallback** (NumPy-2 compatible). CI exercises the h5py path on a
+  synthetic `.gctx`. The h5py reader's GCTx-v1.0 orientation assumption is
+  documented in `gctx.py` and **must be validated against the real GEO file**
+  in Phase 2b (cmapPy is authoritative there). `h5py` is a dev/staging-only
+  dependency (CI), never an `endoscan_core` runtime dependency.
+
+## Storage / DVC (cloud)
+OneDrive-local is not cloud-reachable; for the cloud run use a **Colab-mounted
+Google Drive path as a DVC *local* remote** (no creds in the repo; path in
+git-ignored `.dvc/config.local`), e.g. `dvc remote add --local er_gdrive
+/content/drive/MyDrive/endoscan-dvc`. `gdrive://` (OAuth) is the documented
+alternative. DVC-track `data/staged/er/` + `models/ER/model.pkl`; git-track the
+scripts, `sources.yaml`, small label/mapping CSVs, `metrics.json`, cards, the
+`model_selection` report, the `endpoints.json` entry, and `.dvc` pointers.
+
+## Phase 2b is a separate, reviewed step
+The cloud run produces the real ER + artifacts; a human reviews metrics, the
+scorecard, leakage, and cards (no overclaim) **before** the `endpoints.json`
+entry lands in its own PR.

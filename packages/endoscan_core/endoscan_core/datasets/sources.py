@@ -26,6 +26,22 @@ class UnregisteredSourceError(Exception):
     """Raised when a tool is handed a source that is not in the allow-list."""
 
 
+class Locator(BaseModel):
+    """A concrete download locator for a source artifact (provenance only).
+
+    These document WHERE staged data comes from; the construction tools never use
+    them to fetch (that is the offline staging layer's job, via a human-run cloud
+    workflow). Optional ``sha256`` pins the artifact for reproducibility.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    url: str
+    sha256: str | None = None
+    note: str | None = None
+
+
 class SourceEntry(BaseModel):
     """A single approved data source."""
 
@@ -39,6 +55,9 @@ class SourceEntry(BaseModel):
     version: str
     #: Endpoint ids this source is specific to; empty = broad (applies to all).
     targets: list[str] = Field(default_factory=list)
+    #: Concrete public download locators (optional, additive). Provenance only —
+    #: the toolchain never fetches from these.
+    locators: list[Locator] = Field(default_factory=list)
 
     def applies_to(self, target: str) -> bool:
         """True if this source is broad or explicitly covers ``target``."""

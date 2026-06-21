@@ -18,6 +18,7 @@ from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils.class_weight import compute_sample_weight
 
 from .evaluate_endpoint import EvalMetrics, evaluate_endpoint
 from .splits import grouped_cv_splits, n_splits_for_groups
@@ -55,7 +56,13 @@ def model_tiers(name: str) -> tuple[int, int]:
 
 
 def build_model(name: str, seed: int = SEED) -> Pipeline:
-    """Build a scaler+classifier pipeline for one of the supported models."""
+    """Build a scaler+classifier pipeline for one of the supported models.
+
+    Class imbalance: LogisticRegression and RandomForest take
+    ``class_weight="balanced"`` directly. GradientBoosting has no such parameter,
+    so it is balanced per-fit via `fit_balanced` (sample weights computed from the
+    fold's TRAINING labels — see that function).
+    """
     if name in _L1_RATIO:
         # LR family via saga: l1_ratio mixes L1/L2 (penalty= is deprecated in
         # recent scikit-learn; l1_ratio alone selects the elastic-net family).
@@ -65,14 +72,34 @@ def build_model(name: str, seed: int = SEED) -> Pipeline:
             C=1.0,
             max_iter=5000,
             random_state=seed,
+            class_weight="balanced",
         )
     elif name == "random_forest":
-        clf = RandomForestClassifier(n_estimators=200, random_state=seed)
+        clf = RandomForestClassifier(n_estimators=200, random_state=seed, class_weight="balanced")
     elif name == "gradient_boosting":
         clf = GradientBoostingClassifier(random_state=seed)
     else:
         raise ValueError(f"Unknown model {name!r}; supported: {MODEL_NAMES}")
     return Pipeline([("scaler", StandardScaler()), ("clf", clf)])
+
+
+def fit_balanced(model: Pipeline, X: pd.DataFrame, y: pd.Series) -> Pipeline:
+    """Fit a candidate pipeline with imbalance handling, leakage-safe.
+
+    For GradientBoosting (no ``class_weight``), balanced ``sample_weight`` is
+    computed **from the ``y`` passed to this call** — i.e. the current fold's
+    training labels (or the final-refit labels) — and routed to the classifier
+    step. It is NEVER precomputed globally, so a test fold's prevalence cannot
+    leak into training. LogisticRegression/RandomForest already carry
+    ``class_weight="balanced"`` and need no per-fit weights.
+    """
+    clf = model.named_steps["clf"]
+    if isinstance(clf, GradientBoostingClassifier):
+        sample_weight = compute_sample_weight(class_weight="balanced", y=y)
+        model.fit(X, y, clf__sample_weight=sample_weight)
+    else:
+        model.fit(X, y)
+    return model
 
 
 @dataclass
@@ -102,7 +129,7 @@ def _oof_predictions(
     oof = np.full(len(y), np.nan)
     for train_idx, test_idx in folds:
         model = build_model(name, seed=seed)
-        model.fit(X.iloc[train_idx], y.iloc[train_idx])
+        fit_balanced(model, X.iloc[train_idx], y.iloc[train_idx])
         oof[test_idx] = model.predict_proba(X.iloc[test_idx])[:, 1]
     return oof
 
@@ -132,7 +159,7 @@ def train_endpoint(
     )
 
     fitted = build_model(best.name, seed=seed)
-    fitted.fit(X, y)
+    fit_balanced(fitted, X, y)
 
     return TrainResult(
         selected_model_name=best.name,

@@ -27,7 +27,7 @@ from sklearn.model_selection import GroupShuffleSplit
 from .evaluate_endpoint import EvalMetrics, evaluate_endpoint
 from .model_selection import score_candidates, select_model
 from .splits import grouped_cv_splits, n_splits_for_groups
-from .train_endpoint import build_model
+from .train_endpoint import build_model, fit_balanced
 
 
 @dataclass
@@ -99,7 +99,7 @@ def nested_group_cv(
         selected = select_model(scores, tolerance)
 
         model = build_model(selected, seed=seed)
-        model.fit(X.iloc[train_idx], y.iloc[train_idx])
+        fit_balanced(model, X.iloc[train_idx], y.iloc[train_idx])
         oof[test_idx] = model.predict_proba(X.iloc[test_idx])[:, 1]
         per_fold.append(NestedFoldResult(fold=fold, selected_model=selected, n_test=len(test_idx)))
 
@@ -141,7 +141,7 @@ def holdout_group_eval(
     selected = select_model(scores, tolerance)
 
     model = build_model(selected, seed=seed)
-    model.fit(X.iloc[train_idx], y.iloc[train_idx])
+    fit_balanced(model, X.iloc[train_idx], y.iloc[train_idx])
     proba = model.predict_proba(X.iloc[test_idx])[:, 1]
     return HoldoutResult(
         metrics=evaluate_endpoint(y.iloc[test_idx], proba),

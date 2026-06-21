@@ -17,6 +17,9 @@
 #   version       dataset/release version
 #   targets       optional list of endpoint ids the source is specific to;
 #                 empty/omitted means broad (applies to all targets)
+#   locators      optional list of concrete public download URLs (provenance
+#                 only; the toolchain NEVER fetches from these — staging does,
+#                 via a human-run cloud workflow). Each: {name, url, sha256?, note?}
 
 sources:
   - id: toxcast
@@ -36,13 +39,27 @@ sources:
     targets: []
 
   - id: cerapp
-    name: CERAPP
+    name: CERAPP (experimental ER activity)
     type: labels
     access_method: bulk_csv
-    provenance: Mansouri et al. 2016 (estrogen receptor consensus)
+    provenance: Mansouri et al. 2016, EHP (DOI 10.1289/ehp.1510267)
     version: "2016"
     targets:
       - ER
+    locators:
+      # CRITICAL: use CERAPP's EXPERIMENTAL ER activity calls (the measured
+      # training/evaluation sets), NOT the consensus-model PREDICTIONS for the
+      # ~32k chemicals. Training on predicted labels would make EndoScan mimic a
+      # structure-based QSAR model and violate the transcriptomics-first thesis.
+      - name: cerapp_experimental_training_set
+        url: https://epa.figshare.com/articles/dataset/CERAPP_Training_Set/6062563
+        note: EPA figshare article 6062563 — experimental ER activity (training)
+      - name: cerapp_experimental_evaluation_set
+        url: https://epa.figshare.com/articles/dataset/CERAPP_Evaluation_Set/6062554
+        note: EPA figshare article 6062554 — experimental ER activity (evaluation)
+      - name: cerapp_epa_gaftp_mirror
+        url: https://gaftp.epa.gov/COMPTOX/Sustainable_Chemistry_Data/CERAPP_QSAR_Models/
+        note: EPA bulk mirror (use the EXPERIMENTAL sets, not consensus predictions)
 
   - id: compara
     name: CoMPARA
@@ -60,11 +77,35 @@ sources:
     provenance: Broad LINCS / CMap (GSE92742)
     version: phase1_2017
     targets: []
+    locators:
+      - name: gse92742_sig_info
+        url: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_sig_info.txt.gz
+        note: signature metadata (sig_id, pert_id, cell_id, dose, time)
+      - name: gse92742_gene_info
+        url: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_gene_info.txt.gz
+        note: gene metadata incl. landmark flag (978 landmark genes)
+      - name: gse92742_pert_info
+        url: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_pert_info.txt.gz
+      - name: gse92742_cell_info
+        url: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_cell_info.txt.gz
+      - name: gse92742_level5_modz_gctx
+        url: https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_Level5_COMPZ.MODZ_n473647x12328.gctx.gz
+        note: "Level 5 MODZ matrix (~19.9 GB gz); slice by landmark rid + selected sig_id cid"
+      - name: clue_io_data_api
+        url: https://api.clue.io/api/
+        note: "try-first per-sig_id fetch (free key; ToS); unverified surface, falls back to gctx"
 
   - id: pubchem
     name: PubChem identifier mapping
     type: mapping
     access_method: rest_pug
-    provenance: NCBI PubChem
+    provenance: NCBI PubChem / EBI UniChem
     version: "2024"
     targets: []
+    locators:
+      - name: pubchem_pug_rest
+        url: https://pubchem.ncbi.nlm.nih.gov/rest/pug/
+        note: InChIKey <-> CID <-> SMILES property lookups
+      - name: ebi_unichem
+        url: https://www.ebi.ac.uk/unichem/
+        note: cross-source identifier mapping

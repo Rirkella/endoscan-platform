@@ -40,6 +40,7 @@ from .signature_retriever import (
 )
 from .source_selector import source_selector
 from .sources import (
+    Locator,
     SourceEntry,
     SourcesAllowList,
     SourceType,
@@ -54,6 +55,7 @@ __all__ = [
     "SourceEntry",
     "SourcesAllowList",
     "SourceType",
+    "Locator",
     "UnregisteredSourceError",
     "is_allowed",
     "load_sources",
