@@ -33,18 +33,21 @@ and confirm with a header sample first.
 
 ### LINCS `.gctx` → Parquet (one-off)
 
-LINCS Level-5 ships as a GCToo `.gctx`. Convert it once to the tidy Parquet above.
-Using `cmapPy` (install in a throwaway venv; it is NOT a project dependency):
+LINCS Level-5 ships as a GCToo `.gctx`. Convert it once to the tidy Parquet above
+using the staging layer's **h5py** reader (no cmapPy, no NumPy<2 — the same reader CI
+tests). `pipelines/endpoints/ER/staging/stage_er.build_lincs_parquet` wraps this:
 
 ```python
 # scratch conversion — run once on the human's machine, not committed as app code
-from cmapPy.pandasGEXpress.parse import parse  # pip install cmapPy
+import gctx  # pipelines/endpoints/ER/staging/gctx.py (h5py only)
 
-g = parse("GSE92742_Broad_LINCS_Level5.gctx", rid=LANDMARK_GENE_IDS)  # 978 landmark rows
-sig = g.data_df.T                      # rows = signatures, cols = landmark genes
-meta = g.col_metadata_df              # sig_id index + pert_id/cell_id/pert_dose/pert_time
-out = meta.join(sig)
-out = out.rename(columns={...})        # map LINCS names -> sig_id,pert_id,cell_id,pert_dose,pert_time
+# Partial HDF5 read of the 978 landmark rows x the selected signatures (auto-detects
+# matrix orientation; raises if a requested id is absent — no silent mislabel).
+mat = gctx.slice_gctx_landmark(
+    "GSE92742_Broad_LINCS_Level5.gctx", row_ids=LANDMARK_GENE_IDS, col_ids=SELECTED_SIG_IDS
+)                                       # (genes x signatures) in requested order
+sig = mat.T                            # rows = signatures, cols = landmark genes
+out = meta.join(sig)                   # meta: sig_id index + pert_id/cell_id/pert_dose/pert_time
 out.reset_index().to_parquet("data/staged/er/lincs.parquet", index=False)
 ```
 

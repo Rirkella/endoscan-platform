@@ -37,17 +37,18 @@ local files** that the toolchain then reads via `StagedSourceAdapter`. It is
 - **Imbalance:** the models use `class_weight="balanced"` (GB via per-fit
   `sample_weight`) — handled in `endoscan_core.training`, not here.
 
-## cmapPy vs h5py (dependency placement)
-- **cmapPy is NOT a repo dependency.** It is incompatible with NumPy ≥ 2 (its
-  writer/parser use the removed `numpy.string_`), and this repo is locked on
-  NumPy 2.x. cmapPy is `pip install`ed **inside the Colab notebook** with
-  **NumPy < 2**, where it is the authoritative gctx reader.
-- **`gctx.slice_gctx_landmark` prefers cmapPy when importable, else uses an
-  `h5py` fallback** (NumPy-2 compatible). CI exercises the h5py path on a
-  synthetic `.gctx`. The h5py reader's GCTx-v1.0 orientation assumption is
-  documented in `gctx.py` and **must be validated against the real GEO file**
-  in Phase 2b (cmapPy is authoritative there). `h5py` is a dev/staging-only
-  dependency (CI), never an `endoscan_core` runtime dependency.
+## gctx reader (h5py only — no cmapPy, no NumPy<2)
+- **`h5py` is the sole gctx reader**, used identically in CI (synthetic `.gctx`) and
+  the real Colab run. There is **no cmapPy** and **no `numpy<2` pin** — cmapPy needs
+  the removed `numpy.string_` and would downgrade Colab's NumPy 2 against its
+  preinstalled numpy-2 pandas/h5py/pyarrow (an ABI break). Dropping it removes that
+  failure mode and means CI tests the exact reader the real run uses.
+- **`gctx.slice_gctx_landmark`** auto-detects matrix orientation (matches each matrix
+  dimension to `len(ROW/id)` vs `len(COL/id)`; LINCS dims differ so it is
+  unambiguous), validates every requested id is present (clear error otherwise), and
+  does a **partial HDF5 read** of only the requested signature slices — never the full
+  matrix. `h5py` is a dev/staging-only dependency (CI), never an `endoscan_core`
+  runtime dependency.
 
 ## Storage / DVC (cloud)
 OneDrive-local is not cloud-reachable; for the cloud run use a **Colab-mounted
