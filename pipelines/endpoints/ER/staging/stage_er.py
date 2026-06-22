@@ -102,10 +102,13 @@ def build_lincs_parquet(
     chosen = condition_mod.select_condition_signatures(sig_meta)
     matrix = gctx_mod.slice_gctx_landmark(
         gctx_path, row_ids=landmark_gene_ids, col_ids=list(chosen["sig_id"])
-    )  # (genes x sig_id)
-    # Attach the 978-gene vector to each chosen signature, then early-fuse.
-    expr = matrix.T  # (sig_id x genes)
-    expr.columns = feature_names
+    )  # (genes x sig_id) — but the reader's row order is NOT guaranteed (cmapPy, the
+    # authoritative real-run reader, may return file order rather than requested order).
+    # Reindex to the requested landmark order so the positional ``feature_names`` labels
+    # below can never be silently misassigned to the wrong gene.
+    matrix = matrix.reindex(index=list(landmark_gene_ids))
+    expr = matrix.T  # (sig_id x genes), columns now in landmark order
+    expr.columns = list(feature_names)
     merged = chosen.merge(expr, left_on="sig_id", right_index=True)
     fused = condition_mod.early_fuse(merged, feature_names)
     fused.to_parquet(out_path, index=False)

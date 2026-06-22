@@ -40,6 +40,47 @@ def test_assemble_sig_meta_joins_filters_and_renames() -> None:
     assert set(out["cell_id"]) == {"MCF7", "A549"}
 
 
+def test_build_lincs_parquet_labels_survive_shuffled_slice_order(tmp_path, monkeypatch) -> None:
+    # The real-run reader (cmapPy) may return rows in FILE order, not the requested
+    # landmark order. build_lincs_parquet must reindex so feature columns stay correct.
+    landmark_ids = ["g0", "g1", "g2"]
+    feature_names = ["GENE0", "GENE1", "GENE2"]
+    sig_meta = pd.DataFrame(
+        [
+            {
+                "compound_key": "C1",
+                "sig_id": "S1",
+                "cell_id": "MCF7",
+                "pert_dose": 10.0,
+                "pert_time": 24.0,
+            },
+            {
+                "compound_key": "C1",
+                "sig_id": "S2",
+                "cell_id": "A549",
+                "pert_dose": 10.0,
+                "pert_time": 24.0,
+            },
+        ]
+    )
+    # Reader hands back genes in a DIFFERENT order than requested (g2, g0, g1).
+    shuffled = pd.DataFrame(
+        {"S1": [12.0, 10.0, 11.0], "S2": [22.0, 20.0, 21.0]},
+        index=["g2", "g0", "g1"],
+    )
+    monkeypatch.setattr(
+        stage_er.gctx_mod, "slice_gctx_landmark", lambda path, row_ids, col_ids: shuffled
+    )
+    out = stage_er.build_lincs_parquet(
+        sig_meta, tmp_path / "ignored.gctx", landmark_ids, feature_names, tmp_path / "lincs.parquet"
+    )
+    fused = pd.read_parquet(out).set_index("compound_key").loc["C1"]
+    # g0 -> GENE0 = mean(10, 20) = 15; g1 -> GENE1 = 16; g2 -> GENE2 = 17 regardless of order.
+    assert fused["GENE0"] == 15.0
+    assert fused["GENE1"] == 16.0
+    assert fused["GENE2"] == 17.0
+
+
 def test_select_landmark_genes_by_flag() -> None:
     gene_info = pd.DataFrame(
         [
