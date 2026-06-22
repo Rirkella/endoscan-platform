@@ -82,3 +82,25 @@ def test_four_stop_markers_each_once_in_order() -> None:
     assert sorted(positions) == [1, 2, 3, 4], f"missing/extra stop markers: {sorted(positions)}"
     order = [positions[n] for n in (1, 2, 3, 4)]
     assert order == sorted(order), f"stop markers out of order: {order}"
+
+
+def test_inkernel_import_preflight_between_install_and_fetch() -> None:
+    code = _code(_cells())
+    install_idx = [
+        i for i, src in code if re.search(r"pip install.*-e\s+packages/endoscan_core", src)
+    ]
+    fetch_idx = [i for i, src in code if re.search(r"#\s*1c\)", src)]
+    preflight = [i for i, src in code if "endoscan_core import OK" in src]
+    assert install_idx, "no editable-install cell for endoscan_core"
+    assert fetch_idx, "no 1c fetch cell"
+    assert len(preflight) == 1, "expected exactly one in-kernel import-preflight cell"
+    install_i, fetch_i, pf_i = min(install_idx), min(fetch_idx), preflight[0]
+    assert install_i < pf_i < fetch_i, "import-preflight must be AFTER install and BEFORE 1c fetch"
+
+    pf_src = dict(code)[pf_i]
+    # In-kernel import — NOT a `!python -c "import ..."` subprocess (which would falsely pass).
+    assert re.search(r"^\s*import endoscan_core", pf_src, re.M), "preflight must import in-kernel"
+    # No `!`-prefixed shell line that runs `python -c` (a comment mentioning it is fine).
+    assert not re.search(
+        r"^\s*!.*python.*-c\b", pf_src, re.M
+    ), "preflight must not shell out to a `!python -c` subprocess import check"
