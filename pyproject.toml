@@ -21,6 +21,9 @@ dev = [
     # Staging-layer / CI helper only (NOT an endoscan_core runtime dependency):
     # the gctx slicer + its synthetic-gctx test use h5py (NumPy-2 compatible).
     "h5py>=3.11",
+    # Notebook structural test (tests/staging/test_notebook_structure.py) parses the
+    # operator .ipynb with nbformat. CI-only; not an endoscan_core runtime dependency.
+    "nbformat>=5.10",
 ]
 
 # --- Lint + format -----------------------------------------------------------
