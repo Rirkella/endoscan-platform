@@ -25,6 +25,39 @@ def fetch_url(url: str, dest: Path, *, chunk: int = 1 << 20) -> Path:
     return dest
 
 
+def pubchem_mapping_for_casrns(casrns: Sequence[str]) -> list[dict]:
+    """Build CASRN -> InChIKey/CID/SMILES rows via PubChem PUG REST (cloud only).
+
+    Returns rows shaped for ``pubchem.normalize_mapping``. Runs only in the Colab
+    run (network). Unmapped CASRNs are skipped. Not imported by the test suite.
+    """
+    import requests  # noqa: PLC0415 — staging-only, not a core dependency
+
+    base = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name"
+    props = "InChIKey,CanonicalSMILES"
+    rows: list[dict] = []
+    for casrn in casrns:
+        url = f"{base}/{casrn}/property/{props}/JSON"
+        try:
+            resp = requests.get(url, timeout=60)
+            if resp.status_code != 200:
+                continue
+            prop = resp.json()["PropertyTable"]["Properties"][0]
+        except Exception:
+            continue
+        rows.append(
+            {
+                "input_id": str(casrn),
+                "input_id_type": "CASRN",
+                "inchikey": prop.get("InChIKey"),
+                "cid": prop.get("CID"),
+                "smiles": prop.get("CanonicalSMILES"),
+                "mapping_confidence": "exact",
+            }
+        )
+    return rows
+
+
 def clue_io_landmark_signatures(sig_ids: Sequence[str], api_key: str):
     """TRY-FIRST optimization: fetch per-``sig_id`` Level-5 landmark vectors.
 
