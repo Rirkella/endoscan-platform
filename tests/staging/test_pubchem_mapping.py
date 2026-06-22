@@ -5,6 +5,12 @@ from __future__ import annotations
 import pubchem  # noqa: E402 — resolved via conftest sys.path
 
 
+def test_guess_casrn_column() -> None:
+    assert pubchem.guess_casrn_column(["DTXSID", "CASRN", "name"]) == "CASRN"
+    assert pubchem.guess_casrn_column(["casn", "x"]) == "casn"
+    assert pubchem.guess_casrn_column(["foo", "bar"]) is None
+
+
 def test_normalize_mapping_defaults_and_drops() -> None:
     rows = [
         {"input_id": "1-1-1", "input_id_type": "CASRN", "inchikey": "AAA", "cid": 1, "smiles": "C"},

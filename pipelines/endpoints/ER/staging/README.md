@@ -11,9 +11,13 @@ local files** that the toolchain then reads via `StagedSourceAdapter`. It is
   a synthetic `.gctx` — `gctx.py` (h5py slicer), `condition.py` (10 µM/24 h
   selection + MCF7/A549 early fusion), `cerapp.py` (experimental-call parser),
   `pubchem.py` (mapping normalizer). **No real data, no network.**
-- **Cloud (Colab "Run all"):** `fetch.py` downloads the real sources, `stage_er.py`
-  wires the confirmed real columns and writes `data/staged/er/`, then the ER
-  pipeline runs. See `colab_run_er_phase2.ipynb`.
+- **Cloud (Colab, operator-run):** `colab_run_er_phase2.ipynb` is a **four-stop**
+  operator runbook (NOT "Run all"). The operator only pastes confirmed values into
+  the Stop 2 / Stop 3 CONFIG cells and sends outputs to Claude Chat between stops:
+  Stop 1 fetch+inspect, Stop 2 stage + **gate only** (training hard-wired off),
+  Stop 3 train, Stop 4 DVC-push + print the commit commands for a review PR.
+  `fetch.py` downloads the approved sources; `stage_er.py`'s tested helpers build
+  `data/staged/er/`.
 
 ## Key rules
 - **CERAPP = EXPERIMENTAL ER activity calls only** — never the consensus-model
