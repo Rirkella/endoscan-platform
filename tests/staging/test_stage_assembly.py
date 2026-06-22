@@ -41,8 +41,8 @@ def test_assemble_sig_meta_joins_filters_and_renames() -> None:
 
 
 def test_build_lincs_parquet_labels_survive_shuffled_slice_order(tmp_path, monkeypatch) -> None:
-    # The real-run reader (cmapPy) may return rows in FILE order, not the requested
-    # landmark order. build_lincs_parquet must reindex so feature columns stay correct.
+    # Defensive: even if a slicer returned rows in a different order than requested,
+    # build_lincs_parquet reindexes to landmark order so feature columns stay correct.
     landmark_ids = ["g0", "g1", "g2"]
     feature_names = ["GENE0", "GENE1", "GENE2"]
     sig_meta = pd.DataFrame(
