@@ -1,13 +1,14 @@
 """Orchestrate ER staging — fetch approved sources, build the staged files.
 
-Run in the CLOUD (Colab "Run all"); NOT in CI, NOT on a laptop. Produces
+Run in the CLOUD via the four-stop operator notebook (``colab_run_er_phase2.ipynb``);
+NOT in CI, NOT on a laptop. Produces
 ``data/staged/er/{lincs.parquet, cerapp.csv, pubchem.csv}`` which the toolchain
 then reads via ``StagedSourceAdapter``. The pure transforms it calls
 (``condition``, ``gctx``, ``cerapp``, ``pubchem``) are unit-tested in CI; the
 network fetch (``fetch``) and the real column wiring run only in the cloud.
 
 All functions are parameterized by column names supplied at call time (the
-operator pastes confirmed column names into the notebook's config cells); there
+operator pastes the reviewed column names into the notebook's CONFIG cells); there
 is no hardcoded schema. The pure transforms are unit-tested on fixtures.
 """
 
@@ -126,7 +127,7 @@ def build_pubchem_csv(mapping_rows: list[dict], out_path: Path) -> Path:
 def main() -> None:  # pragma: no cover - cloud entry point, not run in CI
     raise SystemExit(
         "Run the staging steps from the Colab notebook (colab_run_er_phase2.ipynb): it "
-        "fetches the approved locators, wires the CONFIRMed real columns, calls the "
+        "fetches the approved locators, wires the reviewed column names, calls the "
         "build_* functions above, then runs the ER pipeline. Not runnable offline in CI."
     )
 
