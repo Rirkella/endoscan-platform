@@ -12,12 +12,17 @@ local files** that the toolchain then reads via `StagedSourceAdapter`. It is
   selection + MCF7/A549 early fusion), `cerapp.py` (experimental-call parser),
   `pubchem.py` (mapping normalizer). **No real data, no network.**
 - **Cloud (Colab, operator-run):** `colab_run_er_phase2.ipynb` is a **four-stop**
-  operator runbook (NOT "Run all"). The operator only pastes confirmed values into
-  the Stop 2 / Stop 3 CONFIG cells and sends outputs to Claude Chat between stops:
-  Stop 1 fetch+inspect, Stop 2 stage + **gate only** (training hard-wired off),
-  Stop 3 train, Stop 4 DVC-push + print the commit commands for a review PR.
-  `fetch.py` downloads the approved sources; `stage_er.py`'s tested helpers build
-  `data/staged/er/`.
+  operator runbook (NOT "Run all"). A **Preflight** cell verifies a **read-only,
+  single-repo** fine-grained PAT (Colab Secret `GH_PAT_RO`) before anything else;
+  the clone is **read-only and token-safe** (PAT supplied via `GIT_ASKPASS`, never
+  in the URL/argv/`.git/config`/output) and the notebook **never pushes to GitHub**.
+  The operator only pastes confirmed values into the Stop 2 / Stop 3 CONFIG cells and
+  sends outputs to Claude Chat between stops: Stop 1 fetch+inspect, Stop 2 stage +
+  **gate only** (training hard-wired off), Stop 3 train, Stop 4 DVC-push the binaries
+  to Drive + download a **review bundle** (text artifacts + `.dvc` pointers +
+  proposed `endpoints.json`) that Claude Code turns into the review PR. `fetch.py`
+  downloads the approved sources; `stage_er.py`'s tested helpers build
+  `data/staged/er/`; `bundle.py` assembles the Stop-4 handoff bundle.
 
 ## Key rules
 - **CERAPP = EXPERIMENTAL ER activity calls only** — never the consensus-model
