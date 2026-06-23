@@ -21,6 +21,20 @@ from .sources import SourceEntry, SourcesAllowList, require_allowed
 
 MappingConfidence = str  # "exact" | "ambiguous" | "unmapped"
 
+# Id types that are ALREADY the canonical id (a full InChIKey). These need no
+# mapping-source lookup: a fused compound-level signature is keyed directly by its
+# InChIKey, so it maps to itself (identity). CASRN/PERT_ID still go through the source.
+_CANONICAL_ID_TYPES = {"inchikey"}
+
+
+def _normalize_inchikey(value: str) -> str:
+    """Strip + upper-case an InChIKey for like-for-like identity (no truncation)."""
+    return str(value).strip().upper()
+
+
+def _is_canonical_id_type(id_type: str) -> bool:
+    return str(id_type).strip().lower() in _CANONICAL_ID_TYPES
+
 
 class CompoundMapping(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -50,7 +64,13 @@ class MappingResult(BaseModel):
     conflicts: list[MappingConflict] = Field(default_factory=list)
 
     def to_canonical(self, input_id: str, input_id_type: str) -> str | None:
-        """Return the canonical InChIKey for an input id, or None if not exactly mapped."""
+        """Return the canonical InChIKey for an input id, or None if not exactly mapped.
+
+        An id whose type is already canonical (InChIKey) maps to itself — no
+        mapping-source row is required for the fused compound-level path.
+        """
+        if _is_canonical_id_type(input_id_type):
+            return _normalize_inchikey(input_id)
         for mapping in self.mappings:
             if (
                 mapping.input_id == input_id
@@ -91,6 +111,18 @@ def compound_mapper(
 
     result = MappingResult()
     for raw_id, id_type in _dedupe(ids):
+        if _is_canonical_id_type(id_type):  # already a canonical InChIKey -> identity
+            inchikey = _normalize_inchikey(raw_id)
+            result.mappings.append(
+                CompoundMapping(
+                    input_id=raw_id,
+                    input_id_type=id_type,
+                    canonical_id=inchikey,
+                    inchikey_block1=inchikey[:14],
+                    confidence="exact",
+                )
+            )
+            continue
         rows = index.get((raw_id, id_type), [])
         inchikeys = sorted({str(row["inchikey"]) for row in rows if row.get("inchikey")})
 
