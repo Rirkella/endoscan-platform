@@ -20,17 +20,92 @@ _EXCEL_SUFFIXES = {".xlsx", ".xls"}
 _DOC_NAME_TOKENS = ("readme", "license", "licence", "changelog", "notice")
 
 
-def fetch_url(url: str, dest: Path, *, chunk: int = 1 << 20) -> Path:
-    """Stream-download an approved URL to ``dest`` (cloud only)."""
+def _http_download(url: str, dest: Path, *, chunk: int = 1 << 20) -> tuple[str, str]:
+    """Stream-download ``url`` to ``dest`` following redirects (cloud only).
+
+    Returns ``(resolved_url, content_type)``. Raises on a non-200 status. Validation
+    of the *content* is the caller's job (see ``validate_artifact``).
+    """
     import requests  # noqa: PLC0415 — staging-only, not a core dependency
 
+    dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with requests.get(url, stream=True, timeout=300) as resp:
+    with requests.get(url, stream=True, timeout=300, allow_redirects=True) as resp:
         resp.raise_for_status()
+        resolved_url = resp.url
+        content_type = resp.headers.get("Content-Type", "")
         with dest.open("wb") as handle:
             for part in resp.iter_content(chunk_size=chunk):
                 handle.write(part)
-    return dest
+    return resolved_url, content_type
+
+
+def looks_like_html(path: Path) -> bool:
+    """True if the file's first bytes start with ``<!doctype`` / ``<html`` (a web page)."""
+    with Path(path).open("rb") as handle:
+        head = handle.read(512).lstrip().lower()
+    return head.startswith(b"<!doctype") or head.startswith(b"<html")
+
+
+def is_valid_zip(path: Path) -> bool:
+    """True only for a real ZIP container (and not an HTML page saved as ``.zip``)."""
+    return zipfile.is_zipfile(path) and not looks_like_html(path)
+
+
+def validate_artifact(
+    path: Path, *, kind: str = "any", resolved_url: str = "", content_type: str = ""
+) -> Path:
+    """Validate a downloaded artifact; on rejection DELETE it and raise a clear error.
+
+    ``kind``: ``"zip"`` requires a real ZIP, ``"tabular"`` requires it parse as a table,
+    ``"any"`` only rejects HTML. HTML landing pages are always rejected.
+    """
+    path = Path(path)
+    if looks_like_html(path):
+        path.unlink(missing_ok=True)
+        raise ValueError(
+            f"downloaded file is HTML, not data (resolved URL {resolved_url!r}, "
+            f"content-type {content_type!r}) — the resolver hit a landing page."
+        )
+    if kind == "zip" and not zipfile.is_zipfile(path):
+        path.unlink(missing_ok=True)
+        raise ValueError(
+            f"downloaded file is not a valid ZIP (resolved URL {resolved_url!r}, "
+            f"content-type {content_type!r})."
+        )
+    if kind == "tabular" and read_tabular(path) is None:
+        path.unlink(missing_ok=True)
+        raise ValueError(
+            f"downloaded file does not parse as a table (resolved URL {resolved_url!r}, "
+            f"content-type {content_type!r})."
+        )
+    return path
+
+
+def fetch_url(url: str, dest: Path, *, chunk: int = 1 << 20) -> Path:
+    """Stream-download an approved URL to ``dest`` and reject HTML error pages (cloud only)."""
+    resolved_url, content_type = _http_download(url, dest, chunk=chunk)
+    return validate_artifact(dest, kind="any", resolved_url=resolved_url, content_type=content_type)
+
+
+def download_cerapp_file(url: str, dest: Path, *, http=None) -> Path:
+    """Download one CERAPP artifact to ``dest`` with stale-cache revalidation + validation.
+
+    Validates by extension (``.zip`` -> real ZIP, else a parseable table). A pre-existing
+    cached file is re-validated and **re-downloaded if invalid** (e.g. an HTML page saved
+    as ``.zip`` by a prior failed run) — never silently reused. ``http`` is injectable
+    for tests; it must write ``dest`` and return ``(resolved_url, content_type)``.
+    """
+    dest = Path(dest)
+    fetcher = http or _http_download
+    kind = "zip" if dest.suffix.lower() == ".zip" else "tabular"
+    if dest.exists():
+        try:
+            return validate_artifact(dest, kind=kind, resolved_url="(cached)")
+        except ValueError:
+            pass  # validate_artifact already deleted the stale/invalid cache
+    resolved_url, content_type = fetcher(url, dest)
+    return validate_artifact(dest, kind=kind, resolved_url=resolved_url, content_type=content_type)
 
 
 def pubchem_mapping_for_casrns(casrns: Sequence[str]) -> list[dict]:
@@ -66,48 +141,100 @@ def pubchem_mapping_for_casrns(casrns: Sequence[str]) -> list[dict]:
     return rows
 
 
-def figshare_file_urls(article_id: str) -> list[tuple[str, str]]:
-    """Return ``[(filename, download_url)]`` for a figshare article (cloud only).
+def figshare_files(article_id: str) -> list[dict]:
+    """Return the figshare article's ``files[]`` list (cloud only).
 
-    Hits the public figshare API ``GET /v2/articles/{article_id}`` and reads
-    ``files[].download_url``. Not imported by the test suite.
+    Hits the public figshare API ``GET /v2/articles/{article_id}`` and returns the raw
+    ``files`` entries (each with ``name`` + ``download_url``).
     """
     import requests  # noqa: PLC0415 — staging-only, not a core dependency
 
     resp = requests.get(f"https://api.figshare.com/v2/articles/{article_id}", timeout=60)
     resp.raise_for_status()
-    return [(f["name"], f["download_url"]) for f in resp.json().get("files", [])]
+    return resp.json().get("files", [])
+
+
+def pick_figshare_data_files(files: Sequence[dict]) -> list[tuple[str, str]]:
+    """Pick the DATA files from a figshare ``files[]`` list (never the article HTML page).
+
+    Selects entries whose name ends in a data extension (``.zip``/``.csv``/``.tsv``/
+    ``.txt``/``.xlsx``/``.xls``), ignoring PDFs and readme/license docs. Returns
+    ``[(name, download_url)]`` (possibly several — the caller surfaces them).
+    """
+    data_exts = {".zip"} | _DELIMITED_SUFFIXES | _EXCEL_SUFFIXES
+    out: list[tuple[str, str]] = []
+    for entry in files:
+        name = entry.get("name", "")
+        suffix = Path(name).suffix.lower()
+        if suffix in data_exts and not _looks_like_doc(Path(name)):
+            out.append((name, entry.get("download_url", "")))
+    return out
+
+
+def _gaftp_zip_candidates(gaftp_url: str | None) -> list[str]:
+    """Direct CERAPP archive URLs on the GAFTP mirror dir (validated after download)."""
+    if not gaftp_url:
+        return []
+    base = gaftp_url.rstrip("/") + "/"
+    return [base + name for name in ("TrainingSet.zip", "EvaluationSet.zip")]
 
 
 def fetch_cerapp_experimental(
-    dest_dir: Path, article_ids: Sequence[str], *, gaftp_url: str | None = None
+    dest_dir: Path,
+    article_ids: Sequence[str],
+    *,
+    gaftp_url: str | None = None,
+    http=None,
+    figshare_lister=None,
 ) -> list[Path]:
-    """Resolve + download the CERAPP EXPERIMENTAL files programmatically (cloud only).
+    """Resolve + download the CERAPP EXPERIMENTAL archives, VALIDATING every artifact.
 
-    Tries the figshare API first (the ``article_ids`` parsed from the approved
-    figshare locators), downloading every file each article exposes. If that yields
-    nothing and ``gaftp_url`` is given, streams the gaftp mirror instead. Raises if
-    neither resolves (the notebook then offers a single manual-upload fallback).
-    Returns the local file paths. Not imported by the test suite.
+    Resolver order: (a) the GAFTP mirror's direct file URLs; (b) the figshare API
+    ``files[]`` (the DATA file by extension — **never** the article HTML page). Each
+    download is validated (HTML rejected, ``.zip`` must be a real ZIP) and stale invalid
+    cached files are re-fetched. Raises a clear error only after BOTH resolvers fail.
+    ``http`` / ``figshare_lister`` are injectable for tests. Cloud only.
     """
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []
-    try:
-        for article_id in article_ids:
-            for name, download_url in figshare_file_urls(article_id):
-                paths.append(fetch_url(download_url, dest_dir / name))
-    except Exception:
-        paths = []
-    if not paths and gaftp_url:
-        name = Path(gaftp_url.rstrip("/")).name or "cerapp_gaftp"
-        paths = [fetch_url(gaftp_url, dest_dir / name)]
-    if not paths:
-        raise RuntimeError(
-            "Could not resolve CERAPP experimental files from figshare or the gaftp "
-            "mirror; use the clearly-marked manual-upload fallback cell."
-        )
-    return paths
+    figshare = figshare_lister or figshare_files
+    errors: list[str] = []
+
+    # (a) GAFTP mirror first — direct file URLs.
+    gaftp_paths: list[Path] = []
+    for url in _gaftp_zip_candidates(gaftp_url):
+        try:
+            gaftp_paths.append(download_cerapp_file(url, dest_dir / Path(url).name, http=http))
+        except Exception as exc:
+            errors.append(f"gaftp {Path(url).name}: {exc}")
+    if gaftp_paths:
+        return gaftp_paths
+
+    # (b) figshare API second — the DATA file, never the article HTML page.
+    figshare_paths: list[Path] = []
+    for article_id in article_ids:
+        try:
+            data_files = pick_figshare_data_files(figshare(article_id))
+        except Exception as exc:
+            errors.append(f"figshare {article_id}: listing failed: {exc}")
+            continue
+        if not data_files:
+            errors.append(f"figshare {article_id}: no data file in files[]")
+            continue
+        for name, url in data_files:
+            try:
+                figshare_paths.append(download_cerapp_file(url, dest_dir / name, http=http))
+            except Exception as exc:
+                errors.append(f"figshare {name}: {exc}")
+    if figshare_paths:
+        return figshare_paths
+
+    raise RuntimeError(
+        "Could not obtain a VALID CERAPP archive from the GAFTP mirror or figshare "
+        "(HTML/not-a-valid-ZIP or download failure). Details: "
+        + " | ".join(errors)
+        + " — use the manual-upload fallback cell (1d)."
+    )
 
 
 def _looks_like_doc(path: Path) -> bool:
