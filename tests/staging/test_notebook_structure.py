@@ -84,6 +84,17 @@ def test_four_stop_markers_each_once_in_order() -> None:
     assert order == sorted(order), f"stop markers out of order: {order}"
 
 
+def test_gctx_download_only_in_stop2_staging() -> None:
+    code = _code(_cells())
+    cell_1c = next(src for _, src in code if re.search(r"#\s*1c\)", src))
+    cell_2b = next(src for _, src in code if re.search(r"#\s*2b\)", src))
+    # Stop 1c is LIGHT: it must NOT download or decompress the 19.9 GB gctx.
+    assert "download_gctx" not in cell_1c, "Stop 1c must not download the gctx"
+    assert ".gctx.gz" not in cell_1c, "Stop 1c must not decompress the gctx"
+    # The heavy gctx download belongs in the Stop 2 staging cell (after columns).
+    assert "download_gctx" in cell_2b, "the gctx download must live in the Stop 2 staging cell"
+
+
 def test_inkernel_import_preflight_between_install_and_fetch() -> None:
     code = _code(_cells())
     install_idx = [

@@ -11,6 +11,7 @@ the cloud; the pure archive-extraction / delimiter-sniffing / table-reading help
 from __future__ import annotations
 
 import csv
+import re
 import zipfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -106,6 +107,63 @@ def download_cerapp_file(url: str, dest: Path, *, http=None) -> Path:
             pass  # validate_artifact already deleted the stale/invalid cache
     resolved_url, content_type = fetcher(url, dest)
     return validate_artifact(dest, kind=kind, resolved_url=resolved_url, content_type=content_type)
+
+
+def parse_gctx_dims(name: str) -> tuple[int, int] | None:
+    """Parse ``n<sig>x<genes>`` from a GSE92742 Level-5 ``.gctx`` filename.
+
+    e.g. ``GSE92742_..._Level5_COMPZ.MODZ_n473647x12328.gctx.gz`` -> ``(473647, 12328)``
+    (n_signatures, n_genes). Returns ``None`` if the pattern is absent. Pure string
+    parse — lets Stop 1 report the EXPECTED gctx shape WITHOUT downloading the file.
+    """
+    match = re.search(r"_n(\d+)x(\d+)\.gctx", name)
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def is_valid_gctx(path: Path) -> bool:
+    """True if ``path`` opens as an HDF5 GCTx with readable ROW/COL id metadata."""
+    import h5py  # noqa: PLC0415 — staging/dev dependency, not an endoscan_core runtime dep
+
+    path = Path(path)
+    if not path.is_file():
+        return False
+    try:
+        with h5py.File(path, "r") as handle:
+            handle["/0/META/ROW/id"].shape[0]
+            handle["/0/META/COL/id"].shape[0]
+        return True
+    except Exception:
+        return False
+
+
+def download_gctx(url: str, gctx_path: Path, *, gz_path: Path | None = None, http=None) -> Path:
+    """HEAVY: download + gunzip the Level-5 ``.gctx`` with cache validation (cloud only).
+
+    Reuses an existing decompressed ``.gctx`` ONLY if it is a valid HDF5
+    (``is_valid_gctx``) — a truncated/invalid cache from a prior run is discarded and
+    re-fetched (the same don't-reuse-garbage policy as the zip/HTML validation). The
+    downloaded ``.gz`` is rejected if it is HTML. ``http`` is injectable for tests.
+    """
+    import gzip  # noqa: PLC0415 — staging-only
+    import shutil  # noqa: PLC0415 — staging-only
+
+    gctx_path = Path(gctx_path)
+    if is_valid_gctx(gctx_path):
+        return gctx_path  # valid cache — skip the ~20 GB re-download ("resume")
+    gctx_path.unlink(missing_ok=True)
+    gz_path = Path(gz_path) if gz_path else gctx_path.with_name(gctx_path.name + ".gz")
+    fetcher = http or _http_download
+    resolved_url, content_type = fetcher(url, gz_path)
+    validate_artifact(gz_path, kind="any", resolved_url=resolved_url, content_type=content_type)
+    with gzip.open(gz_path, "rb") as src, gctx_path.open("wb") as dst:
+        shutil.copyfileobj(src, dst)
+    if not is_valid_gctx(gctx_path):
+        gctx_path.unlink(missing_ok=True)
+        raise ValueError(
+            f"decompressed gctx is not a valid HDF5 (resolved URL {resolved_url!r}, "
+            f"content-type {content_type!r}) — truncated/invalid download."
+        )
+    return gctx_path
 
 
 def pubchem_mapping_for_casrns(casrns: Sequence[str]) -> list[dict]:
