@@ -27,6 +27,27 @@ import condition as condition_mod  # noqa: E402
 import gctx as gctx_mod  # noqa: E402
 import pubchem as pubchem_mod  # noqa: E402
 
+# LINCS pert_info uses "-666" as its missing-value sentinel; PubChem/CERAPP may emit
+# blanks or NaN. None of these are real InChIKeys and must never join.
+_INCHIKEY_SENTINELS = {"", "-666", "NAN", "NONE", "NA", "NULL"}
+
+
+def normalize_inchikey(value: object) -> str | None:
+    """Normalize an InChIKey for like-for-like joining, or ``None`` if it is a sentinel.
+
+    Strips surrounding whitespace and upper-cases (InChIKeys are canonically
+    upper-case). Returns ``None`` for empty strings, NaN, and the LINCS ``-666``
+    missing-value sentinel so those rows can never silently match. Does NOT truncate:
+    a full 27-char InChIKey stays full and a 14-char block-1 prefix stays a prefix, so
+    callers can compare like-for-like and refuse to match full against prefix.
+    """
+    if value is None:
+        return None
+    token = str(value).strip()
+    if token.upper() in _INCHIKEY_SENTINELS:
+        return None
+    return token.upper()
+
 
 def assemble_sig_meta(
     sig_info: pd.DataFrame,

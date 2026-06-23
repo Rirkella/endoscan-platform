@@ -166,36 +166,87 @@ def download_gctx(url: str, gctx_path: Path, *, gz_path: Path | None = None, htt
     return gctx_path
 
 
-def pubchem_mapping_for_casrns(casrns: Sequence[str]) -> list[dict]:
-    """Build CASRN -> InChIKey/CID/SMILES rows via PubChem PUG REST (cloud only).
+def pubchem_mapping_with_stats(
+    casrns: Sequence[str], *, max_retries: int = 4, throttle_s: float = 0.25
+) -> tuple[list[dict], dict[str, int]]:
+    """Build CASRN -> InChIKey/CID/SMILES rows via PubChem PUG REST, with yield stats.
 
-    Returns rows shaped for ``pubchem.normalize_mapping``. Runs only in the Colab
-    run (network). Unmapped CASRNs are skipped. Not imported by the test suite.
+    Returns ``(rows, stats)`` where ``rows`` are shaped for
+    ``pubchem.normalize_mapping`` and ``stats`` distinguishes a low yield caused by
+    THROTTLING from one caused by GENUINE misses — so the Stop-2 diagnostic can tell
+    "PubChem rate-limited us, retry" apart from "these CASRNs really have no mapping":
+
+    - ``resolved``: CASRNs with an InChIKey returned;
+    - ``not_found``: a clean 404 / 200-with-empty table (genuinely unmatched);
+    - ``rate_limited``: still 429/503 after ``max_retries`` exponential-backoff retries;
+    - ``errored``: other transport/parse failures.
+
+    Polite by default: a small ``throttle_s`` pause between requests (PubChem asks for
+    <= ~5 req/s) and exponential backoff (1s, 2s, 4s, ...) on 429/503. Cloud only; not
+    imported by the test suite.
     """
+    import time  # noqa: PLC0415 — staging-only, not a core dependency
+
     import requests  # noqa: PLC0415 — staging-only, not a core dependency
 
     base = "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name"
     props = "InChIKey,CanonicalSMILES"
     rows: list[dict] = []
+    stats = dict.fromkeys(("requested", "resolved", "not_found", "rate_limited", "errored"), 0)
+    stats["requested"] = len(casrns)
     for casrn in casrns:
         url = f"{base}/{casrn}/property/{props}/JSON"
-        try:
-            resp = requests.get(url, timeout=60)
+        prop: dict | None = None
+        outcome = "errored"
+        for attempt in range(max_retries + 1):
+            try:
+                resp = requests.get(url, timeout=60)
+            except Exception:
+                outcome = "errored"
+                break
+            if resp.status_code in (429, 503):  # throttled -> back off and retry
+                if attempt < max_retries:
+                    time.sleep(2**attempt)
+                    continue
+                outcome = "rate_limited"
+                break
+            if resp.status_code == 404:
+                outcome = "not_found"
+                break
             if resp.status_code != 200:
-                continue
-            prop = resp.json()["PropertyTable"]["Properties"][0]
-        except Exception:
-            continue
-        rows.append(
-            {
-                "input_id": str(casrn),
-                "input_id_type": "CASRN",
-                "inchikey": prop.get("InChIKey"),
-                "cid": prop.get("CID"),
-                "smiles": prop.get("CanonicalSMILES"),
-                "mapping_confidence": "exact",
-            }
-        )
+                outcome = "errored"
+                break
+            try:
+                props_list = resp.json()["PropertyTable"]["Properties"]
+                prop = props_list[0] if props_list else None
+            except Exception:
+                prop = None
+            outcome = "resolved" if (prop and prop.get("InChIKey")) else "not_found"
+            break
+        if outcome == "resolved" and prop is not None:
+            rows.append(
+                {
+                    "input_id": str(casrn),
+                    "input_id_type": "CASRN",
+                    "inchikey": prop.get("InChIKey"),
+                    "cid": prop.get("CID"),
+                    "smiles": prop.get("CanonicalSMILES"),
+                    "mapping_confidence": "exact",
+                }
+            )
+        stats[outcome] += 1
+        if throttle_s:
+            time.sleep(throttle_s)
+    return rows, stats
+
+
+def pubchem_mapping_for_casrns(casrns: Sequence[str]) -> list[dict]:
+    """Build CASRN -> InChIKey/CID/SMILES rows via PubChem PUG REST (cloud only).
+
+    Thin wrapper over :func:`pubchem_mapping_with_stats` that drops the stats, kept for
+    callers that only need the mapping rows. Unmapped CASRNs are skipped.
+    """
+    rows, _stats = pubchem_mapping_with_stats(casrns)
     return rows
 
 
