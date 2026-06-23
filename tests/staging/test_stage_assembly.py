@@ -81,6 +81,23 @@ def test_build_lincs_parquet_labels_survive_shuffled_slice_order(tmp_path, monke
     assert fused["GENE2"] == 17.0
 
 
+def test_normalize_inchikey_strips_uppercases_and_drops_sentinels() -> None:
+    # Whitespace + case are normalized so like-for-like joins succeed.
+    assert stage_er.normalize_inchikey("  abc-def-g  ") == "ABC-DEF-G"
+    key = "ABCDEFGHIJKLMN-OPQRSTUVWX-Y"
+    assert stage_er.normalize_inchikey(f"  {key.lower()}  ") == key
+    # The LINCS -666 sentinel, blanks, and NaN-likes are NOT real keys -> None.
+    for sentinel in ("-666", "", "   ", "nan", "None", "NA", "null", None, float("nan")):
+        assert stage_er.normalize_inchikey(sentinel) is None
+    # Full (27-char) vs prefix (14-char) are preserved, NOT truncated, so a caller can
+    # refuse to match one against the other.
+    full = "ABCDEFGHIJKLMN-OPQRSTUVWX-N"
+    prefix = "ABCDEFGHIJKLMN"
+    assert stage_er.normalize_inchikey(full) == full
+    assert stage_er.normalize_inchikey(prefix) == prefix
+    assert stage_er.normalize_inchikey(full) != stage_er.normalize_inchikey(prefix)
+
+
 def test_select_landmark_genes_by_flag() -> None:
     gene_info = pd.DataFrame(
         [
