@@ -111,6 +111,10 @@ def build_lincs_parquet(
     expr.columns = list(feature_names)
     merged = chosen.merge(expr, left_on="sig_id", right_index=True)
     fused = condition_mod.early_fuse(merged, feature_names)
+    # Write the identity column as ``compound_id`` (the signature_retriever fused-path
+    # contract). Readers also accept the legacy ``compound_key`` name as an alias, so an
+    # already-staged parquet keeps loading — but fresh builds use ``compound_id``.
+    fused = fused.rename(columns={"compound_key": "compound_id"})
     fused.to_parquet(out_path, index=False)
     return out_path
 

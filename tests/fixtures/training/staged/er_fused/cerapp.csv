@@ -1,0 +1,11 @@
+casrn,inchikey,inchi_code,target,consensus_call,consensus_score,label,label_provenance,inchikey_source
+300-00-00,AAAAAAAAAAAAAA-AAAAAAAAAA-N,InChI=1S/cpd0,ER,active,0.9,1,cerapp_experimental_binding,inchi
+300-00-01,BBBBBBBBBBBBBB-BBBBBBBBBB-N,InChI=1S/cpd1,ER,active,0.9,1,cerapp_experimental_binding,inchi
+300-00-02,CCCCCCCCCCCCCC-CCCCCCCCCC-N,InChI=1S/cpd2,ER,active,0.9,1,cerapp_experimental_binding,inchi
+300-00-03,DDDDDDDDDDDDDD-DDDDDDDDDD-N,InChI=1S/cpd3,ER,active,0.9,1,cerapp_experimental_binding,inchi
+300-00-04,EEEEEEEEEEEEEE-EEEEEEEEEE-N,InChI=1S/cpd4,ER,active,0.9,1,cerapp_experimental_binding,inchi
+300-00-05,FFFFFFFFFFFFFF-FFFFFFFFFF-N,InChI=1S/cpd5,ER,active,0.9,1,cerapp_experimental_binding,inchi
+300-00-06,GGGGGGGGGGGGGG-GGGGGGGGGG-N,InChI=1S/cpd6,ER,inactive,0.9,0,cerapp_experimental_binding,inchi
+300-00-07,HHHHHHHHHHHHHH-HHHHHHHHHH-N,InChI=1S/cpd7,ER,inactive,0.9,0,cerapp_experimental_binding,inchi
+300-00-08,IIIIIIIIIIIIII-IIIIIIIIII-N,InChI=1S/cpd8,ER,inactive,0.9,0,cerapp_experimental_binding,inchi
+300-00-09,JJJJJJJJJJJJJJ-JJJJJJJJJJ-N,InChI=1S/cpd9,ER,inactive,0.9,0,cerapp_experimental_binding,inchi

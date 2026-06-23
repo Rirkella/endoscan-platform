@@ -74,7 +74,11 @@ def test_build_lincs_parquet_labels_survive_shuffled_slice_order(tmp_path, monke
     out = stage_er.build_lincs_parquet(
         sig_meta, tmp_path / "ignored.gctx", landmark_ids, feature_names, tmp_path / "lincs.parquet"
     )
-    fused = pd.read_parquet(out).set_index("compound_key").loc["C1"]
+    written = pd.read_parquet(out)
+    # The fused matrix's identity column is written as `compound_id` (the fused-path
+    # contract); `compound_key` is only accepted as a reader alias for legacy parquets.
+    assert "compound_id" in written.columns and "compound_key" not in written.columns
+    fused = written.set_index("compound_id").loc["C1"]
     # g0 -> GENE0 = mean(10, 20) = 15; g1 -> GENE1 = 16; g2 -> GENE2 = 17 regardless of order.
     assert fused["GENE0"] == 15.0
     assert fused["GENE1"] == 16.0

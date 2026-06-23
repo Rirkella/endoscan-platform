@@ -22,9 +22,19 @@ PREFERRED_DOSE_UM = 10.0
 PREFERRED_TIME_H = 24.0
 
 
-def _distance(dose: float, time: float) -> tuple[float, float]:
-    dose_term = abs(math.log10(dose) - math.log10(PREFERRED_DOSE_UM)) if dose and dose > 0 else 1e9
-    return (dose_term, abs(float(time) - PREFERRED_TIME_H))
+def _distance(dose: object, time: object) -> tuple[float, float]:
+    """Distance from the preferred (10 uM, 24 h) condition; never crashes.
+
+    ``sig_info`` delivers ``pert_dose``/``pert_time`` as STRINGS (and sometimes blanks
+    or junk), so coerce numerically first: a non-numeric/non-positive dose or a
+    non-numeric time ranks LAST (large distance) instead of raising on ``dose > 0``.
+    """
+    dose_val = pd.to_numeric(dose, errors="coerce")
+    time_val = pd.to_numeric(time, errors="coerce")
+    dose_ok = pd.notna(dose_val) and dose_val > 0
+    dose_term = abs(math.log10(dose_val) - math.log10(PREFERRED_DOSE_UM)) if dose_ok else 1e9
+    time_term = abs(float(time_val) - PREFERRED_TIME_H) if pd.notna(time_val) else 1e9
+    return (dose_term, time_term)
 
 
 def select_condition_signatures(sig_meta: pd.DataFrame) -> pd.DataFrame:

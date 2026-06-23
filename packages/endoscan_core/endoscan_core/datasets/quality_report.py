@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..registry.templates import render_template
@@ -41,18 +42,37 @@ class DatasetQualityReport(BaseModel):
     dataset_card_path: str | None = None
 
 
-def _duplicate_signature_rate(table: CandidateTable) -> float:
+def _duplicate_signature_rate(table: CandidateTable, granularity: str = "signature") -> float:
     if len(table.metadata) == 0:
         return 0.0
+    if granularity == "compound":
+        # One fused vector per compound by construction; duplicates = repeated compounds.
+        n_total = len(table.metadata)
+        n_unique = table.metadata["compound_key"].nunique()
+        return (n_total - n_unique) / n_total
     keys = ["compound_key", "cell_line", "dose", "time"]
     n_total = len(table.metadata)
     n_unique = len(table.metadata[keys].drop_duplicates())
     return (n_total - n_unique) / n_total
 
 
-def _metadata_coverage(table: CandidateTable) -> float:
+def _metadata_coverage(table: CandidateTable, granularity: str = "signature") -> float:
     if len(table.metadata) == 0:
         return 0.0
+    if granularity == "compound":
+        # Per-signature cell/dose/time were consumed by fusion, so coverage here is the
+        # fraction of compounds with a resolved identity AND a complete feature vector
+        # (no NaN among the landmark genes) — meaningful for a fused matrix, and never
+        # spuriously 0 just because the condition columns are gone.
+        has_key = table.metadata["compound_key"].notna()
+        features_complete = (
+            table.X.notna().all(axis=1)
+            if len(table.X.columns)
+            else pd.Series(True, index=table.metadata.index)
+        )
+        features_complete = features_complete.reset_index(drop=True)
+        complete = has_key.reset_index(drop=True) & features_complete
+        return float(complete.mean())
     needed = ["cell_line", "dose", "time"]
     complete = table.metadata[needed].notna().all(axis=1)
     return float(complete.mean())
@@ -130,11 +150,11 @@ def dataset_quality_report(
         per_class_counts=per_class,
         per_class_compound_counts=per_class_compounds,
         minority_class_fraction=minority_fraction,
-        duplicate_signature_rate=_duplicate_signature_rate(table),
+        duplicate_signature_rate=_duplicate_signature_rate(table, signatures.granularity),
         n_label_conflicts=n_conflicts,
         label_conflict_rate=conflict_rate,
         confidence_summary=_confidence_summary(labels),
-        metadata_coverage=_metadata_coverage(table),
+        metadata_coverage=_metadata_coverage(table, signatures.granularity),
         compound_level_leakage=leakage,
         offending_compounds=offending,
         split_feasible=_split_feasible(table),
