@@ -73,6 +73,11 @@ class DataConfig(BaseModel):
     staged_dir: str | None = None
     n_groups: int = 5
     seed: int = 0
+    # Label sources that MUST be staged for this endpoint (others are optional: a
+    # genuinely-absent optional label file contributes zero rows instead of crashing).
+    # ER trains on CERAPP experimental calls; toxcast/tox21 stay approved in the
+    # allow-list for future endpoints but are optional here.
+    required_label_sources: list[str] = Field(default_factory=list)
 
 
 class GateConfig(BaseModel):
@@ -256,7 +261,27 @@ def run_pipeline(
     sig_sources = source_selector(target, allow_list, types=["signatures"])
     map_source = source_selector(target, allow_list, types=["mapping"])[0]
 
-    labels = label_retriever(target, label_sources, adapter, allow_list=allow_list)
+    # A genuinely-ABSENT label extract contributes zero rows (not a crash); a
+    # present-but-malformed one still raises when label_retriever parses it. Required
+    # label sources (per endpoint config) must be present — a missing one is an
+    # operator/staging error with a clear message, not a silent gate fail.
+    present_ids = {s.id for s in label_sources if adapter.has_source(s)}
+    status = ", ".join(
+        f"{s.id}={'present' if s.id in present_ids else 'absent'}" for s in label_sources
+    )
+    print(f"label sources: {status}")
+    required = set(config.data.required_label_sources)
+    missing_required = sorted(
+        s.id for s in label_sources if s.id in required and s.id not in present_ids
+    )
+    if missing_required:
+        raise ValueError(
+            f"required label source(s) not staged for {target}: {missing_required}. "
+            "Stage the extract(s) or adjust data.required_label_sources."
+        )
+    present_label_sources = [s for s in label_sources if s.id in present_ids]
+
+    labels = label_retriever(target, present_label_sources, adapter, allow_list=allow_list)
     signatures = signature_retriever(sig_sources, adapter, allow_list=allow_list)
     ids = [(r.compound_id, r.compound_id_type) for r in labels.records]
     ids += [(s.compound_id, s.compound_id_type) for s in signatures.records]
@@ -379,7 +404,11 @@ def run_pipeline(
         render_selection_markdown(report_dict), encoding="utf-8"
     )
 
-    sources = [s.id for s in [*label_sources, *sig_sources, map_source]]
+    # Registry honesty: provenance lists only the label sources that ACTUALLY
+    # contributed at least one label record (e.g. CERAPP), not absent/empty optional
+    # ones. Signature + mapping sources always contribute on a successful run.
+    contributing_labels = sorted({record.assay_source for record in labels.records})
+    sources = [*contributing_labels, *[s.id for s in sig_sources], map_source.id]
     card = _render_model_card(
         config,
         status,

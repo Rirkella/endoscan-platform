@@ -16,6 +16,7 @@ data:
   fixtures_dir: tests/fixtures/datasets
   n_groups: 2
   seed: 0
+  required_label_sources: [cerapp]  # ER trains on CERAPP; toxcast/tox21 optional here
 
 gate:
   thresholds_path: registry/data/quality_gates.yaml   # strict, real thresholds

@@ -30,6 +30,10 @@ class StagedSourceAdapter:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
 
+    def has_source(self, source: SourceEntry) -> bool:
+        """True if a Parquet or CSV extract for ``source`` exists under the root."""
+        return any((self.root / f"{source.id}{ext}").is_file() for ext in _EXTENSIONS)
+
     def read_records(self, source: SourceEntry) -> RawTable:
         for ext in _EXTENSIONS:
             path = self.root / f"{source.id}{ext}"
