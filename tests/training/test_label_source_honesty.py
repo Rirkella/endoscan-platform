@@ -114,6 +114,27 @@ def test_zero_labels_fails_gate_not_crash(
     assert res.n_overlap == 0
 
 
+def test_present_but_empty_required_source_does_not_mask_empty_contribution(
+    er_run: ModuleType, allow_list: SourcesAllowList, tmp_path: Path
+) -> None:
+    # The required-source check is presence-only and INDEPENDENT of the gate's
+    # label-count judgment: a PRESENT-but-EMPTY required CERAPP file satisfies the
+    # required check (no missing-required error) yet still FAILS the gate as
+    # zero-overlap -- required-present must NOT mask an empty contribution.
+    staged = _cerapp_only(tmp_path / "staged", with_cerapp=False)
+    # Header-only CERAPP file: present (has_source True) but yields zero label rows.
+    pd.DataFrame(columns=["casrn", "target", "consensus_call", "consensus_score"]).to_csv(
+        staged / "cerapp.csv", index=False
+    )
+    res = _run(er_run, _cfg(er_run, staged, required=("cerapp",)), allow_list, tmp_path / "out")
+    # Required check satisfied (the file is present) -> run_pipeline did NOT raise.
+    # Gate fails on the empty contribution, not "passes" because the source was present.
+    assert res.n_overlap == 0
+    assert res.gate_passed is False
+    assert "min_overlap" in res.gate_summary and "min_compounds_per_class" in res.gate_summary
+    assert res.trained is False
+
+
 def _balanced_cerapp_only(dst: Path) -> Path:
     """A balanced (8/8) fused CERAPP-only staged dir for a stable nested-CV train run."""
     dst.mkdir(parents=True, exist_ok=True)
