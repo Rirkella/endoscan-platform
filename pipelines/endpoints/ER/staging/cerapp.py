@@ -85,6 +85,12 @@ def assemble_evaluation_labels(
       whose ``mode_col`` equals "Agonist" / "Antagonist" (case-insensitive EXACT match
       on the mode value, NOT a substring of the assay class). Single endpoint only
       (never fused across modes).
+    - ``label_mode="functional"``: the ENDPOINT UNION — keep rows whose ``mode_col`` is
+      "Agonist" OR "Antagonist" (ER transactivation-pathway modulation; direction is
+      NOT distinguished). Positive = active in ANY functional row; negative = tested in
+      those modes and inactive in all. A cross-mode disagreement (agonist-active +
+      antagonist-inactive) is POSITIVE under the union, NOT a conflict; only a genuine
+      INTRA-mode ``{0,1}`` contradiction is excluded.
     - ``label_mode="any"``: keep all rows (no axis filter).
     - rows with a non-0/1 (NaN/blank) ``active_col`` are dropped.
     - collapse per CASRN: all kept rows inactive -> label 0; >=1 active AND no
@@ -98,21 +104,28 @@ def assemble_evaluation_labels(
     reused) plus an explicit ``label`` and ``label_provenance``. ``conflicts`` lists the
     excluded compounds with their disagreeing values + row count.
     """
-    if label_mode not in ("binding", "agonist", "antagonist", "any"):
+    if label_mode not in ("binding", "agonist", "antagonist", "functional", "any"):
         raise ValueError(
-            "label_mode must be 'binding', 'agonist', 'antagonist', or 'any', "
-            f"got {label_mode!r}"
+            "label_mode must be 'binding', 'agonist', 'antagonist', 'functional', or "
+            f"'any', got {label_mode!r}"
         )
 
     # Endpoint-axis modes match the Mode column value exactly (case-insensitive).
     _mode_value = {"agonist": "agonist", "antagonist": "antagonist"}.get(label_mode)
+    _functional = label_mode == "functional"  # union of {agonist, antagonist} endpoints
+    _functional_modes = {"agonist", "antagonist"}
 
     # Per-CASRN: collect kept 0/1 labels and a representative InChI string (stable order).
+    # ``functional`` is resolved separately (per-CASRN, per-mode) after the loop, so it
+    # can treat cross-mode disagreement as positive (union) while still excluding a
+    # genuine intra-mode contradiction.
     per_casrn: dict[str, dict] = {}
+    func_tmp: dict[str, dict] = {}  # casrn -> {"agonist": set, "antagonist": set, "inchi": str}
     for row in rows:
         casrn = str(row.get(casrn_col) or "").strip()
         if not casrn:
             continue
+        row_mode = ""
         if label_mode == "binding":
             # Assay-TECHNOLOGY axis: assay-class contains "binding".
             assay_class = str(row.get(assay_class_col) or "").lower()
@@ -122,13 +135,40 @@ def assemble_evaluation_labels(
             # CERAPP ENDPOINT axis: exact Mode value (agonist | antagonist).
             if str(row.get(mode_col) or "").strip().lower() != _mode_value:
                 continue
+        elif _functional:
+            # ENDPOINT union: keep Agonist OR Antagonist rows (exact value, not substring).
+            row_mode = str(row.get(mode_col) or "").strip().lower()
+            if row_mode not in _functional_modes:
+                continue
         label = _to_label(row.get(active_col))
         if label is None:  # NaN / non-0-1 -> dropped
+            continue
+        if _functional:
+            entry = func_tmp.setdefault(casrn, {"inchi": None})
+            entry.setdefault(row_mode, set()).add(label)
+            if entry["inchi"] is None and row.get(inchi_col):
+                entry["inchi"] = str(row[inchi_col])
             continue
         entry = per_casrn.setdefault(casrn, {"labels": set(), "inchi": None})
         entry["labels"].add(label)
         if entry["inchi"] is None and row.get(inchi_col):
             entry["inchi"] = str(row[inchi_col])
+
+    if _functional:
+        # Resolve each compound's functional label from its per-mode label sets:
+        # - any single mode internally contradicts ({0,1}) -> genuine contradiction,
+        #   resolve to {0,1} so the collapse loop below EXCLUDES it (never voted);
+        # - else union: positive if active in ANY functional mode, negative otherwise.
+        #   (agonist-active + antagonist-inactive -> positive, NOT a conflict.)
+        for casrn, entry in func_tmp.items():
+            mode_sets = [v for k, v in entry.items() if k != "inchi"]
+            if any(s == {0, 1} for s in mode_sets):
+                resolved = {0, 1}
+            elif any(1 in s for s in mode_sets):
+                resolved = {1}
+            else:
+                resolved = {0}
+            per_casrn[casrn] = {"labels": resolved, "inchi": entry["inchi"]}
 
     label_rows: list[dict] = []
     conflicts: list[dict] = []
