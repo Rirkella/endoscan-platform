@@ -21,6 +21,10 @@ class FixtureSourceAdapter:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
 
+    def has_source(self, source: SourceEntry) -> bool:
+        """True if a CSV fixture for ``source`` exists under the root."""
+        return (self.root / f"{source.id}.csv").is_file()
+
     def read_records(self, source: SourceEntry) -> RawTable:
         path = self.root / f"{source.id}.csv"
         if not path.is_file():

@@ -11,8 +11,9 @@ local files** that the toolchain then reads via `StagedSourceAdapter`. It is
   a synthetic `.gctx` — `gctx.py` (h5py slicer), `condition.py` (10 µM/24 h
   selection + MCF7/A549 early fusion), `cerapp.py` (experimental-call parser),
   `pubchem.py` (mapping normalizer). **No real data, no network.**
-- **Cloud (Colab, operator-run):** `colab_run_er_phase2.ipynb` is a **four-stop**
-  operator runbook (NOT "Run all"). A **Preflight** cell verifies a **read-only,
+- **Cloud (Colab, operator-run):** `notebooks/colab_run_er_phase2_clean.ipynb` is a
+  **four-stop** operator runbook (NOT "Run all"); see `docs/runbooks/er_phase2_colab.md`.
+  A **Preflight** cell verifies a **read-only,
   single-repo** fine-grained PAT (Colab Secret `GH_PAT_RO`) before anything else;
   the clone is **read-only and token-safe** (PAT supplied via `GIT_ASKPASS`, never
   in the URL/argv/`.git/config`/output) and the notebook **never pushes to GitHub**.

@@ -16,6 +16,7 @@ data:
   staged_dir: data/staged/er
   n_groups: 10                     # compound groups for the split plan
   seed: 0
+  required_label_sources: [cerapp]  # CERAPP required; toxcast/tox21 optional (absent -> 0 rows)
 
 gate:
   thresholds_path: registry/data/quality_gates.yaml   # strict, real thresholds

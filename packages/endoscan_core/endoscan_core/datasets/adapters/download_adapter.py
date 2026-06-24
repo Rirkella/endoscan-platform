@@ -14,6 +14,12 @@ from .base import RawTable
 class RealDownloadAdapter:
     """Placeholder for real source downloads. Every call raises."""
 
+    def has_source(self, source: SourceEntry) -> bool:
+        raise NotImplementedError(
+            f"Real source download for {source.id!r} is not implemented yet "
+            "(M2 is fixtures-only)."
+        )
+
     def read_records(self, source: SourceEntry) -> RawTable:
         raise NotImplementedError(
             f"Real source download for {source.id!r} is not implemented yet "

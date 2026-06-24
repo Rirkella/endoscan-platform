@@ -25,3 +25,12 @@ class SourceAdapter(Protocol):
     """
 
     def read_records(self, source: SourceEntry) -> RawTable: ...
+
+    def has_source(self, source: SourceEntry) -> bool:
+        """Whether a backing extract for ``source`` exists (without reading it).
+
+        Lets the pipeline tell a genuinely-absent OPTIONAL label source (skip,
+        contribute zero rows) apart from a present-but-malformed one (which must
+        still raise when ``read_records`` parses it).
+        """
+        ...
