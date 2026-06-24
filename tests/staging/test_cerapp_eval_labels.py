@@ -155,3 +155,60 @@ def test_custom_mode_col_name() -> None:
     ]
     labels, _ = cerapp.assemble_evaluation_labels(rows, label_mode="agonist", mode_col="endpoint")
     assert {r["casrn"]: r["label"] for r in labels} == {"M1": 1}
+
+
+# --- functional mode: Mode in {Agonist, Antagonist} union (ER functional modulation) ---
+
+
+def test_functional_mode_selects_agonist_or_antagonist_not_binding() -> None:
+    rows = [
+        _mode_row("AG", "Agonist", 1),  # agonist active -> positive
+        _mode_row("AN", "Antagonist", 0),  # antagonist inactive -> negative
+        _mode_row("BO", "Binding", 1),  # endpoint "Binding" is NOT functional -> ignored
+        _mode_row("OT", "Other", 1),  # any other mode -> ignored
+    ]
+    labels, conflicts = cerapp.assemble_evaluation_labels(rows, label_mode="functional")
+    assert {r["casrn"]: r["label"] for r in labels} == {"AG": 1, "AN": 0}
+    assert conflicts == []
+    assert all(r["label_provenance"] == "cerapp_experimental_functional" for r in labels)
+
+
+def test_functional_union_positive_if_active_in_any_functional_row() -> None:
+    # Active in an agonist row, inactive in an antagonist row -> POSITIVE under the union
+    # (cross-mode disagreement is NOT a conflict).
+    rows = [
+        _mode_row("U", "Agonist", 1),
+        _mode_row("U", "Antagonist", 0),
+    ]
+    labels, conflicts = cerapp.assemble_evaluation_labels(rows, label_mode="functional")
+    assert {r["casrn"]: r["label"] for r in labels} == {"U": 1}
+    assert conflicts == []
+
+
+def test_functional_positive_in_agonist_absent_in_antagonist_is_positive() -> None:
+    rows = [_mode_row("P", "Agonist", 1)]  # only agonist evidence, active -> positive
+    labels, conflicts = cerapp.assemble_evaluation_labels(rows, label_mode="functional")
+    assert {r["casrn"]: r["label"] for r in labels} == {"P": 1}
+    assert conflicts == []
+
+
+def test_functional_intra_mode_disagreement_still_excluded() -> None:
+    # Two Agonist rows for the same compound disagree -> genuine same-mode contradiction
+    # -> EXCLUDED (never voted), even though it would be "active in some row".
+    rows = [
+        _mode_row("C", "Agonist", 1),
+        _mode_row("C", "Agonist", 0),
+    ]
+    labels, conflicts = cerapp.assemble_evaluation_labels(rows, label_mode="functional")
+    assert labels == []
+    assert [c["casrn"] for c in conflicts] == ["C"]
+    assert conflicts[0]["labels"] == [0, 1]
+
+
+def test_functional_all_inactive_is_negative() -> None:
+    rows = [
+        _mode_row("N", "Agonist", 0),
+        _mode_row("N", "Antagonist", 0),
+    ]
+    labels, _ = cerapp.assemble_evaluation_labels(rows, label_mode="functional")
+    assert {r["casrn"]: r["label"] for r in labels} == {"N": 0}
