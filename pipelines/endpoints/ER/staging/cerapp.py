@@ -67,6 +67,7 @@ def assemble_evaluation_labels(
     assay_class_col: str = "ASSAY_CLASS_NAME",
     active_col: str = "All_active",
     inchi_col: str = "InChI_Code",
+    mode_col: str = "Mode",
     label_mode: str = "binding",
     target: str = "ER",
 ) -> tuple[list[dict], list[dict]]:
@@ -74,10 +75,17 @@ def assemble_evaluation_labels(
 
     The real ``Supplemental_Material_4_evaluationSet.xlsx`` is assay-level (many rows
     per CASRN), so it must be collapsed. Parameterized only by column names + a mode
-    (nothing hardcoded):
+    (nothing hardcoded). Two different selection axes exist in the file and the mode
+    picks which one:
 
-    - ``label_mode="binding"``: keep only rows whose ``assay_class_col`` contains
-      "binding" (case-insensitive); ``"any"``: keep all assay-class rows.
+    - ``label_mode="binding"``: the assay-TECHNOLOGY axis — keep only rows whose
+      ``assay_class_col`` contains "binding" (case-insensitive), i.e. genuine
+      binding-assay rows.
+    - ``label_mode="agonist"`` / ``"antagonist"``: the CERAPP ENDPOINT axis — keep rows
+      whose ``mode_col`` equals "Agonist" / "Antagonist" (case-insensitive EXACT match
+      on the mode value, NOT a substring of the assay class). Single endpoint only
+      (never fused across modes).
+    - ``label_mode="any"``: keep all rows (no axis filter).
     - rows with a non-0/1 (NaN/blank) ``active_col`` are dropped.
     - collapse per CASRN: all kept rows inactive -> label 0; >=1 active AND no
       disagreement -> label 1; rows that DISAGREE -> **CONFLICT: excluded** (never
@@ -90,8 +98,14 @@ def assemble_evaluation_labels(
     reused) plus an explicit ``label`` and ``label_provenance``. ``conflicts`` lists the
     excluded compounds with their disagreeing values + row count.
     """
-    if label_mode not in ("binding", "any"):
-        raise ValueError(f"label_mode must be 'binding' or 'any', got {label_mode!r}")
+    if label_mode not in ("binding", "agonist", "antagonist", "any"):
+        raise ValueError(
+            "label_mode must be 'binding', 'agonist', 'antagonist', or 'any', "
+            f"got {label_mode!r}"
+        )
+
+    # Endpoint-axis modes match the Mode column value exactly (case-insensitive).
+    _mode_value = {"agonist": "agonist", "antagonist": "antagonist"}.get(label_mode)
 
     # Per-CASRN: collect kept 0/1 labels and a representative InChI string (stable order).
     per_casrn: dict[str, dict] = {}
@@ -100,8 +114,13 @@ def assemble_evaluation_labels(
         if not casrn:
             continue
         if label_mode == "binding":
+            # Assay-TECHNOLOGY axis: assay-class contains "binding".
             assay_class = str(row.get(assay_class_col) or "").lower()
             if "binding" not in assay_class:
+                continue
+        elif _mode_value is not None:
+            # CERAPP ENDPOINT axis: exact Mode value (agonist | antagonist).
+            if str(row.get(mode_col) or "").strip().lower() != _mode_value:
                 continue
         label = _to_label(row.get(active_col))
         if label is None:  # NaN / non-0-1 -> dropped
