@@ -1,3 +1,23 @@
 {
-  "endpoints": []
+  "endpoints": [
+    {
+      "endpoint_id": "ER",
+      "biological_target": "Estrogen Receptor",
+      "input_type": "transcriptomics",
+      "model_path": "models/ER/model.pkl",
+      "feature_schema_path": "models/ER/feature_schema.json",
+      "metrics_path": "models/ER/metrics.json",
+      "explainer_path": null,
+      "model_card_path": "models/ER/model_card.md",
+      "dataset_card_path": "models/ER/dataset_card.md",
+      "status": "experimental",
+      "version": "0.1.0",
+      "created_at": "2026-06-25T14:44:39.125592Z",
+      "source_refs": [
+        "cerapp",
+        "lincs",
+        "pubchem"
+      ]
+    }
+  ]
 }

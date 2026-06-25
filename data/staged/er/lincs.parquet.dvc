@@ -1,0 +1,5 @@
+outs:
+- md5: b8ebd6cf46701149cd5bb2be5a8c0c8c
+  size: 5465568
+  hash: md5
+  path: lincs.parquet
