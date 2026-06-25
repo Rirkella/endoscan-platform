@@ -255,7 +255,9 @@ def build_limitations_section(
         if missed:
             status_line += " Unmet validated_mvp criteria: " + "; ".join(missed) + "."
     else:
-        status_line = f"**Status — {status.value}:** meets the configured validated_mvp floors/ceilings."
+        status_line = (
+            f"**Status — {status.value}:** meets the configured " "validated_mvp floors/ceilings."
+        )
 
     # STATISTICAL POWER.
     outer_splits = evaluation.get("outer_splits")
@@ -264,7 +266,10 @@ def build_limitations_section(
         f"(prevalence {prevalence:.3f})."
     )
     if outer_splits:
-        power += f" Only ~{n_pos / outer_splits:.0f} positives per held-out fold (n_pos / {outer_splits})."
+        power += (
+            f" Only ~{n_pos / outer_splits:.0f} positives per held-out fold "
+            f"(n_pos / {outer_splits})."
+        )
 
     # MODEL SELECTION STABILITY.
     per_fold = list(evaluation.get("per_fold_selected") or [])
