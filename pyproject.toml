@@ -24,6 +24,10 @@ dev = [
     # Notebook structural test (tests/staging/test_notebook_structure.py) parses the
     # operator .ipynb with nbformat. CI-only; not an endoscan_core runtime dependency.
     "nbformat>=5.10",
+    # TreeSHAP for the M4 inference/explainability tests; installed in CI so the explain
+    # tests run. NOT an endoscan_core runtime dependency (shap import is lazy in
+    # inference/explain.py and explain tests importorskip it).
+    "shap>=0.44",
 ]
 
 # --- Lint + format -----------------------------------------------------------

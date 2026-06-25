@@ -183,7 +183,14 @@ def _status_for(
 
 
 def _metrics_dict(
-    metrics: EvalMetrics, n_compounds: int, selected_model: str, evaluation: dict
+    metrics: EvalMetrics,
+    n_compounds: int,
+    selected_model: str,
+    evaluation: dict,
+    *,
+    validated_mvp_floors: dict[str, float],
+    validated_mvp_ceilings: dict[str, float],
+    claim_scope: str | None,
 ) -> dict:
     return {
         "auroc": metrics.auroc,
@@ -197,6 +204,11 @@ def _metrics_dict(
         "selected_model": selected_model,
         "threshold": metrics.threshold,
         "evaluation": evaluation,
+        # Structured fields the M4 inference/limitations layer reads (no card parsing):
+        # the floors/ceilings the run was judged against and the endpoint's claim scope.
+        "validated_mvp_floors": dict(validated_mvp_floors),
+        "validated_mvp_ceilings": dict(validated_mvp_ceilings),
+        "claim_scope": claim_scope,
         "estimate": "honest (nested-outer or held-out); not resubstitution/inner-CV",
     }
 
@@ -508,7 +520,18 @@ def run_pipeline(
     )
     n_compounds = int(table.metadata["compound_key"].nunique())
     (model_dir / "metrics.json").write_text(
-        json.dumps(_metrics_dict(honest, n_compounds, final_model_name, evaluation), indent=2),
+        json.dumps(
+            _metrics_dict(
+                honest,
+                n_compounds,
+                final_model_name,
+                evaluation,
+                validated_mvp_floors=config.training.validated_mvp_floors,
+                validated_mvp_ceilings=config.training.validated_mvp_ceilings,
+                claim_scope=config.claim_scope,
+            ),
+            indent=2,
+        ),
         encoding="utf-8",
     )
     shutil.copyfile(report.dataset_card_path, model_dir / "dataset_card.md")

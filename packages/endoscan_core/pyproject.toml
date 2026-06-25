@@ -18,6 +18,12 @@ dependencies = [
     "pyarrow>=15",
 ]
 
+# Inference/explainability EXTRA — NOT a core dependency. ``shap`` (TreeSHAP) is only
+# needed by endoscan_core.inference.explain; core imports cleanly without it (the shap
+# import is lazy, inside the explain functions). Install: pip install 'endoscan-core[explain]'.
+[project.optional-dependencies]
+explain = ["shap>=0.44"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

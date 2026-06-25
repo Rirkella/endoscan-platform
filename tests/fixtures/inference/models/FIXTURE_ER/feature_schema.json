@@ -1,0 +1,11 @@
+{
+  "features": [
+    "G1",
+    "G2",
+    "G3",
+    "G4",
+    "G5"
+  ],
+  "standardized": true,
+  "schema_version": "0.1"
+}

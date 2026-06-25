@@ -1,0 +1,39 @@
+{
+  "auroc": 0.7,
+  "auprc": 0.3,
+  "balanced_accuracy": 0.58,
+  "f1": 0.3,
+  "brier_score": 0.1,
+  "confusion_matrix": {
+    "tn": 30,
+    "fp": 6,
+    "fn": 14,
+    "tp": 10
+  },
+  "n_samples": 60,
+  "n_compounds": 60,
+  "selected_model": "random_forest",
+  "threshold": 0.5,
+  "evaluation": {
+    "mode": "nested",
+    "outer_splits": 5,
+    "inner_splits": 3,
+    "per_fold_selected": [
+      "random_forest",
+      "lasso_logreg",
+      "random_forest",
+      "random_forest",
+      "gradient_boosting"
+    ]
+  },
+  "validated_mvp_floors": {
+    "auroc": 0.65,
+    "auprc": 0.2,
+    "balanced_accuracy": 0.65
+  },
+  "validated_mvp_ceilings": {
+    "brier_score": 0.2
+  },
+  "claim_scope": "ER functional modulation (agonist or antagonist transactivation; direction not distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
+  "estimate": "fixture record (not a real estimate)"
+}
