@@ -9,6 +9,10 @@
 endpoint_id: ER
 biological_target: Estrogen Receptor
 version: "0.1.0"
+claim_scope: >-
+  ER functional modulation (agonist or antagonist transactivation; direction not
+  distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic
+  claim
 
 data:
   target: ER

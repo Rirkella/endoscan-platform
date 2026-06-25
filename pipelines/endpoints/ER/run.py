@@ -123,6 +123,10 @@ class PipelineConfig(BaseModel):
     endpoint_id: str
     biological_target: str
     version: str = "0.1.0"
+    # Conservative, endpoint-specific scope of the claim (model-card SCOPE OF CLAIM).
+    # Parameterized so it is not hardcoded to ER; a generic conservative default is used
+    # when unset.
+    claim_scope: str | None = None
     data: DataConfig
     gate: GateConfig
     approval: ApprovalConfig
@@ -197,6 +201,108 @@ def _metrics_dict(
     }
 
 
+_GENERIC_CLAIM_SCOPE = (
+    "the configured endpoint only; NOT a pan-endocrine, regulatory, clinical, or "
+    "diagnostic claim"
+)
+
+
+def missed_floors(
+    metrics: EvalMetrics, floors: dict[str, float], ceilings: dict[str, float]
+) -> list[str]:
+    """Floors/ceilings the honest estimate FAILS, phrased value-vs-threshold.
+
+    Uses the same comparison ``_status_for`` makes (floor: ``>=``; ceiling: ``<=``),
+    so the card's missed-metric list is accurate, never hardcoded.
+    """
+    missed: list[str] = []
+    for name, value in floors.items():
+        observed = getattr(metrics, name)
+        if observed < value:
+            missed.append(f"{name.replace('_', ' ')} {observed:.3f} < {value:.2f} floor")
+    for name, value in ceilings.items():
+        observed = getattr(metrics, name)
+        if observed > value:
+            missed.append(f"{name.replace('_', ' ')} {observed:.3f} > {value:.2f} ceiling")
+    return missed
+
+
+def build_limitations_section(
+    *,
+    status: EndpointStatus,
+    metrics: EvalMetrics,
+    report,
+    evaluation: dict,
+    floors: dict[str, float],
+    ceilings: dict[str, float],
+    selected_model: str,
+    claim_scope: str | None,
+) -> str:
+    """Build the parameterized, honest model-card Limitations block from real values."""
+    per_class = report.per_class_compound_counts
+    n_pos = int(per_class.get(1, 0))
+    n_neg = int(per_class.get(0, 0))
+    n_total = n_pos + n_neg
+    prevalence = (n_pos / n_total) if n_total else 0.0
+
+    # STATUS line.
+    if status == EndpointStatus.experimental:
+        missed = missed_floors(metrics, floors, ceilings)
+        status_line = (
+            "**Status — experimental:** a real-data methodology demonstration, NOT a "
+            "validated predictor."
+        )
+        if missed:
+            status_line += " Unmet validated_mvp criteria: " + "; ".join(missed) + "."
+    else:
+        status_line = f"**Status — {status.value}:** meets the configured validated_mvp floors/ceilings."
+
+    # STATISTICAL POWER.
+    outer_splits = evaluation.get("outer_splits")
+    power = (
+        f"**Statistical power:** {n_pos} positives / {n_total} compounds "
+        f"(prevalence {prevalence:.3f})."
+    )
+    if outer_splits:
+        power += f" Only ~{n_pos / outer_splits:.0f} positives per held-out fold (n_pos / {outer_splits})."
+
+    # MODEL SELECTION STABILITY.
+    per_fold = list(evaluation.get("per_fold_selected") or [])
+    if len(set(per_fold)) > 1:
+        stability = (
+            f"**Model-selection stability:** family selection was UNSTABLE across folds "
+            f"(per-fold picks: {per_fold}); the registered model ({selected_model}) is the "
+            "automated simplicity-aware scorecard pick on all data."
+        )
+    elif per_fold:
+        stability = (
+            f"**Model-selection stability:** selection was consistent across folds "
+            f"({selected_model}); chosen by the automated simplicity-aware scorecard."
+        )
+    else:
+        stability = (
+            f"**Model-selection stability:** {selected_model}, the automated "
+            "simplicity-aware scorecard pick."
+        )
+
+    # COVERAGE.
+    coverage = (
+        "**Coverage:** built from the intersection of approved labels and "
+        "transcriptomic signatures (compound-level); it is coverage-limited and NOT "
+        "representative of the full chemical space."
+    )
+
+    # SCOPE OF CLAIM.
+    scope = f"**Scope of claim:** {claim_scope or _GENERIC_CLAIM_SCOPE}."
+
+    disclaimer = (
+        "Pre-screening / prioritization only; metrics are the honest compound-level "
+        "cross-validated estimate, NOT regulatory-grade validation, and must be "
+        "confirmed experimentally."
+    )
+    return "\n\n".join([status_line, power, stability, coverage, scope, disclaimer])
+
+
 def _render_model_card(
     config: PipelineConfig,
     status: EndpointStatus,
@@ -204,9 +310,18 @@ def _render_model_card(
     metrics: EvalMetrics,
     report,
     n_features: int,
-    evaluation_mode: str,
+    evaluation: dict,
     sources: list[str],
 ) -> str:
+    evaluation_mode = evaluation["mode"]
+    per_fold = list(evaluation.get("per_fold_selected") or [])
+    unstable = len(set(per_fold)) > 1
+    training_summary = (
+        f"compound-level {evaluation_mode} evaluation; model chosen by a "
+        f"simplicity-aware scorecard over {len(config.training.models)} sklearn models"
+    )
+    if unstable:
+        training_summary += ", family selection unstable across folds (see Limitations)"
     return render_template(
         "model_card.md",
         {
@@ -222,10 +337,7 @@ def _render_model_card(
             ),
             "feature_summary": f"{n_features} landmark genes",
             "model_type": selected_model,
-            "training_summary": (
-                f"compound-level {evaluation_mode} evaluation; model chosen by a "
-                f"simplicity-aware scorecard over {len(config.training.models)} sklearn models"
-            ),
+            "training_summary": training_summary,
             "metrics_summary": (
                 f"AUROC={metrics.auroc:.3f}, AUPRC={metrics.auprc:.3f}, "
                 f"balanced_acc={metrics.balanced_accuracy:.3f}, F1={metrics.f1:.3f}, "
@@ -235,10 +347,15 @@ def _render_model_card(
                 "Research prioritization of estrogen-receptor activity from signatures."
             ),
             "not_recommended_use": "Any regulatory, clinical, or diagnostic decision.",
-            "limitations": (
-                "Pre-screening / prioritization only. Built from a curated allow-list; "
-                "metrics are the honest compound-level cross-validated estimate and are NOT "
-                "regulatory-grade validation."
+            "limitations": build_limitations_section(
+                status=status,
+                metrics=metrics,
+                report=report,
+                evaluation=evaluation,
+                floors=config.training.validated_mvp_floors,
+                ceilings=config.training.validated_mvp_ceilings,
+                selected_model=selected_model,
+                claim_scope=config.claim_scope,
             ),
         },
     )
@@ -416,7 +533,7 @@ def run_pipeline(
         honest,
         report,
         len(table.feature_names),
-        evaluation["mode"],
+        evaluation,
         sources,
     )
     (model_dir / "model_card.md").write_text(card, encoding="utf-8")
