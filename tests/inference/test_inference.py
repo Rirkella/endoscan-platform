@@ -307,3 +307,40 @@ def test_floor_or_ceiling_naming_absent_metric_raises() -> None:
         missed_criteria(metrics, {"specificity": 0.5}, {})
     with pytest.raises(ValueError, match="ceiling"):
         missed_criteria(metrics, {}, {"log_loss": 0.30})
+
+
+# --- real ER: PARTIAL floor record reads truthfully (structurally sourced) -------------
+
+
+def test_real_er_partial_floor_record_reads_like_the_card() -> None:
+    """The regenerated real-ER metrics.json carries a PARTIAL floor record: only the
+    ground-truth-recovered balanced_accuracy floor (0.60) + brier ceiling (0.20), plus
+    claim_scope and a floors_provenance note. The limitations block must now read
+    identically to the frozen model card — STRUCTURALLY sourced, not degrading — and
+    must NOT imply "all floors met" from the incomplete set.
+    """
+    entries = json.loads((REPO_ROOT / "registry/models/endpoints.json").read_text())
+    er = next(e for e in entries["endpoints"] if e["endpoint_id"] == "ER")
+    entry = EndpointEntry.model_validate(er)
+    metrics = json.loads((REPO_ROOT / "models/ER/metrics.json").read_text())
+
+    lim = build_limitations(entry, metrics)
+    assert lim.status == "experimental" and lim.is_experimental
+    assert lim.floors_recorded is True
+    # The single missed floor — present key, evaluated (the #24 hardening does NOT raise).
+    assert lim.missed_criteria == ["balanced accuracy 0.579 < 0.60 floor"]
+    assert "ER functional modulation" in lim.claim_scope  # verbatim scope, card-matching
+    # Provenance makes the partial record self-evident (auroc/auprc floors unrecorded).
+    assert lim.floors_provenance is not None
+    assert "not recoverable" in lim.floors_provenance
+    assert lim.prevalence == pytest.approx(73 / 959)  # (fn+tp)=73 over n_samples=959
+
+
+def test_partial_floor_record_does_not_raise_on_present_key() -> None:
+    # The real-ER partial record has ONE floor key (balanced_accuracy), present in
+    # metrics -> hardened missed_criteria evaluates it without raising.
+    metrics = json.loads((REPO_ROOT / "models" / "ER" / "metrics.json").read_text())
+    floors = metrics["validated_mvp_floors"]
+    ceilings = metrics["validated_mvp_ceilings"]
+    assert list(floors) == ["balanced_accuracy"]  # partial, single key
+    assert missed_criteria(metrics, floors, ceilings) == ["balanced accuracy 0.579 < 0.60 floor"]
