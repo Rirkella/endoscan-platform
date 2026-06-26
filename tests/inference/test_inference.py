@@ -24,12 +24,14 @@ from endoscan_core.inference import (
     explain,
     load_endpoint_model,
     load_feature_schema,
+    missed_criteria,
     predict,
     predict_batch,
     validate_signature,
 )
 from endoscan_core.inference.schema_validation import SignatureValidationError
 from endoscan_core.registry.schema import EndpointEntry
+from endoscan_core.training.evaluate_endpoint import ConfusionMatrix, EvalMetrics
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "inference"
@@ -232,3 +234,76 @@ def test_real_er_feature_schema_validates_a_correct_signature() -> None:
     assert vec.shape == (978,)
     with pytest.raises(SignatureValidationError, match="missing"):
         validate_signature({g: 0.1 for g in schema.features[:-1]}, schema)
+
+
+# --- status / limitations agreement: same keys + mirrored operators -------------------
+
+
+def _er_eval_metrics() -> EvalMetrics:
+    # The frozen real-ER committed values (models/ER/metrics.json).
+    return EvalMetrics(
+        auroc=0.7396951049816011,
+        auprc=0.25637241142364803,
+        balanced_accuracy=0.5788830823463929,
+        f1=0.25,
+        brier_score=0.070140394032221,
+        confusion_matrix=ConfusionMatrix(tn=868, fp=18, fn=60, tp=13),
+        n_samples=959,
+        threshold=0.5,
+    )
+
+
+def test_status_and_limitations_compare_identical_keys_and_operators(er_run) -> None:
+    """missed_floors (run.py) == missed_criteria (limitations.py) == the _status_for verdict.
+
+    A future metric-key rename can't make one detect a floor the other misses: every
+    floor/ceiling key must be BOTH an EvalMetrics attribute (run.py reads it via getattr)
+    AND a key emitted into metrics.json (limitations.py reads it via dict lookup).
+    """
+    floors = {"auroc": 0.65, "auprc": 0.15, "balanced_accuracy": 0.60}
+    ceilings = {"brier_score": 0.20}
+    m = _er_eval_metrics()
+    md = er_run._metrics_dict(
+        m,
+        959,
+        "random_forest",
+        {"mode": "nested", "outer_splits": 5, "inner_splits": 3},
+        validated_mvp_floors=floors,
+        validated_mvp_ceilings=ceilings,
+        claim_scope="ER functional modulation",
+    )
+
+    # (a) every floor/ceiling key resolves in BOTH namespaces — no silent divergence.
+    for key in (*floors, *ceilings):
+        assert hasattr(m, key), f"{key} is not an EvalMetrics attribute (run.py getattr)"
+        assert key in md, f"{key} is not emitted into metrics.json (limitations.py lookup)"
+
+    # (b) the two implementations produce the identical missed list.
+    assert er_run.missed_floors(m, floors, ceilings) == missed_criteria(md, floors, ceilings)
+
+    # (c) emptiness of that list agrees with the _status_for validated_mvp/experimental verdict.
+    status = er_run._status_for(m, floors, ceilings)
+    assert (missed_criteria(md, floors, ceilings) == []) == (status.value == "validated_mvp")
+
+    # Pinned to this frozen ER case: exactly one missed floor, status experimental.
+    assert missed_criteria(md, floors, ceilings) == ["balanced accuracy 0.579 < 0.60 floor"]
+    assert status.value == "experimental"
+
+
+def test_partial_floor_record_evaluates_without_raising() -> None:
+    # A small/partial floor record (one key, present in metrics) evaluates normally.
+    metrics = {"balanced_accuracy": 0.579, "brier_score": 0.07}
+    assert missed_criteria(metrics, {"balanced_accuracy": 0.60}, {}) == [
+        "balanced accuracy 0.579 < 0.60 floor"
+    ]
+    assert missed_criteria(metrics, {"balanced_accuracy": 0.50}, {}) == []
+    assert missed_criteria(metrics, {}, {"brier_score": 0.20}) == []  # ceiling met, no raise
+
+
+def test_floor_or_ceiling_naming_absent_metric_raises() -> None:
+    # An un-evaluable criterion (metric absent from metrics) RAISES — never silently skipped.
+    metrics = {"balanced_accuracy": 0.579}
+    with pytest.raises(ValueError, match="specificity"):
+        missed_criteria(metrics, {"specificity": 0.5}, {})
+    with pytest.raises(ValueError, match="ceiling"):
+        missed_criteria(metrics, {}, {"log_loss": 0.30})

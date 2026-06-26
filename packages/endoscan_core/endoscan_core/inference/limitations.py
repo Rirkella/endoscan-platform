@@ -50,18 +50,42 @@ class LimitationsBlock(BaseModel):
     disclaimer: str = DISCLAIMER
 
 
+def _require_metric(metrics: dict, name: str, kind: str) -> float:
+    """Fetch ``metrics[name]`` or RAISE — a floor/ceiling naming an absent metric is
+    un-evaluable, and silently skipping it would let inference under-report a criterion
+    the trainer's ``_status_for`` enforces (it reads the metric off the EvalMetrics
+    object and would compare it). A small/partial floor record is fine; this only fires
+    when a listed key has NO value in ``metrics``."""
+    value = metrics.get(name)
+    if value is None:
+        raise ValueError(
+            f"validated_mvp {kind} references metric '{name}', which has no value in "
+            f"metrics (un-evaluable {kind}; emit the metric into metrics.json or drop "
+            f"the threshold)"
+        )
+    return value
+
+
 def missed_criteria(
     metrics: dict, floors: dict[str, float], ceilings: dict[str, float]
 ) -> list[str]:
-    """Floors/ceilings the recorded metrics FAIL, value-vs-threshold (floor >=, ceiling <=)."""
+    """Floors/ceilings the recorded metrics FAIL, value-vs-threshold (floor >=, ceiling <=).
+
+    Mirrors the trainer's ``_status_for`` exactly: same metric keys, same operators
+    (floor ``<``, ceiling ``>``). Every floor/ceiling key MUST resolve to a value in
+    ``metrics``; a key whose metric is ABSENT raises (see :func:`_require_metric`) rather
+    than being silently skipped. This does NOT fire for a small/partial floor record —
+    e.g. ``{"balanced_accuracy": 0.60}`` evaluates normally as long as that one key is
+    present in ``metrics``.
+    """
     out: list[str] = []
     for name, thr in floors.items():
-        value = metrics.get(name)
-        if value is not None and value < thr:
+        value = _require_metric(metrics, name, "floor")
+        if value < thr:
             out.append(f"{name.replace('_', ' ')} {value:.3f} < {thr:.2f} floor")
     for name, thr in ceilings.items():
-        value = metrics.get(name)
-        if value is not None and value > thr:
+        value = _require_metric(metrics, name, "ceiling")
+        if value > thr:
             out.append(f"{name.replace('_', ' ')} {value:.3f} > {thr:.2f} ceiling")
     return out
 
