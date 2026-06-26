@@ -1,4 +1,4 @@
-# EndoScan — Implementation Issues (M0 → M4)
+# EndoScan — Implementation Issues (M0 → M9)
 
 > Clean-repository implementation plan. Execute **one issue at a time**, each as a single PR, reviewed and
 > merged before the next begins. Governing rules: [`../PROJECT_RULES.md`](../PROJECT_RULES.md).
@@ -161,6 +161,12 @@ tests/fixtures/datasets/                                  # small offline extrac
 
 ## Issue 4 — M3: ER endpoint built through the toolchain (human-in-the-loop)
 
+> **Status — completed; ER registered as `experimental` (NOT `validated_mvp`).** The honest
+> nested estimate gave balanced accuracy 0.579 < the 0.60 floor, so the gate correctly
+> yielded `experimental`. That is the expected, honest outcome and the reference endpoint
+> the rest of the roadmap builds on — it must NOT be re-described as validated. The
+> `validated_mvp`/`experimental` wording below describes the gate *logic*, not a claim.
+
 **1. Title** · `M3 — ER endpoint built end-to-end through the toolchain (human-in-the-loop)`
 
 **2. Goal** · Produce the first real registered endpoint — Estrogen Receptor (ER) — entirely via the M2 toolchain plus a **gated** training step, proving the agentic data-construction path works end to end.
@@ -237,3 +243,215 @@ tests/inference/   tests/explain/   tests/reporting/
 **9. Labels** · `M4` · `inference` · `explainability` · `reporting` · `core`
 
 **10. Dependencies** · Issues 1, 2, 3 (needs a registered ER model). Issue 4 strongly recommended complete.
+
+---
+
+## Roadmap to MVP (M5 → M9)
+
+> **MVP definition.** EndoScan's MVP must demonstrate **BOTH**: **(1)** a registered endpoint
+> used for inference + explainability (done for ER in M4); **AND (2)** the agent-assisted
+> build pipeline reproducing the endpoint-construction workflow over deterministic, tested
+> tools — with gates, provenance, cards, and **HUMAN APPROVAL**. The differentiator is
+> **reproducible endpoint-building**, not a UI over one classifier.
+>
+> M0–M4 are complete (history above); ER is registered as `experimental`. **M5–M9 below are
+> proposed, not yet implemented.** The same rules apply to each: one issue = one branch =
+> one PR; stop after each for review; never weaken or bypass the gate (PROJECT_RULES §3.3),
+> never fabricate (§6.1), never claim regulatory-grade validation.
+
+---
+
+## Issue 6 — M5: Builder Agent orchestrator + approval gate
+
+**1. Title** · `M5 — Builder Agent orchestrator + approval gate`
+
+**2. Goal** · An orchestrator (e.g. `agent/builder_agent.py`) that, given a **build recipe** for an endpoint, **SEQUENCES the existing tested M2 tools** — `source_selector` → `label_retriever` → `signature_retriever` → `compound_mapper` → `overlap_computer` → `candidate_table_builder` → `dataset_quality_report` (writes the dataset card) → `quality_gates` verdict — and records build status. It **REIMPLEMENTS ZERO SCIENCE**: it only calls tested `endoscan_core` tools. It **STOPS at the quality gate** and requires an explicit **HUMAN APPROVAL token** before any train/register; on approval it triggers the existing M3 `run_pipeline` (train/evaluate/card/register). It must **NEVER lower thresholds**, **NEVER register without metrics + dataset card + model card + limitations**, and must **preserve provenance / `source_refs`**.
+
+**3. Background / why this matters** · Agent-assisted endpoint expansion is the thesis (PROJECT_RULES §2): the science already exists as individually-tested M2 tools and the M3 gated pipeline, so M5 is **pure orchestration** — it adds no science, only a deterministic call-sequence plus the approval boundary. It re-expresses the §3.2/§3.3 hard boundary at the orchestration layer (no training before a `pass` verdict and a human approval). `agent/` is currently an empty placeholder.
+
+**4. Non-goals** · No new science; no threshold changes; no UI (M8); no API (M7); no forcing a validated endpoint; no second-endpoint data work (M6). (Source *discovery* stays out — PROJECT_RULES §3.1a is propose-only and unimplemented.)
+
+**5. Modules / files likely touched**
+```
+agent/{builder_agent.py,build_status.py,approval.py,recipes/<ENDPOINT>.yaml}   # new
+agent/prompts/.gitkeep                                                          # placeholder
+packages/endoscan_core/...        # imported AS-IS (no edits)
+pipelines/endpoints/ER/run.py     # run_pipeline imported AS-IS (no edits)
+tests/agent/                      # orchestration + boundary tests on fixtures
+```
+
+**6. Acceptance criteria**
+- Runs on **fixtures** in CI; a dry-run / candidate build for a recipe produces a build status + artifacts + dataset quality report + gate verdict.
+- The agent **STOPS awaiting approval** at the gate; both the **approval** and **rejection** paths are exercised.
+- No endpoint needs to validate in M5 — a candidate build that reaches the gate is sufficient.
+- Provenance / `source_refs` are carried through into any proposed registry entry.
+
+**7. Tests / checks** (the load-bearing ones)
+- The agent **CANNOT** proceed to train/register without an explicit **approval token** — *structural, not a default*: a test proves it **raises/blocks** when approval is absent.
+- It never writes a registry entry missing **metrics / dataset card / model card / limitations**.
+- It never proceeds on a **FAILED** gate verdict.
+- Thresholds are read from `registry/data/quality_gates.yaml` and are **never mutated** by the agent.
+
+**8. Must-not-change** · `endoscan_core` science; the quality gate; the frozen ER model/status/artifacts; M4's limitations guarantees.
+
+**9. Checkpoint / review criteria before merge** · Zero science reimplemented (agent only sequences tested tools); the gate→approval boundary is **structural** (blocks without a token); approval **and** rejection paths tested; CI green on fixtures.
+
+**10. Labels** · `M5` · `agent` · `orchestration` · `gate` · `human-in-the-loop`
+
+**11. Dependencies** · Issues 1–5 (M2 tools + gate, M3 pipeline, M1 registry, M4 limitations).
+
+---
+
+## Issue 7 — M6: Prove the thesis — agent builds a SECOND endpoint candidate
+
+**1. Title** · `M6 — Prove the thesis: agent builds a SECOND endpoint candidate`
+
+**2. Goal** · Run the **M5 orchestrator** on a second candidate (e.g. **AR via CoMPARA**, or another feasible CERAPP-style target — **candidate TBD, decided at milestone start**). The point is **reproducing the BUILD WORKFLOW with minimal manual work**, NOT forcing a validated endpoint. If the data supports it → train/register **at the status the gate yields** (`experimental` or `validated_mvp`). If the data fails the gate → mark **`failed_qc`** with a clear dataset card + gate report. **BOTH outcomes are acceptable and successful** if honest and reproducible. State explicitly: **a documented `failed_qc` is a VALID, valuable outcome** — it proves the gate works on new data — and must not create pressure to lower any bar.
+
+**3. Background / why this matters** · This is the actual demonstration of the differentiator — reproducible endpoint-building over a *new* target through the agent, not by hand. CERAPP/CoMPARA-style sources are already in the allow-list family; the one real data run uses the **staged adapter** (no live CI downloads), consistent with M3.
+
+**4. Non-goals** · No threshold lowering to force a pass; no manual science outside the tools; no API/frontend changes; no retraining ER.
+
+**5. Modules / files likely touched**
+```
+agent/recipes/<ENDPOINT>.yaml                 # the second-endpoint build recipe
+models/<ENDPOINT>/                            # registered artifacts IF it clears the gate (DVC-tracked)
+registry/models/endpoints.json                # second-endpoint entry (experimental | validated_mvp | failed_qc)
+registry/data/dataset_cards/<ENDPOINT>.md     # dataset card (written either way)
+tests/agent/                                  # second-endpoint build + outcome tests
+# agent (M5) and endoscan_core used AS-IS
+```
+
+**6. Acceptance criteria**
+- A second candidate is produced **primarily through the agentic pipeline** (not by hand).
+- A **dataset quality report + gate verdict** exist; **human approval** is recorded.
+- If registered, it appears in the endpoint library with **NO API/frontend code changes**.
+- If rejected, the **`failed_qc`** path is documented (dataset card + gate report) and tested.
+
+**7. Tests / checks** · The build runs through the agent; the register path (valid entry; cards + limitations present) **or** the `failed_qc` path (status `failed_qc`; dataset card + gate report written) is tested; ER artifacts/status unchanged; thresholds unchanged.
+
+**8. Must-not-change** · ER (model/status/artifacts); the gate thresholds; the agent's M5 guarantees.
+
+**9. Checkpoint / review criteria before merge** · The build ran through the agent (not by hand); the outcome (register **or** `failed_qc`) is honest, gated, and reproducible; provenance/cards present; no bar was lowered to manufacture a pass.
+
+**10. Labels** · `M6` · `endpoint-2` · `agentic-build` · `thesis` · `data-quality`
+
+**11. Dependencies** · Issue 6 (M5). M2 tools, M3 pipeline, M1 registry.
+
+---
+
+## Issue 8 — M7: Thin FastAPI service
+
+**1. Title** · `M7 — Thin FastAPI service`
+
+**2. Goal** · Serve inference/explainability for registered endpoints (`GET /endpoints`, `POST /predict`, `POST /explain`) **and** minimal **builder-admin** routes (launch build, check build status, view dataset quality report / gate verdict, approve/reject). **Thin**: NO science/business logic outside `endoscan_core` + the M5 agent.
+
+**3. Background / why this matters** · The API must stay thin (PROJECT_RULES §2): it wraps the M4 inference package and the M5 agent. The approve/reject routes **expose** the gate; they do not bypass it. This is the first network surface over the two MVP halves.
+
+**4. Non-goals** · No UI (M8); no auth/accounts; no hosting; no model logic; no second-endpoint work.
+
+**5. Modules / files likely touched**
+```
+services/api/{app.py,routers/inference.py,routers/builder.py,models.py,errors.py}   # new
+tests/api/                                                                            # route tests on fixtures
+# endoscan_core.inference + agent imported AS-IS
+```
+
+**6. Acceptance criteria**
+- `curl` → prediction + explanation + **limitations** works on **FIXTURE_ER**.
+- Build **launch / status / approve / reject** works on fixtures.
+- DVC/model-unavailable errors are clean **4xx/5xx** (M4's `ModelArtifactUnavailableError` mapped, not a crash).
+- **Limitations on EVERY** predict/explain response. No retrain / endpoint change.
+
+**7. Tests / checks** · Route tests on fixtures (predict/explain carry limitations; `/endpoints` lists the library); builder-admin launch/status/approve/reject; an approve test proving approval is **routed through the agent's gate**; an approve test proving the approve route **CANNOT trigger training on a build whose gate verdict is FAILED** — human approval is necessary but NOT sufficient; a passing gate remains required (PROJECT_RULES §3.3). The API exposes approve/reject but cannot override a failed gate. An error-mapping test (model-unavailable → clean 4xx/5xx, not a 500 traceback).
+
+**8. Must-not-change** · `endoscan_core`; the frozen ER endpoint; M4 limitations guarantees; the agent's approval boundary (the API exposes approve/reject, it does **NOT** bypass the gate).
+
+**9. Checkpoint / review criteria before merge** · Routes are thin (no science in the API layer); limitations on every response; approval routed through the gate and **CANNOT override a failed verdict** — a human can approve a PASSING build to proceed, never approve past a gate failure; CI green on fixtures.
+
+**10. Labels** · `M7` · `api` · `fastapi` · `serving` · `thin`
+
+**11. Dependencies** · Issues 5 (M4 inference), 6 (M5 agent), 1 (M1 registry).
+
+---
+
+## Issue 9 — M8: Frontend (demo UI)
+
+**1. Title** · `M8 — Frontend (demo UI)`
+
+**2. Goal** · A user flow (paste/upload signature → prediction dashboard → explanation → limitations → report) **and** an internal **builder dashboard** (build status, dataset quality report, gate verdict, approve/reject). **Demo UI, not production.**
+
+**3. Background / why this matters** · The demo surface that makes both MVP halves tangible. It consumes the M7 API only; the endpoint library is data-driven, so a registered M6 endpoint appears with no frontend change. Limitations are a first-class, non-hideable UI element (no-overclaiming, §5).
+
+**4. Non-goals** · No auth; no hosting; no production hardening; no science; no model logic.
+
+**5. Modules / files likely touched**
+```
+apps/web/   # Vite/React/Tailwind/TS: result view, limitations panel, builder dashboard,
+            # API client, bundled example signature
+apps/web/tests/   # component/e2e (demo) checks
+```
+
+**6. Acceptance criteria**
+- Browser demo works for **ER**.
+- A second endpoint from M6 (if registered) appears **AUTOMATICALLY** from the endpoint library (no frontend code change).
+- The builder dashboard works on a fixture/demo build.
+- **Limitations VISIBLE and not hideable**; the builder dashboard shows the gate verdict / `failed_qc` **honestly**; no regulatory/diagnostic claims; **scope-of-claim shown verbatim**.
+
+**7. Tests / checks** · Component/e2e (demo): result view renders limitations + verbatim scope; builder dashboard renders the gate verdict including `failed_qc`; the endpoint library list is API-driven; a smoke/e2e run against a demo build.
+
+**8. Must-not-change** · The M7 API contract; `endoscan_core`; the frozen ER endpoint.
+
+**9. Checkpoint / review criteria before merge** · Limitations prominent + accurate; ER works end-to-end; the builder dashboard shows gate results honestly (incl. `failed_qc`); no science in the frontend.
+
+**10. Labels** · `M8` · `frontend` · `demo-ui` · `react`
+
+**11. Dependencies** · Issue 8 (M7). M6 (if a second endpoint exists).
+
+---
+
+## Issue 10 — M9: Report engine + docs + MVP packaging
+
+**1. Title** · `M9 — Report engine + docs + MVP packaging`
+
+**2. Goal** · A shareable **report** (prediction, score, top genes, limitations, provenance, endpoint status, model/dataset card links); **README + architecture diagram + demo walkthrough + example data + one-command local run**; portfolio/demo-ready.
+
+**3. Background / why this matters** · Packages the MVP for a fresh-clone demo of both halves (inference on ER + an agentic build), reusing existing reporting. Framing is honest and up front: experimental pre-screening, **not** regulatory-grade (§5).
+
+**4. Non-goals** · No cloud hosting / CI-CD / production Docker (a simple local run is fine); no second-endpoint science; no new model logic.
+
+**5. Modules / files likely touched**
+```
+packages/endoscan_core/endoscan_core/reporting/   # report generator (reuse docx/pdf skills)
+README.md   docs/walkthrough.md   docs/architecture.*   examples/   scripts/run_demo.*
+tests/reporting/                                  # report-completeness checks
+```
+
+**6. Acceptance criteria**
+- A fresh clone runs the demo locally with **one documented command**.
+- A user runs ER inference and sees/downloads a **report**.
+- The builder demo can **launch / monitor / approve** a candidate build.
+- Docs state clearly: **experimental pre-screening, NOT regulatory-grade**; cards + limitations linked and consistent.
+
+**7. Tests / checks** · Report-generator test (all sections present: prediction, top genes, **limitations**, provenance, endpoint status, card links); a docs/CI check that the one-command demo path is exercised on fixtures; a link/consistency check across cards + limitations.
+
+**8. Must-not-change** · Everything upstream (core, frozen ER, the M7 API contract, the agent's guarantees).
+
+**9. Checkpoint / review criteria before merge** · Fresh-clone one-command demo works; the report is honest + complete; the framing is experimental and up front.
+
+**10. Labels** · `M9` · `reporting` · `docs` · `packaging` · `mvp`
+
+**11. Dependencies** · Issues 8 (M7), 9 (M8). M4 reporting/limitations.
+
+---
+
+## Deferred beyond MVP (must NOT block the MVP)
+
+Explicitly out of scope for the MVP; none of these may gate or delay M5–M9:
+- More endpoints beyond the second candidate.
+- Pathway / GO enrichment over the SHAP gene set.
+- DEDuCT / similar-compound contextualization.
+- Lasso / linear interpretability comparison (the `AttributionMethod` interface was left open in M4 for exactly this).
+- Batch prediction + batch reporting.
+- Production deployment / hosting + CI-CD.
+- Regulatory-grade validation / larger-N endpoints to reach `validated_mvp`.
