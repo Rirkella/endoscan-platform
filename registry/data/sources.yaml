@@ -69,6 +69,35 @@ sources:
     version: "2020"
     targets:
       - AR
+    locators:
+      # CRITICAL (same rule as CERAPP/ER): use CoMPARA's EXPERIMENTAL/MEASURED AR
+      # activity calls (the measured training/evaluation sets), NOT the CoMPARA
+      # consensus-MODEL predictions applied to the large chemical library. Training on
+      # predicted labels would make EndoScan mimic a structure-based QSAR model and
+      # violate the transcriptomics-first thesis.
+      #
+      # CONFIDENCE: the paper DOI below is a CONFIRMED authoritative reference; the
+      # EPA gAFTP and figshare HOSTS are confirmed to exist, but the EXACT CoMPARA
+      # experimental-set path/article is NOT yet verified — flagged for human
+      # confirmation (do not assume the subdir/article id without checking).
+      - name: compara_paper_doi
+        url: https://doi.org/10.1289/EHP5580
+        note: >-
+          CONFIRMED reference — Mansouri et al. 2020, Environ Health Perspect (CoMPARA,
+          androgen receptor). Source of record for the EXPERIMENTAL AR activity
+          training/evaluation sets; resolve the measured-set file from here.
+      - name: compara_epa_gaftp_mirror
+        url: https://gaftp.epa.gov/COMPTOX/Sustainable_Chemistry_Data/
+        note: >-
+          NEEDS HUMAN CONFIRMATION — EPA bulk mirror root (confirmed to exist; CERAPP's
+          analog is the CERAPP_QSAR_Models subdir). Locate the CoMPARA EXPERIMENTAL set
+          (measured calls, NOT consensus predictions); exact subdir not yet verified.
+      - name: compara_epa_figshare
+        url: https://epa.figshare.com/
+        note: >-
+          NEEDS HUMAN CONFIRMATION — EPA figshare host (confirmed to exist; CERAPP used
+          articles 6062563/6062554). Find the CoMPARA EXPERIMENTAL androgen-activity
+          training+evaluation dataset; exact article id not yet verified — do not assume.
 
   - id: lincs
     name: LINCS L1000
