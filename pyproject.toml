@@ -47,6 +47,8 @@ known-first-party = ["endoscan_core"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages"]
 addopts = "-q"
+# Repo root on the path so the top-level `agent` package (not an installed dist) imports.
+pythonpath = ["."]
 
 # --- Types (minimal, NON-blocking; CI does not gate on mypy) -----------------
 [tool.mypy]

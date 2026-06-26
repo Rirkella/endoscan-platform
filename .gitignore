@@ -51,3 +51,6 @@ node_modules/
 # patterns above (M1/M2 commit dummy .pkl and data fixtures under here).
 !tests/fixtures/
 !tests/fixtures/**
+
+# Builder-agent build workspaces (scratch; auditable but not committed)
+/.builds/
