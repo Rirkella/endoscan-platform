@@ -26,5 +26,13 @@
       "gradient_boosting"
     ]
   },
+  "validated_mvp_floors": {
+    "balanced_accuracy": 0.6
+  },
+  "validated_mvp_ceilings": {
+    "brier_score": 0.2
+  },
+  "claim_scope": "ER functional modulation (agonist or antagonist transactivation; direction not distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
+  "floors_provenance": "partial: balanced_accuracy floor (0.60) and brier ceiling (0.20) recovered from the committed card; auroc/auprc floors used at training were not persisted and are not recoverable from any committed artifact",
   "estimate": "honest (nested-outer or held-out); not resubstitution/inner-CV"
 }

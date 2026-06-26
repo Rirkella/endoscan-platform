@@ -8,7 +8,10 @@ a future card rewording cannot change inference behaviour:
 - ``missed_criteria`` <- recomputed from ``metrics.json`` metric VALUES vs the run's
   ``validated_mvp_floors``/``validated_mvp_ceilings`` (also in ``metrics.json``), using
   the SAME comparison the trainer's status decision makes (floor ``>=``, ceiling ``<=``);
-- ``claim_scope``   <- the structured ``metrics.json["claim_scope"]`` field.
+- ``claim_scope``   <- the structured ``metrics.json["claim_scope"]`` field;
+- ``floors_provenance`` <- the optional ``metrics.json["floors_provenance"]`` field — a
+  note explaining a PARTIAL floor record (some floors recovered, others not persisted)
+  so an incomplete set never reads as "all floors met" and no threshold is fabricated.
 
 If a legacy ``metrics.json`` predates these structured fields, the block degrades
 honestly: status + prevalence still resolve; ``floors_recorded`` is ``False`` and
@@ -43,6 +46,7 @@ class LimitationsBlock(BaseModel):
     is_experimental: bool
     missed_criteria: list[str]
     floors_recorded: bool
+    floors_provenance: str | None = None
     positives: int | None
     n_total: int | None
     prevalence: float | None
@@ -98,6 +102,11 @@ def build_limitations(entry: EndpointEntry, metrics: dict) -> LimitationsBlock:
     ceilings = metrics.get("validated_mvp_ceilings") or {}
     floors_recorded = isinstance(floors, dict)
     missed = missed_criteria(metrics, floors, ceilings) if floors_recorded else []
+    # A PARTIAL floor record (e.g. only balanced_accuracy recovered, the rest not
+    # persisted) is honest, not fabricated: missed_criteria evaluates the keys that ARE
+    # present, and floors_provenance documents WHY the record is partial so the block
+    # never implies "all floors met" from an incomplete set.
+    floors_provenance = metrics.get("floors_provenance")
 
     cm = metrics.get("confusion_matrix") or {}
     positives = (int(cm["fn"]) + int(cm["tp"])) if {"fn", "tp"} <= set(cm) else None
@@ -112,6 +121,7 @@ def build_limitations(entry: EndpointEntry, metrics: dict) -> LimitationsBlock:
         is_experimental=(status == "experimental"),
         missed_criteria=missed,
         floors_recorded=floors_recorded,
+        floors_provenance=floors_provenance,
         positives=positives,
         n_total=n_total,
         prevalence=prevalence,
