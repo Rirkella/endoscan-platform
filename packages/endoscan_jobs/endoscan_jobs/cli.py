@@ -42,8 +42,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
-    except SystemExit:
-        return EXIT_USAGE
+    except SystemExit as exc:
+        # argparse exits 0 for --help/-h (success); non-zero for a parse error (usage).
+        return 0 if exc.code in (0, None) else EXIT_USAGE
 
     if args.command == "list":
         print("available jobs:", ", ".join(sorted(JOBS)))
