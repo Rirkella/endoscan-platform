@@ -1,0 +1,45 @@
+# TEST-ONLY ER pipeline config for the agent FAIL path: identical to
+# tests/fixtures/training/er_pipeline.test.yaml EXCEPT the gate points at the strict
+# production thresholds (registry/data/quality_gates.yaml), which the small staged
+# fixture cannot clear -> a deterministic gated_fail. Used to exercise the agent's
+# FAIL -> no-register path offline.
+
+endpoint_id: ER
+biological_target: Estrogen Receptor
+version: "0.1.0"
+
+data:
+  target: ER
+  adapter: staged
+  staged_dir: tests/fixtures/training/staged/er
+  n_groups: 5
+  seed: 0
+
+gate:
+  thresholds_path: registry/data/quality_gates.yaml
+
+approval:
+  approved: false
+  approved_by: ""
+  note: ""
+
+evaluation:
+  mode: nested
+  outer_splits: 5
+  inner_splits: 3
+  test_size: 0.25
+
+training:
+  models:
+    - ridge_logreg
+    - lasso_logreg
+    - elastic_net_logreg
+    - random_forest
+    - gradient_boosting
+  selection_tolerance: 0.02
+  validated_mvp_floors:
+    auroc: 0.75
+    auprc: 0.50
+    balanced_accuracy: 0.65
+  validated_mvp_ceilings:
+    brier_score: 0.20
