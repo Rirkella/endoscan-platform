@@ -1,0 +1,62 @@
+# EndoScan heavy-job runner — SELF-HOSTED (designed, NOT yet wired).
+#
+# INERT until a self-hosted runner with the `endoscan` label is registered (the
+# server-wiring follow-up). It builds the job image and runs a named job inside the
+# container against the persistent data disk, then uploads logs/reports/artifacts so
+# Claude Code can inspect failures via the GitHub API WITHOUT the operator.
+#
+# It is manual-only (`workflow_dispatch`) and runs on `[self-hosted, endoscan]`, so it
+# never executes on GitHub-hosted CI and cannot run until the runner exists.
+name: jobs
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Job name (e.g. coverage)"
+        required: true
+        default: "coverage"
+      target:
+        description: "Target/endpoint id (e.g. AR)"
+        required: true
+        default: "AR"
+
+concurrency:
+  group: endoscan-jobs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  run-job:
+    # Requires a registered self-hosted runner labelled `endoscan` (server-wiring step).
+    runs-on: [self-hosted, endoscan]
+    env:
+      # Persistent artifact disk on the VM (bind-mounted into the container at /data).
+      ENDOSCAN_DATA_ROOT: ${{ vars.ENDOSCAN_DATA_ROOT || '/var/lib/endoscan' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build job image
+        run: docker build -t endoscan-jobs:ci .
+
+      - name: Run job in container
+        run: |
+          mkdir -p "$ENDOSCAN_DATA_ROOT"
+          docker run --rm \
+            -v "$ENDOSCAN_DATA_ROOT":/data \
+            -e ENDOSCAN_DATA_ROOT=/data \
+            endoscan-jobs:ci run "${{ inputs.job }}" "${{ inputs.target }}" --data-root /data
+
+      - name: Collect logs + reports for inspection
+        if: always()
+        run: |
+          mkdir -p _artifacts
+          cp -r "$ENDOSCAN_DATA_ROOT/logs" _artifacts/ 2>/dev/null || true
+          cp -r "$ENDOSCAN_DATA_ROOT/reports" _artifacts/ 2>/dev/null || true
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: endoscan-${{ inputs.job }}-${{ inputs.target }}
+          path: _artifacts/
+          if-no-files-found: ignore

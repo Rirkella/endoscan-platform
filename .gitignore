@@ -54,3 +54,6 @@ node_modules/
 
 # Builder-agent build workspaces (scratch; auditable but not committed)
 /.builds/
+
+# Job-runner local storage root (LocalStorage default; persistent disk on the server)
+/.endoscan-data/
