@@ -1,0 +1,31 @@
+# EndoScan job runner — containerized heavy-job entrypoint.
+#
+# A thin, framework-light package that runs named jobs (coverage diagnostics now;
+# the M5 build job later) inside the Docker runtime, writing structured logs +
+# artifacts through the Storage interface. It imports endoscan_core for all science;
+# rdkit/requests/openpyxl live HERE (never in endoscan_core, which stays lean).
+
+[project]
+name = "endoscan-jobs"
+version = "0.0.0"
+description = "EndoScan containerized job runner (coverage diagnostics; later the build job)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "endoscan-core",
+    "pydantic>=2.6",
+    "pandas>=2.1",
+    "requests>=2.31",
+    "openpyxl>=3.1",
+    "rdkit>=2024.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["endoscan_jobs"]
+
+[tool.uv.sources]
+endoscan-core = { workspace = true }

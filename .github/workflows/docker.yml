@@ -1,0 +1,32 @@
+# Docker build smoke — proves the heavy-job image builds from the frozen lock and the
+# `endoscan_jobs` entrypoint works. GitHub-hosted (no self-hosted runner needed); does
+# NOT run heavy jobs or touch the network beyond the build. Separate from ci.yml so the
+# main lint/test gate stays fast.
+name: docker
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "packages/**"
+      - ".github/workflows/docker.yml"
+  push:
+    branches: [main]
+
+jobs:
+  build-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build job image
+        run: docker build -t endoscan-jobs:smoke .
+
+      - name: Smoke the entrypoint (no heavy job, no network)
+        run: |
+          docker run --rm endoscan-jobs:smoke --help
+          docker run --rm endoscan-jobs:smoke list | tee /tmp/list.txt
+          grep -q "coverage" /tmp/list.txt
