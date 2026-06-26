@@ -38,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="coverage mode: binding|agonist|antagonist|functional_modulation|"
         "broad_any_activity (default functional_modulation = agonist∪antagonist)",
     )
+    run.add_argument(
+        "--contexts",
+        default=None,
+        help="coverage cell-line contexts: ';'-separated 'NAME:CELL1,CELL2' entries or bare "
+        "preset names (default presets include 'VCaP+A549 (mixed)')",
+    )
     run.add_argument("--force-table", default=None)
     run.add_argument("--force-call-col", default=None)
     run.add_argument("--force-struct-col", default=None)
@@ -70,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         "source_zip": args.source_zip,
         "lincs_dir": args.lincs_dir,
         "mode": args.mode,
+        "contexts": args.contexts,
         "force_table": args.force_table,
         "force_call_col": args.force_call_col,
         "force_struct_col": args.force_struct_col,
