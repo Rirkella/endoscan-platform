@@ -32,15 +32,51 @@ from ..runner import JobContext, JobError, JobOutcome
 
 DEFAULT_MODE = "functional_modulation"  # the MAIN endpoint: agonist ∪ antagonist
 
-# Candidate cell-line contexts (UPPERCASE LINCS cell_id). VCaP/LNCaP are androgen-
-# responsive; MCF7/A549 are what ER used; the broad set adds PC3.
+# Candidate cell-line contexts (UPPERCASE LINCS cell_id). VCaP is androgen-responsive;
+# MCF7/A549 are what ER used; the broad set adds PC3. (VCaP+LNCaP was dropped: LNCaP has
+# zero LINCS trt_cp signatures, so that preset was numerically identical to VCaP alone.)
 DEFAULT_PROBE_LINES = ["VCAP", "LNCAP", "MCF7", "A549", "PC3"]
 DEFAULT_CONTEXTS: dict[str, list[str]] = {
     "VCaP (androgen)": ["VCAP"],
-    "VCaP+LNCaP (androgen)": ["VCAP", "LNCAP"],
+    "VCaP+A549 (mixed)": ["VCAP", "A549"],
     "MCF7/A549 (ER-style)": ["MCF7", "A549"],
     "broad (VCaP+MCF7+A549+PC3)": ["VCAP", "MCF7", "A549", "PC3"],
 }
+
+
+def resolve_contexts(spec: str | None) -> dict[str, list[str]]:
+    """Resolve a ``--contexts`` spec into ``{name: [CELL, ...]}``.
+
+    ``None``/empty -> :data:`DEFAULT_CONTEXTS` (which already includes ``VCaP+A549``).
+    The spec is ``;``-separated entries; each entry is either an explicit context
+    ``NAME:CELL1,CELL2`` (cell ids upper-cased) or a bare ``NAME`` naming a preset
+    (a key of :data:`DEFAULT_CONTEXTS`). This is a config selector only — it changes
+    *which* cell-line contexts are scored, never any threshold or science logic.
+    """
+    if not spec or not spec.strip():
+        return {name: list(cells) for name, cells in DEFAULT_CONTEXTS.items()}
+    contexts: dict[str, list[str]] = {}
+    for raw_entry in spec.split(";"):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        if ":" in entry:
+            name, _, cells_str = entry.partition(":")
+            name = name.strip()
+            cells = [c.strip().upper() for c in cells_str.split(",") if c.strip()]
+            if not name or not cells:
+                raise ValueError(f"invalid --contexts entry {entry!r}; expected NAME:CELL1,CELL2")
+            contexts[name] = cells
+        elif entry in DEFAULT_CONTEXTS:
+            contexts[entry] = list(DEFAULT_CONTEXTS[entry])
+        else:
+            raise ValueError(
+                f"unknown context preset {entry!r}; known presets: {sorted(DEFAULT_CONTEXTS)}"
+            )
+    if not contexts:
+        return {name: list(cells) for name, cells in DEFAULT_CONTEXTS.items()}
+    return contexts
+
 
 # CoMPARA EXPERIMENTAL articles (figshare). Consensus predictions (10322012) excluded.
 COMPARA_EXPERIMENTAL_ARTICLES = [10321697, 10321994]
@@ -194,6 +230,19 @@ def coverage_job(ctx: JobContext) -> JobOutcome:
         if not labels:
             raise JobError("no clean AR labels derived from the measured table")
 
+    # The active cell-line contexts (runtime --contexts, else the defaults inc. VCaP+A549).
+    try:
+        contexts = resolve_contexts(ctx.options.get("contexts"))
+    except ValueError as exc:
+        raise JobError(str(exc)) from exc
+    # Probe every default line plus any cell named by the active contexts.
+    probe_lines = list(DEFAULT_PROBE_LINES)
+    for lines in contexts.values():
+        for cell in lines:
+            if cell not in probe_lines:
+                probe_lines.append(cell)
+    ctx.log("contexts", names=list(contexts), probe_lines=probe_lines)
+
     # 3) LINCS metadata -> per-line trt_cp profiled InChIKeys.
     sig, pert = _load_lincs(ctx)
     pert_to_ik: dict[str, str] = {}
@@ -204,16 +253,14 @@ def coverage_job(ctx: JobContext) -> JobOutcome:
     trt = sig[sig["pert_type"].astype(str) == "trt_cp"].copy()
     trt["_CELL"] = trt["cell_id"].astype(str).str.upper()
 
-    line_signature_counts = {
-        line: int((trt["_CELL"] == line).sum()) for line in DEFAULT_PROBE_LINES
-    }
+    line_signature_counts = {line: int((trt["_CELL"] == line).sum()) for line in probe_lines}
     line_to_ik: dict[str, set[str]] = {}
-    for line in DEFAULT_PROBE_LINES:
+    for line in probe_lines:
         pids = set(trt.loc[trt["_CELL"] == line, "pert_id"].astype(str))
         line_to_ik[line] = {pert_to_ik[p] for p in pids if p in pert_to_ik}
     context_inchikeys = {
         name: set().union(*(line_to_ik.get(line, set()) for line in lines)) if lines else set()
-        for name, lines in DEFAULT_CONTEXTS.items()
+        for name, lines in contexts.items()
     }
 
     # 4) Pure coverage math + verdict vs the gate floors (default mirrors quality_gates.yaml).
@@ -223,7 +270,7 @@ def coverage_job(ctx: JobContext) -> JobOutcome:
         labels=labels,
         n_conflicts=conflicts,
         context_inchikeys=context_inchikeys,
-        contexts=DEFAULT_CONTEXTS,
+        contexts=contexts,
         line_signature_counts=line_signature_counts,
         floors=floors,
         source_table=source_table,
