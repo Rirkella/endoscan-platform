@@ -18,9 +18,19 @@ import pandas as pd
 
 from endoscan_core.diagnostics import GateFloors, build_coverage_report
 
-from ..compara import extract_tables, select_measured_ar_call, to_binary
+from ..compara import (
+    MODES,
+    extract_sdf_records,
+    extract_tables,
+    is_sdf_archive,
+    labels_for_mode,
+    select_measured_ar_call,
+    to_binary,
+)
 from ..identity import collapse_one_label_per_structure, inchikey_from
 from ..runner import JobContext, JobError, JobOutcome
+
+DEFAULT_MODE = "functional_modulation"  # the MAIN endpoint: agonist ∪ antagonist
 
 # Candidate cell-line contexts (UPPERCASE LINCS cell_id). VCaP/LNCaP are androgen-
 # responsive; MCF7/A549 are what ER used; the broad set adds PC3.
@@ -124,42 +134,65 @@ def _load_lincs(ctx: JobContext) -> tuple[pd.DataFrame, pd.DataFrame]:
 def coverage_job(ctx: JobContext) -> JobOutcome:
     target = ctx.target
 
-    # 1) CoMPARA experimental archive -> measured AR table + call column.
+    # 1) CoMPARA experimental archive -> measured AR labels (SDF real format; table fallback).
     raw = _load_compara_bytes(ctx)
     ctx.storage.put_bytes(f"raw/{target}/compara.zip", raw)
-    tables = extract_tables(raw)
-    ctx.log("compara_tables", names=[n for n, _ in tables])
-    if not tables:
-        raise JobError("no tabular tables found in the CoMPARA archive")
-    selection, df = select_measured_ar_call(
-        tables,
-        force_table=ctx.options.get("force_table"),
-        force_call_col=ctx.options.get("force_call_col"),
-        force_struct_col=ctx.options.get("force_struct_col"),
-    )
-    ctx.log(
-        "compara_selected",
-        table=selection.table_name,
-        call=selection.call_col,
-        struct=selection.struct_inchi_col or selection.struct_smiles_col,
-        values=selection.value_distribution,
-    )
 
-    # 2) Identity: InChIKey per structure, collapse to one label, record conflicts.
-    pairs: list[tuple[str, int]] = []
-    for _, row in df.iterrows():
-        label = to_binary(row.get(selection.call_col))
-        if label is None:
-            continue
-        ik = inchikey_from(
-            row.get(selection.struct_inchi_col), row.get(selection.struct_smiles_col)
+    if is_sdf_archive(raw):
+        # Real CoMPARA format: SDFs with <Mode>Class measured labels. Default mode is the
+        # MAIN endpoint functional_modulation (agonist ∪ antagonist; binding EXCLUDED).
+        mode = ctx.options.get("mode") or DEFAULT_MODE
+        if mode not in MODES:
+            raise JobError(f"unknown mode {mode!r}; one of {MODES}")
+        records = extract_sdf_records(raw)
+        ctx.log(
+            "compara_sdf",
+            binding=len(records["binding"]),
+            agonist=len(records["agonist"]),
+            antagonist=len(records["antagonist"]),
         )
-        if ik:
-            pairs.append((ik, label))
-    labels, conflicts = collapse_one_label_per_structure(pairs)
-    ctx.log("labels", n=len(labels), conflicts=conflicts)
-    if not labels:
-        raise JobError("no clean AR labels derived from the measured table")
+        result = labels_for_mode(records, mode)
+        labels, conflicts = dict(result.labels), result.n_conflicts
+        source_table = ", ".join(result.source_sdfs)
+        source_call = mode + (" [DIAGNOSTIC-ONLY]" if result.diagnostic_only else "")
+        ctx.log(
+            "sdf_labels",
+            mode=mode,
+            diagnostic_only=result.diagnostic_only,
+            pos=result.n_positive,
+            neg=result.n_negative,
+            conflicts=conflicts,
+            sdfs=result.source_sdfs,
+        )
+        if not labels:
+            raise JobError(f"no clean AR labels for mode {mode!r}")
+    else:
+        # Legacy TABLE fallback (e.g. a CSV/XLSX archive).
+        tables = extract_tables(raw)
+        ctx.log("compara_tables", names=[n for n, _ in tables])
+        if not tables:
+            raise JobError("no SDF or tabular measured data found in the CoMPARA archive")
+        selection, df = select_measured_ar_call(
+            tables,
+            force_table=ctx.options.get("force_table"),
+            force_call_col=ctx.options.get("force_call_col"),
+            force_struct_col=ctx.options.get("force_struct_col"),
+        )
+        pairs: list[tuple[str, int]] = []
+        for _, row in df.iterrows():
+            label = to_binary(row.get(selection.call_col))
+            if label is None:
+                continue
+            ik = inchikey_from(
+                row.get(selection.struct_inchi_col), row.get(selection.struct_smiles_col)
+            )
+            if ik:
+                pairs.append((ik, label))
+        labels, conflicts = collapse_one_label_per_structure(pairs)
+        source_table, source_call = selection.table_name, selection.call_col
+        ctx.log("labels", n=len(labels), conflicts=conflicts)
+        if not labels:
+            raise JobError("no clean AR labels derived from the measured table")
 
     # 3) LINCS metadata -> per-line trt_cp profiled InChIKeys.
     sig, pert = _load_lincs(ctx)
@@ -193,8 +226,8 @@ def coverage_job(ctx: JobContext) -> JobOutcome:
         contexts=DEFAULT_CONTEXTS,
         line_signature_counts=line_signature_counts,
         floors=floors,
-        source_table=selection.table_name,
-        source_call_column=selection.call_col,
+        source_table=source_table,
+        source_call_column=source_call,
     )
 
     # 5) Persist report (json + human markdown) through Storage.

@@ -51,8 +51,9 @@ def test_coverage_failed_qc_exits_zero(tmp_path: Path) -> None:
 def test_report_records_measured_source_and_overlap(tmp_path: Path) -> None:
     _run(tmp_path)
     report = json.loads((tmp_path / "reports" / "coverage" / "AR" / "testrun.json").read_text())
-    assert report["source_call_column"] == "AR_Binding"  # measured, not predicted
-    assert report["n_structures"] == 12
+    # Default mode is functional_modulation (agonist∪antagonist) over the real SDF format.
+    assert report["source_call_column"] == "functional_modulation"
+    assert report["n_structures"] == 7  # 4 functional positives + 3 negatives
     # Overlap is computed per context; the broad context sees the most lines.
     broad = next(c for c in report["contexts"] if c["name"].startswith("broad"))
     assert broad["overlap"] >= 1 and broad["overlap"] >= broad["positives"]

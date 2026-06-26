@@ -32,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--run-id", default=None, help="explicit run id (else generated)")
     run.add_argument("--source-zip", default=None, help="local CoMPARA Data.zip (offline)")
     run.add_argument("--lincs-dir", default=None, help="dir with sig_info/pert_info (offline)")
+    run.add_argument(
+        "--mode",
+        default=None,
+        help="coverage mode: binding|agonist|antagonist|functional_modulation|"
+        "broad_any_activity (default functional_modulation = agonist∪antagonist)",
+    )
     run.add_argument("--force-table", default=None)
     run.add_argument("--force-call-col", default=None)
     run.add_argument("--force-struct-col", default=None)
@@ -63,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     options = {
         "source_zip": args.source_zip,
         "lincs_dir": args.lincs_dir,
+        "mode": args.mode,
         "force_table": args.force_table,
         "force_call_col": args.force_call_col,
         "force_struct_col": args.force_struct_col,
