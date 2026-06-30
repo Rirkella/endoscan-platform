@@ -18,6 +18,8 @@ dependencies = [
     "requests>=2.31",
     "openpyxl>=3.1",
     "rdkit>=2024.3",
+    # the LINCS gctx slicer (extract_signatures job) reads HDF5 via h5py (NumPy-2 safe).
+    "h5py>=3.11",
 ]
 
 [build-system]

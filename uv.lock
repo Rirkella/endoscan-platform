@@ -910,6 +910,7 @@ version = "0.0.0"
 source = { editable = "packages/endoscan_jobs" }
 dependencies = [
     { name = "endoscan-core" },
+    { name = "h5py" },
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "pydantic" },
@@ -920,6 +921,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "endoscan-core", editable = "packages/endoscan_core" },
+    { name = "h5py", specifier = ">=3.11" },
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "pydantic", specifier = ">=2.6" },
