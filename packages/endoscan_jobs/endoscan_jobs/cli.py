@@ -41,6 +41,19 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--force-table", default=None)
     run.add_argument("--force-call-col", default=None)
     run.add_argument("--force-struct-col", default=None)
+    # extract_signatures job: the LINCS gctx slice (server stages the real files; CI uses
+    # a synthetic gctx fixture). The cell-line set is parameterized (not hardcoded).
+    run.add_argument("--gctx-path", default=None, help="local LINCS Level-5 .gctx (server only)")
+    run.add_argument(
+        "--gene-info", default=None, help="LINCS gene_info.txt (else found under --lincs-dir)"
+    )
+    run.add_argument(
+        "--cell-lines",
+        default=None,
+        help="comma-separated cell lines for extraction (e.g. 'VCAP,A549'; default MCF7,A549)",
+    )
+    run.add_argument("--slice-batch", type=int, default=None, help="sig_ids per hyperslab read")
+    run.add_argument("--rdcc-bytes", type=int, default=None, help="HDF5 chunk-cache bound (bytes)")
     return parser
 
 
@@ -73,6 +86,11 @@ def main(argv: list[str] | None = None) -> int:
         "force_table": args.force_table,
         "force_call_col": args.force_call_col,
         "force_struct_col": args.force_struct_col,
+        "gctx_path": args.gctx_path,
+        "gene_info": args.gene_info,
+        "cell_lines": args.cell_lines,
+        "slice_batch": args.slice_batch,
+        "rdcc_bytes": args.rdcc_bytes,
     }
     result = run_job(args.job, args.target, storage=storage, run_id=args.run_id, options=options)
     print(f"status={result.status} exit={result.exit_code} verdict={result.verdict}")
