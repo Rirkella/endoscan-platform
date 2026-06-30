@@ -1,0 +1,14 @@
+# BuildRecipe for the AR functional_modulation (VCaP) build through the M5 Builder Agent.
+#
+# The agent loads this, runs the dataset toolchain + gate into a workspace, and STOPS at
+# awaiting_approval (gate PASS) or failed_qc (gate FAIL) — training/registration happen
+# only through the guarded promote() after explicit human approval. A BuildRecipe forbids
+# extra keys, so it cannot smuggle a (lowered) threshold; floors come ONLY from the
+# referenced config + registry/data/quality_gates.yaml.
+#
+# pipeline_runner_path reuses the GENERIC ER runner (run_pipeline is target-agnostic; the
+# agent never edits it). pipeline_config_path is the committed AR fixture config (CI). For
+# the server build, point this at a filled real config derived from config.real.example.yaml.
+name: ar_functional_modulation
+pipeline_runner_path: pipelines/endpoints/ER/run.py
+pipeline_config_path: pipelines/endpoints/AR/config.yaml

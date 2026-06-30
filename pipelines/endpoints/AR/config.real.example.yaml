@@ -1,0 +1,72 @@
+# AR endpoint pipeline config — REAL run TEMPLATE (server build). Copy this, point it at
+# the staged extracts, and set approved: true ONLY after a human reviews the gate verdict
+# + dataset card. Run by the M5 Builder Agent on the server (start_build -> review ->
+# approve -> promote); NOT in CI, NOT a change to thresholds or the frozen ER model.
+#
+# Stage the three files under data/staged/ar/ (the StagedSourceAdapter resolves each
+# source by `<staged_dir>/<source.id>.{parquet|csv}`):
+#
+#   lincs.parquet   signatures (source id `lincs`). This IS the curated AR signatures
+#                   matrix from the extract_signatures job — fused, InChIKey compound_id,
+#                   978 landmark gene columns, the SAME fused contract ER uses. The job
+#                   writes curated/AR/signatures.parquet; RENAME/stage it as lincs.parquet
+#                   here because the signatures source id is `lincs` (we reuse the broad
+#                   LINCS source rather than minting an AR-specific signatures source).
+#                   For VCaP-only, extract with --cell-lines VCAP.
+#   compara.csv     labels (source id `compara`). The MEASURED functional_modulation calls
+#                   (agonist∪antagonist, binding EXCLUDED), in the consensus-table shape
+#                   label_retriever expects: casrn, inchikey, target=AR,
+#                   consensus_call ∈ {active, inactive}, consensus_score. The active/
+#                   inactive value is the MEASURED call — NEVER CoMPARA's consensus-MODEL
+#                   predictions (that would violate transcriptomics-first).
+#   pubchem.csv     mapping (source id `pubchem`). CASRN -> InChIKey for the AR compounds,
+#                   so the CASRN-keyed labels map onto the InChIKey-keyed signatures.
+
+endpoint_id: AR
+biological_target: Androgen Receptor
+version: "0.1.0"
+claim_scope: >-
+  AR functional modulation (agonist or antagonist transactivation; binding EXCLUDED;
+  direction not distinguished) in the androgen-responsive VCaP/LINCS context; not a
+  physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim
+recommended_use: >-
+  Research prioritization of androgen-receptor functional modulation from transcriptomic
+  signatures.
+not_recommended_use: Any regulatory, clinical, or diagnostic decision.
+
+data:
+  target: AR
+  adapter: staged                  # reads local Parquet/CSV extracts (no downloads)
+  staged_dir: data/staged/ar
+  n_groups: 10                     # compound groups for the split plan
+  seed: 0
+  required_label_sources: [compara]
+
+gate:
+  thresholds_path: registry/data/quality_gates.yaml   # the SAME strict thresholds
+
+approval:
+  approved: false                  # set true by a human AFTER reviewing the gate + card
+
+evaluation:
+  mode: nested                     # nested grouped CV (honest estimate); "holdout" if N large
+  outer_splits: 5
+  inner_splits: 3
+  test_size: 0.25
+
+training:
+  models:
+    - ridge_logreg
+    - lasso_logreg
+    - elastic_net_logreg
+    - random_forest
+    - gradient_boosting
+  selection_tolerance: 0.02
+  # IDENTICAL to ER — NOT lowered for AR. AUPRC floor 0.50 sits well above the AR
+  # prevalence baseline (~0.29 at 40/140); a miss yields `experimental`, not a lowered bar.
+  validated_mvp_floors:
+    auroc: 0.75
+    auprc: 0.50
+    balanced_accuracy: 0.65
+  validated_mvp_ceilings:
+    brier_score: 0.20
