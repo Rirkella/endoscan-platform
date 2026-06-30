@@ -46,7 +46,7 @@ from endoscan_core.datasets import (
     source_selector,
 )
 from endoscan_core.features import build_feature_schema
-from endoscan_core.registry import EndpointEntry, EndpointStatus, register_endpoint
+from endoscan_core.registry import EndpointEntry, EndpointStatus, register_or_update_endpoint
 from endoscan_core.registry.store import find_repo_root
 from endoscan_core.registry.templates import render_template
 from endoscan_core.training import (
@@ -649,7 +649,10 @@ def run_pipeline(
         created_at=datetime.now(UTC),
         source_refs=sources,
     )
-    register_endpoint(entry, repo_root=output_root)
+    # Re-registration path: overwrites an already-registered (non-frozen) endpoint in place
+    # so a re-promote needs no manual endpoints.json editing. Only reached after gate PASS +
+    # approval (the chokepoint is unchanged); a FROZEN endpoint (ER) is refused.
+    register_or_update_endpoint(entry, repo_root=output_root)
 
     return base.model_copy(
         update={

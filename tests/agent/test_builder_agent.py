@@ -87,6 +87,48 @@ def test_pass_then_approve_then_promote_registers(pass_recipe, builds_root, outp
     assert get_status(record.build_id, builds_root=builds_root).state is BuildState.registered
 
 
+def _approve_and_promote(recipe, builds_root, output_root):
+    record = start_build(recipe, repo_root=REPO_ROOT, builds_root=builds_root)
+    token = approve(record.build_id, "alice", builds_root=builds_root)
+    return promote(
+        record.build_id, token,
+        repo_root=REPO_ROOT, output_root=output_root, builds_root=builds_root,
+    )  # fmt: skip
+
+
+def test_repromote_overwrites_registered_endpoint_without_manual_edit(
+    pass_recipe, builds_root, output_root
+):
+    # A re-promote of an already-registered (non-frozen) endpoint overwrites it IN PLACE —
+    # no manual endpoints.json editing, no duplicate-id error (the bug this fixes).
+    _approve_and_promote(pass_recipe, builds_root, output_root)
+    first = get_endpoint("ER", repo_root=output_root)
+    assert first.updated_at is None  # first registration -> no re-register stamp
+
+    result = _approve_and_promote(pass_recipe, builds_root, output_root)  # SECOND promote
+    assert result.registered is True
+    again = get_endpoint("ER", repo_root=output_root)
+    assert again.updated_at is not None  # audit trail: re-registered
+    assert again.created_at == first.created_at  # original registration time preserved
+    assert len(_endpoints(output_root)) == 1  # overwritten, not duplicated
+
+
+def test_repromote_without_token_is_still_blocked(pass_recipe, builds_root, output_root):
+    # Re-registration is NOT a backdoor: a second promote WITHOUT a token is refused by the
+    # SAME chokepoint, and the already-registered entry is left untouched.
+    _approve_and_promote(pass_recipe, builds_root, output_root)
+    first = get_endpoint("ER", repo_root=output_root)
+
+    record2 = start_build(pass_recipe, repo_root=REPO_ROOT, builds_root=builds_root)
+    with pytest.raises(ApprovalRequiredError):
+        promote(
+            record2.build_id, None,
+            repo_root=REPO_ROOT, output_root=output_root, builds_root=builds_root,
+        )  # fmt: skip
+    after = get_endpoint("ER", repo_root=output_root)
+    assert after.updated_at is None and after.created_at == first.created_at  # untouched
+
+
 # --- THE chokepoint: necessary-but-not-sufficient -------------------------------------
 
 

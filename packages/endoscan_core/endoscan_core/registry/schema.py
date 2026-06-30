@@ -67,6 +67,12 @@ class EndpointEntry(BaseModel):
     status: EndpointStatus = EndpointStatus.candidate
     version: str
     created_at: datetime
+    #: Set when an entry is RE-REGISTERED (overwritten) so the audit trail shows it was
+    #: re-promoted rather than silently mutated; ``None`` until the first re-registration.
+    updated_at: datetime | None = None
+    #: A frozen endpoint is IMMUTABLE — ``register_or_update_endpoint`` refuses to overwrite
+    #: it (e.g. ER). Re-registration is for non-frozen endpoints only.
+    frozen: bool = False
     source_refs: list[str] = Field(default_factory=list)
 
     @field_validator("endpoint_id")

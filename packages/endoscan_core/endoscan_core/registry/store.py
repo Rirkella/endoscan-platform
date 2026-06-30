@@ -49,6 +49,10 @@ class EndpointNotFoundError(RegistryError):
     """Raised when an endpoint id is not present in the index."""
 
 
+class FrozenEndpointError(RegistryValidationError):
+    """Raised when re-registration is attempted on a FROZEN (immutable) endpoint (e.g. ER)."""
+
+
 def find_repo_root(start: Path | None = None) -> Path:
     """Locate the repository root by walking upward from ``start``.
 
@@ -120,6 +124,58 @@ def register_endpoint(entry: EndpointEntry, repo_root: Path | None = None) -> En
     index = _read_index(root)
     if any(existing.endpoint_id == entry.endpoint_id for existing in index.endpoints):
         raise RegistryValidationError(f"Endpoint {entry.endpoint_id!r} is already registered")
+    if entry.status is EndpointStatus.validated_mvp:
+        _require_artifacts_exist(entry, root)
+    index.endpoints.append(entry)
+    _write_index(root, index)
+    return entry
+
+
+def register_or_update_endpoint(
+    entry: EndpointEntry, repo_root: Path | None = None
+) -> EndpointEntry:
+    """Register a NEW endpoint, or RE-REGISTER (overwrite) an existing NON-FROZEN one.
+
+    A first registration behaves exactly like :func:`register_endpoint` (append + the
+    validated_mvp artifact gate). For an EXISTING id this overwrites the entry in place —
+    enforcing that every referenced artifact exists — while **preserving the original
+    ``created_at``** and stamping ``updated_at`` so the audit trail shows the entry was
+    re-registered, not silently mutated. A **FROZEN** entry (e.g. ER) is REFUSED with
+    :class:`FrozenEndpointError`; frozen endpoints stay immutable and ``frozen`` cannot be
+    flipped through this path.
+
+    This changes only the re-registration *mechanics*: it is NOT a bypass of the approval
+    gate. The single training/registration path (``run_pipeline``) reaches here ONLY after
+    the quality gate PASSES and a human approval is set, so a re-promote still requires gate
+    PASS + a valid approval token exactly as a first promote does.
+    """
+    root = repo_root or find_repo_root()
+    index = _read_index(root)
+    for position, existing in enumerate(index.endpoints):
+        if existing.endpoint_id == entry.endpoint_id:
+            if existing.frozen:
+                raise FrozenEndpointError(
+                    f"Endpoint {entry.endpoint_id!r} is frozen and cannot be overwritten; "
+                    "frozen endpoints are immutable (re-registration is for non-frozen "
+                    "endpoints only)."
+                )
+            missing = [rel for rel in entry.artifact_paths() if not (root / rel).is_file()]
+            if missing:
+                raise RegistryValidationError(
+                    f"Cannot re-register {entry.endpoint_id!r}: missing artifact path(s): "
+                    f"{', '.join(missing)}"
+                )
+            updated = entry.model_copy(
+                update={
+                    "created_at": existing.created_at,  # preserve the original registration
+                    "updated_at": entry.created_at,  # audit: when it was re-registered
+                    "frozen": existing.frozen,  # cannot flip frozen via re-registration
+                }
+            )
+            index.endpoints[position] = updated
+            _write_index(root, index)
+            return updated
+    # New id -> identical to register_endpoint (append + the validated_mvp gate).
     if entry.status is EndpointStatus.validated_mvp:
         _require_artifacts_exist(entry, root)
     index.endpoints.append(entry)
