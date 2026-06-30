@@ -127,6 +127,12 @@ class PipelineConfig(BaseModel):
     # Parameterized so it is not hardcoded to ER; a generic conservative default is used
     # when unset.
     claim_scope: str | None = None
+    # Model-card recommended / not-recommended use lines. Optional and endpoint-specific:
+    # when unset they fall back to the ER defaults below, so ER's rendered card is
+    # byte-identical, while a non-ER endpoint (e.g. AR) supplies its own wording instead of
+    # inheriting "estrogen-receptor" text.
+    recommended_use: str | None = None
+    not_recommended_use: str | None = None
     data: DataConfig
     gate: GateConfig
     approval: ApprovalConfig
@@ -217,6 +223,11 @@ _GENERIC_CLAIM_SCOPE = (
     "the configured endpoint only; NOT a pan-endocrine, regulatory, clinical, or "
     "diagnostic claim"
 )
+
+# Model-card use-line defaults. These are the ORIGINAL ER strings; an endpoint whose
+# config leaves the fields unset renders exactly these (ER's card stays byte-identical).
+_DEFAULT_RECOMMENDED_USE = "Research prioritization of estrogen-receptor activity from signatures."
+_DEFAULT_NOT_RECOMMENDED_USE = "Any regulatory, clinical, or diagnostic decision."
 
 
 def missed_floors(
@@ -360,10 +371,8 @@ def _render_model_card(
                 f"balanced_acc={metrics.balanced_accuracy:.3f}, F1={metrics.f1:.3f}, "
                 f"Brier={metrics.brier_score:.3f} (honest {evaluation_mode} estimate)"
             ),
-            "recommended_use": (
-                "Research prioritization of estrogen-receptor activity from signatures."
-            ),
-            "not_recommended_use": "Any regulatory, clinical, or diagnostic decision.",
+            "recommended_use": config.recommended_use or _DEFAULT_RECOMMENDED_USE,
+            "not_recommended_use": config.not_recommended_use or _DEFAULT_NOT_RECOMMENDED_USE,
             "limitations": build_limitations_section(
                 status=status,
                 metrics=metrics,

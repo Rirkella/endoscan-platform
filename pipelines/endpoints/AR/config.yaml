@@ -1,0 +1,67 @@
+# AR endpoint pipeline config — committed default (intentionally BLOCKED), mirroring
+# pipelines/endpoints/ER/config.yaml. Uses the fixture adapter + the STRICT real quality
+# gate + approved: false, so running it on the tiny fixture set is blocked (the fixture
+# cannot clear the strict gate and no human has approved). The real AR build runs on the
+# SERVER on staged data — see config.real.example.yaml.
+#
+# AR is a new TARGET through the existing gated machinery: the agent sequences the same
+# tested tools ER uses (source_selector -> label_retriever[compara] ->
+# signature_retriever[lincs] -> compound_mapper -> overlap_computer ->
+# candidate_table_builder -> dataset_quality_report -> quality_gates). NO science is added.
+#
+# functional_modulation (agonist∪antagonist, binding EXCLUDED) is realized by WHAT is
+# staged in compara.csv (the MEASURED calls), not by a config knob — there is no `mode`
+# field on PipelineConfig and none is added here.
+
+endpoint_id: AR
+biological_target: Androgen Receptor
+version: "0.1.0"
+claim_scope: >-
+  AR functional modulation (agonist or antagonist transactivation; binding EXCLUDED;
+  direction not distinguished) in the androgen-responsive VCaP/LINCS context; not a
+  physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim
+# AR-specific model-card wording (so the card does NOT inherit ER's "estrogen-receptor" text).
+recommended_use: >-
+  Research prioritization of androgen-receptor functional modulation from transcriptomic
+  signatures.
+not_recommended_use: Any regulatory, clinical, or diagnostic decision.
+
+data:
+  target: AR
+  adapter: fixture                 # "fixture" (CI) | "staged" (real server build)
+  fixtures_dir: tests/fixtures/datasets
+  n_groups: 2
+  seed: 0
+  required_label_sources: [compara]  # AR trains on CoMPARA measured functional_modulation
+
+gate:
+  thresholds_path: registry/data/quality_gates.yaml   # the SAME strict file ER uses
+
+approval:
+  approved: false                  # a human must explicitly approve (no AR-special path)
+  approved_by: ""
+  note: ""
+
+evaluation:
+  mode: nested                     # honest estimate: "nested" | "holdout"
+  outer_splits: 5
+  inner_splits: 3
+  test_size: 0.25
+
+training:
+  models:
+    - ridge_logreg
+    - lasso_logreg
+    - elastic_net_logreg
+    - random_forest
+    - gradient_boosting
+  selection_tolerance: 0.02
+  # IDENTICAL to ER — the SAME floors, NOT lowered for AR. With ~40 positives AR will
+  # most likely register `experimental` (missing these floors), exactly as ER did; the
+  # status logic is shared (run.py::_status_for), never AR-special-cased.
+  validated_mvp_floors:
+    auroc: 0.75
+    auprc: 0.50
+    balanced_accuracy: 0.65
+  validated_mvp_ceilings:
+    brier_score: 0.20
