@@ -19,6 +19,16 @@ FLOORS = {"auroc": 0.75, "auprc": 0.50, "balanced_accuracy": 0.60}
 CEILINGS = {"brier_score": 0.20}
 ER_SCOPE = "ER functional modulation (agonist or antagonist transactivation)"
 
+# When no bootstrap-CI / fold-evidence is supplied (legacy/point-only call), the
+# strengthened status rule reports these honest reasons (validated_mvp not attainable
+# without that evidence) IN ADDITION to any point floor/ceiling miss.
+NO_EVIDENCE_REASONS = [
+    "no sample-evidence summary (per-fold support not recorded); validated_mvp requires "
+    "recorded fold support",
+    "no CI evidence / no fold support — validation predates confidence-interval evidence; "
+    "validated_mvp requires a bootstrap CI",
+]
+
 
 def _metrics(*, auroc=0.740, auprc=0.256, bal=0.579, f1=0.250, brier=0.070) -> EvalMetrics:
     return EvalMetrics(
@@ -45,8 +55,12 @@ def test_missed_floors_mirrors_status_for_comparison(er_run: ModuleType) -> None
     assert "auprc 0.256 < 0.50 floor" in missed
     assert "balanced accuracy 0.579 < 0.60 floor" in missed
     assert "brier score 0.250 > 0.20 ceiling" in missed
-    # A met floor is NOT listed.
-    assert er_run.missed_floors(_metrics(auroc=0.99, auprc=0.99, bal=0.99), FLOORS, CEILINGS) == []
+    # A met floor is NOT listed; with no CI/fold evidence supplied, only the honest
+    # evidence reasons remain (validated_mvp still not attainable on a point estimate).
+    assert (
+        er_run.missed_floors(_metrics(auroc=0.99, auprc=0.99, bal=0.99), FLOORS, CEILINGS)
+        == NO_EVIDENCE_REASONS
+    )
 
 
 def test_experimental_limitations_are_parameterized_and_honest(er_run: ModuleType) -> None:

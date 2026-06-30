@@ -24,6 +24,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 from ..registry.schema import EndpointEntry
+from ..training.uncertainty import unmet_validated_mvp_reasons
 
 GENERIC_CLAIM_SCOPE = (
     "the configured endpoint only; NOT a pan-endocrine, regulatory, clinical, or "
@@ -54,44 +55,28 @@ class LimitationsBlock(BaseModel):
     disclaimer: str = DISCLAIMER
 
 
-def _require_metric(metrics: dict, name: str, kind: str) -> float:
-    """Fetch ``metrics[name]`` or RAISE — a floor/ceiling naming an absent metric is
-    un-evaluable, and silently skipping it would let inference under-report a criterion
-    the trainer's ``_status_for`` enforces (it reads the metric off the EvalMetrics
-    object and would compare it). A small/partial floor record is fine; this only fires
-    when a listed key has NO value in ``metrics``."""
-    value = metrics.get(name)
-    if value is None:
-        raise ValueError(
-            f"validated_mvp {kind} references metric '{name}', which has no value in "
-            f"metrics (un-evaluable {kind}; emit the metric into metrics.json or drop "
-            f"the threshold)"
-        )
-    return value
-
-
 def missed_criteria(
     metrics: dict, floors: dict[str, float], ceilings: dict[str, float]
 ) -> list[str]:
-    """Floors/ceilings the recorded metrics FAIL, value-vs-threshold (floor >=, ceiling <=).
+    """The reasons validated_mvp is NOT earned, recomputed from ``metrics.json``.
 
-    Mirrors the trainer's ``_status_for`` exactly: same metric keys, same operators
-    (floor ``<``, ceiling ``>``). Every floor/ceiling key MUST resolve to a value in
-    ``metrics``; a key whose metric is ABSENT raises (see :func:`_require_metric`) rather
-    than being silently skipped. This does NOT fire for a small/partial floor record —
-    e.g. ``{"balanced_accuracy": 0.60}`` evaluates normally as long as that one key is
-    present in ``metrics``.
+    Delegates to the SAME shared decision the trainer uses
+    (``endoscan_core.training.uncertainty.unmet_validated_mvp_reasons``), reading the
+    ``uncertainty`` and ``evidence`` blocks from ``metrics`` — so trainer status and served
+    limitations can never diverge (the strengthened PR #24 agreement invariant): the
+    min-evidence gate, the require-a-CI rule, and the CI-lower-bound floor / CI-upper-bound
+    ceiling checks (same floor/ceiling VALUES). A floor/ceiling naming a metric ABSENT from
+    ``metrics`` still raises rather than being silently skipped. A legacy ``metrics.json``
+    with no ``uncertainty``/``evidence`` blocks degrades honestly — it reports the missing
+    CI/fold evidence (validated_mvp not attainable without it), never fabricating a pass.
     """
-    out: list[str] = []
-    for name, thr in floors.items():
-        value = _require_metric(metrics, name, "floor")
-        if value < thr:
-            out.append(f"{name.replace('_', ' ')} {value:.3f} < {thr:.2f} floor")
-    for name, thr in ceilings.items():
-        value = _require_metric(metrics, name, "ceiling")
-        if value > thr:
-            out.append(f"{name.replace('_', ' ')} {value:.3f} > {thr:.2f} ceiling")
-    return out
+    return unmet_validated_mvp_reasons(
+        metrics,
+        floors,
+        ceilings,
+        uncertainty=metrics.get("uncertainty"),
+        evidence=metrics.get("evidence"),
+    )
 
 
 def build_limitations(entry: EndpointEntry, metrics: dict) -> LimitationsBlock:

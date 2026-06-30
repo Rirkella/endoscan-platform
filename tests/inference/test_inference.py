@@ -38,6 +38,17 @@ FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "inference"
 GENES = ["G1", "G2", "G3", "G4", "G5"]
 SIG = {"G1": 1.5, "G2": -0.5, "G3": 0.2, "G4": 0.0, "G5": -0.3}
 
+# A legacy metrics.json (e.g. the frozen ER record) carries no bootstrap-CI / fold
+# evidence, so the strengthened rule reports these honest reasons IN ADDITION to any
+# point floor/ceiling miss — validation predates CI evidence, so validated_mvp is
+# unattainable (the record stays experimental; nothing about it is fabricated).
+NO_EVIDENCE_REASONS = [
+    "no sample-evidence summary (per-fold support not recorded); validated_mvp requires "
+    "recorded fold support",
+    "no CI evidence / no fold support — validation predates confidence-interval evidence; "
+    "validated_mvp requires a bootstrap CI",
+]
+
 
 def _schema():
     return load_feature_schema(FIXTURE_ROOT / "models" / "FIXTURE_ER" / "feature_schema.json")
@@ -285,19 +296,26 @@ def test_status_and_limitations_compare_identical_keys_and_operators(er_run) -> 
     status = er_run._status_for(m, floors, ceilings)
     assert (missed_criteria(md, floors, ceilings) == []) == (status.value == "validated_mvp")
 
-    # Pinned to this frozen ER case: exactly one missed floor, status experimental.
-    assert missed_criteria(md, floors, ceilings) == ["balanced accuracy 0.579 < 0.60 floor"]
+    # Pinned to this frozen ER case (no CI/fold evidence in md): the honest evidence
+    # reasons + the one point floor miss, status experimental. Both surfaces AGREE.
+    assert missed_criteria(md, floors, ceilings) == [
+        *NO_EVIDENCE_REASONS,
+        "balanced accuracy 0.579 < 0.60 floor",
+    ]
     assert status.value == "experimental"
 
 
 def test_partial_floor_record_evaluates_without_raising() -> None:
-    # A small/partial floor record (one key, present in metrics) evaluates normally.
+    # A small/partial floor record (one key, present in metrics) evaluates normally; with no
+    # CI/fold evidence the honest evidence reasons accompany any point miss (and remain even
+    # when the point floor IS met — validated_mvp needs the evidence, not just the point).
     metrics = {"balanced_accuracy": 0.579, "brier_score": 0.07}
     assert missed_criteria(metrics, {"balanced_accuracy": 0.60}, {}) == [
-        "balanced accuracy 0.579 < 0.60 floor"
+        *NO_EVIDENCE_REASONS,
+        "balanced accuracy 0.579 < 0.60 floor",
     ]
-    assert missed_criteria(metrics, {"balanced_accuracy": 0.50}, {}) == []
-    assert missed_criteria(metrics, {}, {"brier_score": 0.20}) == []  # ceiling met, no raise
+    assert missed_criteria(metrics, {"balanced_accuracy": 0.50}, {}) == NO_EVIDENCE_REASONS
+    assert missed_criteria(metrics, {}, {"brier_score": 0.20}) == NO_EVIDENCE_REASONS  # no raise
 
 
 def test_floor_or_ceiling_naming_absent_metric_raises() -> None:
@@ -327,8 +345,10 @@ def test_real_er_partial_floor_record_reads_like_the_card() -> None:
     lim = build_limitations(entry, metrics)
     assert lim.status == "experimental" and lim.is_experimental
     assert lim.floors_recorded is True
-    # The single missed floor — present key, evaluated (the #24 hardening does NOT raise).
-    assert lim.missed_criteria == ["balanced accuracy 0.579 < 0.60 floor"]
+    # The honest evidence reasons (this frozen record predates CI evidence) + the single
+    # point floor miss — present key, evaluated (the #24 hardening does NOT raise). ER stays
+    # experimental; the strengthened rule makes the missing-CI fact explicit, not fabricated.
+    assert lim.missed_criteria == [*NO_EVIDENCE_REASONS, "balanced accuracy 0.579 < 0.60 floor"]
     assert "ER functional modulation" in lim.claim_scope  # verbatim scope, card-matching
     # Provenance makes the partial record self-evident (auroc/auprc floors unrecorded).
     assert lim.floors_provenance is not None
@@ -343,4 +363,7 @@ def test_partial_floor_record_does_not_raise_on_present_key() -> None:
     floors = metrics["validated_mvp_floors"]
     ceilings = metrics["validated_mvp_ceilings"]
     assert list(floors) == ["balanced_accuracy"]  # partial, single key
-    assert missed_criteria(metrics, floors, ceilings) == ["balanced accuracy 0.579 < 0.60 floor"]
+    assert missed_criteria(metrics, floors, ceilings) == [
+        *NO_EVIDENCE_REASONS,
+        "balanced accuracy 0.579 < 0.60 floor",
+    ]

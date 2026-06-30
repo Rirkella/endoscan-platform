@@ -27,6 +27,18 @@ from .train_endpoint import (
     model_tiers,
     train_endpoint,
 )
+from .uncertainty import (
+    BOOTSTRAP_RESAMPLES,
+    CI_LEVEL,
+    CI_METRICS,
+    MIN_POS_PER_FOLD,
+    MIN_POS_TOTAL,
+    build_uncertainty_block,
+    evidence_summary,
+    fold_metrics,
+    grouped_bootstrap_ci,
+    unmet_validated_mvp_reasons,
+)
 
 __all__ = [
     "ConfusionMatrix",
@@ -53,4 +65,14 @@ __all__ = [
     "HoldoutResult",
     "nested_group_cv",
     "holdout_group_eval",
+    "MIN_POS_TOTAL",
+    "MIN_POS_PER_FOLD",
+    "BOOTSTRAP_RESAMPLES",
+    "CI_LEVEL",
+    "CI_METRICS",
+    "grouped_bootstrap_ci",
+    "fold_metrics",
+    "evidence_summary",
+    "build_uncertainty_block",
+    "unmet_validated_mvp_reasons",
 ]
