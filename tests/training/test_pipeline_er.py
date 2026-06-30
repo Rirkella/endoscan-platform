@@ -96,9 +96,12 @@ def test_metrics_are_the_honest_nested_estimate(
     assert metrics["auroc"] < 0.75  # weak signal
 
 
-def test_permissive_floors_promote_to_validated_mvp(
+def test_underpowered_run_blocked_from_validated_mvp_by_min_evidence(
     er_run: ModuleType, allow_list: SourcesAllowList, tmp_output_root: Path
 ) -> None:
+    # Even with floors=0.0 (CI trivially clears them), the tiny staged fixture (~8 positives)
+    # cannot earn validated_mvp: the sample-aware min-evidence gate demotes it to
+    # experimental. This is the strengthened rule working — no lucky/underpowered badge.
     config = _config(
         er_run,
         approved=True,
@@ -112,12 +115,15 @@ def test_permissive_floors_promote_to_validated_mvp(
         thresholds=er_run.load_thresholds(RELAXED_GATES),
         output_root=tmp_output_root,
     )
-    assert result.status == "validated_mvp"
+    assert result.status == "experimental"
     entry = get_endpoint("ER", repo_root=tmp_output_root)
-    assert entry.status is EndpointStatus.validated_mvp
-    # validated_mvp registered => the registry artifact-existence gate passed.
+    assert entry.status is EndpointStatus.experimental
+    # It still REGISTERED (experimental registers too) — artifacts + the evidence blocks exist.
     for rel in (entry.model_path, entry.feature_schema_path, entry.metrics_path):
         assert (tmp_output_root / rel).is_file()
+    metrics = json.loads((tmp_output_root / entry.metrics_path).read_text())
+    assert metrics["evidence"]["n_positives_total"] < 30  # underpowered -> gate binds
+    assert "uncertainty" in metrics and "per_fold_metrics" in metrics
 
 
 def test_strict_gate_blocks_training(

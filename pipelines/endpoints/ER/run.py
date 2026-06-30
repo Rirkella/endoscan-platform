@@ -59,6 +59,7 @@ from endoscan_core.training import (
     score_candidates,
     select_model,
     selection_report,
+    unmet_validated_mvp_reasons,
 )
 from endoscan_core.training.train_endpoint import MODEL_NAMES
 
@@ -177,15 +178,34 @@ def make_adapter(config: PipelineConfig, data_dir: Path) -> SourceAdapter:
     raise ValueError(f"Unknown data.adapter {config.data.adapter!r}")
 
 
+def _metrics_point(metrics: EvalMetrics) -> dict[str, float]:
+    """The metric VALUES the floors/ceilings are checked against (EvalMetrics -> dict)."""
+    return {
+        "auroc": metrics.auroc,
+        "auprc": metrics.auprc,
+        "balanced_accuracy": metrics.balanced_accuracy,
+        "f1": metrics.f1,
+        "brier_score": metrics.brier_score,
+    }
+
+
 def _status_for(
-    metrics: EvalMetrics, floors: dict[str, float], ceilings: dict[str, float]
+    metrics: EvalMetrics,
+    floors: dict[str, float],
+    ceilings: dict[str, float],
+    *,
+    uncertainty: dict | None = None,
+    evidence: dict | None = None,
 ) -> EndpointStatus:
-    """validated_mvp iff every floor (>=) and ceiling (<=) is met, else experimental."""
-    meets_floors = all(getattr(metrics, name) >= value for name, value in floors.items())
-    meets_ceilings = all(getattr(metrics, name) <= value for name, value in ceilings.items())
-    if meets_floors and meets_ceilings:
-        return EndpointStatus.validated_mvp
-    return EndpointStatus.experimental
+    """validated_mvp iff the strengthened evidence rule is met, else experimental.
+
+    Delegates to the SINGLE shared decision (``unmet_validated_mvp_reasons``): the
+    min-evidence gate + CI-lower-bound floor check (same floor VALUES). Absent
+    uncertainty/evidence -> reasons non-empty -> experimental (graceful degrade)."""
+    reasons = unmet_validated_mvp_reasons(
+        _metrics_point(metrics), floors, ceilings, uncertainty=uncertainty, evidence=evidence
+    )
+    return EndpointStatus.validated_mvp if not reasons else EndpointStatus.experimental
 
 
 def _metrics_dict(
@@ -197,8 +217,11 @@ def _metrics_dict(
     validated_mvp_floors: dict[str, float],
     validated_mvp_ceilings: dict[str, float],
     claim_scope: str | None,
+    uncertainty: dict | None = None,
+    per_fold_metrics: list[dict] | None = None,
+    evidence: dict | None = None,
 ) -> dict:
-    return {
+    out = {
         "auroc": metrics.auroc,
         "auprc": metrics.auprc,
         "balanced_accuracy": metrics.balanced_accuracy,
@@ -217,6 +240,16 @@ def _metrics_dict(
         "claim_scope": claim_scope,
         "estimate": "honest (nested-outer or held-out); not resubstitution/inner-CV",
     }
+    # ADDED ALONGSIDE the pooled scalar metrics (existing keys above are unchanged): the
+    # bootstrap-CI / per-fold / sample-evidence blocks the strengthened status rule uses.
+    # The M4 inference layer reads these to evidence validated_mvp under uncertainty.
+    if uncertainty is not None:
+        out["uncertainty"] = uncertainty
+    if per_fold_metrics is not None:
+        out["per_fold_metrics"] = per_fold_metrics
+    if evidence is not None:
+        out["evidence"] = evidence
+    return out
 
 
 _GENERIC_CLAIM_SCOPE = (
@@ -231,23 +264,24 @@ _DEFAULT_NOT_RECOMMENDED_USE = "Any regulatory, clinical, or diagnostic decision
 
 
 def missed_floors(
-    metrics: EvalMetrics, floors: dict[str, float], ceilings: dict[str, float]
+    metrics: EvalMetrics,
+    floors: dict[str, float],
+    ceilings: dict[str, float],
+    *,
+    uncertainty: dict | None = None,
+    evidence: dict | None = None,
 ) -> list[str]:
-    """Floors/ceilings the honest estimate FAILS, phrased value-vs-threshold.
+    """The reasons validated_mvp is NOT earned, phrased honestly.
 
-    Uses the same comparison ``_status_for`` makes (floor: ``>=``; ceiling: ``<=``),
-    so the card's missed-metric list is accurate, never hardcoded.
+    Delegates to the SAME shared decision the M4 inference layer
+    (``inference.limitations.missed_criteria``) uses, so trainer status and served
+    limitations can never diverge (the strengthened PR #24 agreement invariant): the
+    min-evidence gate, the require-a-CI rule, and the CI-lower-bound floor / CI-upper-bound
+    ceiling checks (same floor VALUES).
     """
-    missed: list[str] = []
-    for name, value in floors.items():
-        observed = getattr(metrics, name)
-        if observed < value:
-            missed.append(f"{name.replace('_', ' ')} {observed:.3f} < {value:.2f} floor")
-    for name, value in ceilings.items():
-        observed = getattr(metrics, name)
-        if observed > value:
-            missed.append(f"{name.replace('_', ' ')} {observed:.3f} > {value:.2f} ceiling")
-    return missed
+    return unmet_validated_mvp_reasons(
+        _metrics_point(metrics), floors, ceilings, uncertainty=uncertainty, evidence=evidence
+    )
 
 
 def build_limitations_section(
@@ -260,6 +294,8 @@ def build_limitations_section(
     ceilings: dict[str, float],
     selected_model: str,
     claim_scope: str | None,
+    uncertainty: dict | None = None,
+    evidence: dict | None = None,
 ) -> str:
     """Build the parameterized, honest model-card Limitations block from real values."""
     per_class = report.per_class_compound_counts
@@ -270,7 +306,9 @@ def build_limitations_section(
 
     # STATUS line.
     if status == EndpointStatus.experimental:
-        missed = missed_floors(metrics, floors, ceilings)
+        missed = missed_floors(
+            metrics, floors, ceilings, uncertainty=uncertainty, evidence=evidence
+        )
         status_line = (
             "**Status — experimental:** a real-data methodology demonstration, NOT a "
             "validated predictor."
@@ -340,6 +378,9 @@ def _render_model_card(
     n_features: int,
     evaluation: dict,
     sources: list[str],
+    *,
+    uncertainty: dict | None = None,
+    evidence: dict | None = None,
 ) -> str:
     evaluation_mode = evaluation["mode"]
     per_fold = list(evaluation.get("per_fold_selected") or [])
@@ -382,6 +423,8 @@ def _render_model_card(
                 ceilings=config.training.validated_mvp_ceilings,
                 selected_model=selected_model,
                 claim_scope=config.claim_scope,
+                uncertainty=uncertainty,
+                evidence=evidence,
             ),
         },
     )
@@ -482,6 +525,7 @@ def run_pipeline(
             tolerance=tol,
         )
         honest = ho.metrics
+        uncertainty, per_fold_metrics, evidence = ho.uncertainty, ho.per_fold_metrics, ho.evidence
         evaluation = {
             "mode": "holdout",
             "test_size": config.evaluation.test_size,
@@ -500,6 +544,9 @@ def run_pipeline(
             tolerance=tol,
         )
         honest = nested.outer_metrics
+        uncertainty = nested.uncertainty
+        per_fold_metrics = nested.per_fold_metrics
+        evidence = nested.evidence
         evaluation = {
             "mode": "nested",
             "outer_splits": nested.outer_splits,
@@ -513,8 +560,14 @@ def run_pipeline(
     final_model = build_model(final_model_name, seed=seed)
     fit_balanced(final_model, X, y)  # final refit on all rows (balanced)
 
+    # Status under the STRENGTHENED rule: min-evidence gate + CI-lower-bound >= floor
+    # (same floor VALUES). Uncertainty/evidence come from the honest nested/holdout result.
     status = _status_for(
-        honest, config.training.validated_mvp_floors, config.training.validated_mvp_ceilings
+        honest,
+        config.training.validated_mvp_floors,
+        config.training.validated_mvp_ceilings,
+        uncertainty=uncertainty,
+        evidence=evidence,
     )
 
     # 3) Write artifacts. Binary model.pkl is DVC-tracked; the rest is git text.
@@ -538,6 +591,9 @@ def run_pipeline(
                 validated_mvp_floors=config.training.validated_mvp_floors,
                 validated_mvp_ceilings=config.training.validated_mvp_ceilings,
                 claim_scope=config.claim_scope,
+                uncertainty=uncertainty,
+                per_fold_metrics=per_fold_metrics,
+                evidence=evidence,
             ),
             indent=2,
         ),
@@ -572,6 +628,8 @@ def run_pipeline(
         len(table.feature_names),
         evaluation,
         sources,
+        uncertainty=uncertainty,
+        evidence=evidence,
     )
     (model_dir / "model_card.md").write_text(card, encoding="utf-8")
 
