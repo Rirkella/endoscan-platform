@@ -1,14 +1,14 @@
-sig_id	pert_id	pert_type	cell_id	pert_idose	pert_itime
-SIG_0001	BRD-K00000	trt_cp	VCAP	10 uM	24 h
-SIG_0002	BRD-K00000	trt_cp	MCF7	10 uM	24 h
-SIG_0003	BRD-K00000	trt_cp	A549	10 uM	24 h
-SIG_0004	BRD-K00001	trt_cp	VCAP	10 uM	24 h
-SIG_0005	BRD-K00001	trt_cp	LNCAP	10 uM	24 h
-SIG_0006	BRD-K00002	trt_cp	VCAP	10 uM	24 h
-SIG_0007	BRD-K00002	trt_cp	MCF7	10 uM	24 h
-SIG_0008	BRD-K00003	trt_cp	MCF7	10 uM	24 h
-SIG_0009	BRD-K00004	trt_cp	A549	10 uM	24 h
-SIG_0010	BRD-K00005	trt_cp	VCAP	10 uM	24 h
-SIG_0011	BRD-K00006	trt_cp	PC3	10 uM	24 h
-SIG_0012	BRD-K00007	trt_cp	PC3	10 uM	24 h
-SIG_CTRL	DMSO	ctl_vehicle	VCAP	-666	24 h
+sig_id	pert_id	pert_iname	pert_type	cell_id	pert_dose	pert_dose_unit	pert_idose	pert_time	pert_time_unit	pert_itime	distil_id
+SIG_0001	BRD-K00000	bisphenol_A	trt_cp	VCAP	10.0	µM	10 µM	24.0	h	24 h	VCAP_BRD-K00000:1
+SIG_0002	BRD-K00000	bisphenol_A	trt_cp	MCF7	10.0	µM	10 µM	24.0	h	24 h	MCF7_BRD-K00000:2
+SIG_0003	BRD-K00000	bisphenol_A	trt_cp	A549	10.0	µM	10 µM	24.0	h	24 h	A549_BRD-K00000:3
+SIG_0004	BRD-K00001	nonylphenol	trt_cp	VCAP	10.0	µM	10 µM	24.0	h	24 h	VCAP_BRD-K00001:4
+SIG_0005	BRD-K00001	nonylphenol	trt_cp	LNCAP	10.0	µM	10 µM	24.0	h	24 h	LNCAP_BRD-K00001:5
+SIG_0006	BRD-K00002	phenol	trt_cp	VCAP	10.0	µM	10 µM	24.0	h	24 h	VCAP_BRD-K00002:6
+SIG_0007	BRD-K00002	phenol	trt_cp	MCF7	10.0	µM	10 µM	24.0	h	24 h	MCF7_BRD-K00002:7
+SIG_0008	BRD-K00003	toluene	trt_cp	MCF7	10.0	µM	10 µM	24.0	h	24 h	MCF7_BRD-K00003:8
+SIG_0009	BRD-K00004	aniline	trt_cp	A549	10.0	µM	10 µM	24.0	h	24 h	A549_BRD-K00004:9
+SIG_0010	BRD-K00005	benzene	trt_cp	VCAP	10.0	µM	10 µM	24.0	h	24 h	VCAP_BRD-K00005:10
+SIG_0011	BRD-K00006	pyridine	trt_cp	PC3	10.0	µM	10 µM	24.0	h	24 h	PC3_BRD-K00006:11
+SIG_0012	BRD-K00007	ethanol	trt_cp	PC3	10.0	µM	10 µM	24.0	h	24 h	PC3_BRD-K00007:12
+SIG_CTRL	DMSO	DMSO	ctl_vehicle	VCAP	-666	-666	-666	24.0	h	24 h	VCAP_DMSO:ctrl
