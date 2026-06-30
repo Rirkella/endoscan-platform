@@ -54,6 +54,48 @@ def select_landmark_genes(
     )
 
 
+#: Dose/time column candidates, in resolution priority. The REAL GSE92742 sig_info carries
+#: BOTH a numeric column (``pert_dose`` e.g. 0.1, ``pert_time`` e.g. 24.0) AND a string
+#: quantity column (``pert_idose`` "10 µM", ``pert_itime`` "24 h"). Prefer the numeric one;
+#: parse the string quantity only as a fallback. (The old code renamed the STRING column onto
+#: ``pert_dose`` — colliding with the existing numeric ``pert_dose`` and producing a duplicate
+#: column, so ``row["pert_dose"]`` returned a 2-element Series and ``_distance`` raised the
+#: "truth value of a Series is ambiguous" error on real data.)
+_DOSE_NUMERIC, _DOSE_STRING = "pert_dose", "pert_idose"
+_TIME_NUMERIC, _TIME_STRING = "pert_time", "pert_itime"
+
+
+def _leading_number(series: pd.Series) -> pd.Series:
+    """Numeric prefix of a quantity string (``"10 µM"`` -> 10.0, ``"24 h"`` -> 24.0)."""
+    token = series.astype(str).str.extract(r"([-+]?\d*\.?\d+)", expand=False)
+    return pd.to_numeric(token, errors="coerce")
+
+
+def _resolve_numeric(
+    sig_info: pd.DataFrame, explicit: str | None, numeric_col: str, string_col: str, kind: str
+) -> pd.Series:
+    """One UNAMBIGUOUS numeric Series for dose/time — never a duplicate column.
+
+    Resolution: an explicit override column (numeric-coerced, parsed if it is a quantity
+    string) -> the real numeric column -> the string quantity column parsed to its leading
+    number. Matches the FROZEN ER staging behavior, where the operator fed the NUMERIC dose/
+    time column into the condition rule.
+    """
+    if explicit is not None:
+        if explicit not in sig_info.columns:
+            raise KeyError(f"{kind} column {explicit!r} not in sig_info ({list(sig_info.columns)})")
+        coerced = pd.to_numeric(sig_info[explicit], errors="coerce")
+        return coerced if not coerced.isna().all() else _leading_number(sig_info[explicit])
+    if numeric_col in sig_info.columns:
+        return pd.to_numeric(sig_info[numeric_col], errors="coerce")
+    if string_col in sig_info.columns:
+        return _leading_number(sig_info[string_col])
+    raise KeyError(
+        f"no {kind} column in sig_info (looked for {numeric_col!r} or {string_col!r}): "
+        f"{list(sig_info.columns)}"
+    )
+
+
 def assemble_sig_meta(
     sig_info: pd.DataFrame,
     pert_to_inchikey: dict[str, str],
@@ -63,31 +105,33 @@ def assemble_sig_meta(
     sig_id_col: str = "sig_id",
     pert_id_col: str = "pert_id",
     cell_id_col: str = "cell_id",
-    dose_col: str = "pert_idose",
-    time_col: str = "pert_itime",
+    dose_col: str | None = None,
+    time_col: str | None = None,
 ) -> pd.DataFrame:
     """Build the tidy ``sig_meta`` table the extraction consumes (the overlap sig_id list).
 
     Joins ``sig_info`` -> compound (perturbagen -> InChIKey via ``pert_to_inchikey``) and
     keeps only signatures of the requested ``cell_lines`` whose compound has an experimental
     label (``labelled_inchikeys``). Returns columns:
-    ``compound_key, sig_id, cell_id, pert_dose, pert_time``.
+    ``compound_key, sig_id, cell_id, pert_dose, pert_time`` where ``pert_dose``/``pert_time``
+    are SINGLE numeric columns (resolved via :func:`_resolve_numeric`, never duplicated).
+
+    ``dose_col``/``time_col`` default to ``None`` (auto-detect the numeric column, else the
+    parsed string quantity); pass an explicit column name to override.
     """
-    renamed = sig_info.rename(
-        columns={
-            sig_id_col: "sig_id",
-            pert_id_col: "perturbagen_id",
-            cell_id_col: "cell_id",
-            dose_col: "pert_dose",
-            time_col: "pert_time",
-        }
-    )
+    out = pd.DataFrame(index=sig_info.index)
+    out["sig_id"] = sig_info[sig_id_col].astype(str)
+    out["perturbagen_id"] = sig_info[pert_id_col].astype(str)
+    out["cell_id"] = sig_info[cell_id_col].astype(str).str.upper()
+    out["pert_dose"] = _resolve_numeric(sig_info, dose_col, _DOSE_NUMERIC, _DOSE_STRING, "dose")
+    out["pert_time"] = _resolve_numeric(sig_info, time_col, _TIME_NUMERIC, _TIME_STRING, "time")
+    out["compound_key"] = out["perturbagen_id"].map(pert_to_inchikey)
+
     cells = {str(c).upper() for c in cell_lines}
-    renamed["cell_id"] = renamed["cell_id"].astype(str).str.upper()
-    in_cells = renamed[renamed["cell_id"].isin(cells)].copy()
-    in_cells["compound_key"] = in_cells["perturbagen_id"].astype(str).map(pert_to_inchikey)
-    kept = in_cells[
-        in_cells["compound_key"].notna() & in_cells["compound_key"].isin(labelled_inchikeys)
+    kept = out[
+        out["cell_id"].isin(cells)
+        & out["compound_key"].notna()
+        & out["compound_key"].isin(labelled_inchikeys)
     ]
     columns = ["compound_key", "sig_id", "cell_id", "pert_dose", "pert_time"]
     return kept[columns].reset_index(drop=True)

@@ -136,7 +136,12 @@ def main() -> None:
         zf.writestr("Data/README.txt", "CoMPARA experimental AR data (fixture, real format).")
     print("wrote", zip_path)
 
-    # LINCS metadata keyed by the SAME InChIKeys.
+    # LINCS metadata keyed by the SAME InChIKeys. ``sig_info`` mirrors the REAL GSE92742
+    # 12-column schema, which carries BOTH a NUMERIC dose/time column (``pert_dose`` 10.0,
+    # ``pert_time`` 24.0) AND a STRING quantity column (``pert_idose`` "10 µM",
+    # ``pert_itime`` "24 h"). That coexistence is exactly what collided in the first real
+    # extraction (rename pert_idose->pert_dose duplicated the numeric pert_dose), so the
+    # fixture must reproduce it for CI to catch the regression.
     pert_rows, sig_rows, sig_n = [], [], 0
     for i, (name, cells) in enumerate(CELLS.items()):
         pert_id = f"BRD-K{i:05d}"
@@ -154,20 +159,32 @@ def main() -> None:
                 {
                     "sig_id": f"SIG_{sig_n:04d}",
                     "pert_id": pert_id,
+                    "pert_iname": name,
                     "pert_type": "trt_cp",
                     "cell_id": cell,
-                    "pert_idose": "10 uM",
-                    "pert_itime": "24 h",
+                    "pert_dose": "10.0",  # NUMERIC (the real file's preferred column)
+                    "pert_dose_unit": "µM",
+                    "pert_idose": "10 µM",  # STRING quantity (collides if renamed onto pert_dose)
+                    "pert_time": "24.0",  # NUMERIC
+                    "pert_time_unit": "h",
+                    "pert_itime": "24 h",  # STRING quantity
+                    "distil_id": f"{cell}_{pert_id}:{sig_n}",
                 }
             )
     sig_rows.append(
         {
             "sig_id": "SIG_CTRL",
             "pert_id": "DMSO",
+            "pert_iname": "DMSO",
             "pert_type": "ctl_vehicle",
             "cell_id": "VCAP",
+            "pert_dose": "-666",
+            "pert_dose_unit": "-666",
             "pert_idose": "-666",
+            "pert_time": "24.0",
+            "pert_time_unit": "h",
             "pert_itime": "24 h",
+            "distil_id": "VCAP_DMSO:ctrl",
         }
     )
     lincs = HERE / "lincs"
