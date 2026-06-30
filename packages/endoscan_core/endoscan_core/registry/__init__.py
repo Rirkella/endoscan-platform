@@ -12,6 +12,7 @@ No training, inference, data, or agent logic lives here.
 from .schema import EndpointEntry, EndpointIndex, EndpointStatus
 from .store import (
     EndpointNotFoundError,
+    FrozenEndpointError,
     RegistryError,
     RegistryValidationError,
     find_repo_root,
@@ -19,6 +20,7 @@ from .store import (
     list_endpoints,
     load_model,
     register_endpoint,
+    register_or_update_endpoint,
     update_status,
 )
 from .templates import load_template, render_template, template_placeholders
@@ -28,6 +30,7 @@ __all__ = [
     "EndpointIndex",
     "EndpointStatus",
     "EndpointNotFoundError",
+    "FrozenEndpointError",
     "RegistryError",
     "RegistryValidationError",
     "find_repo_root",
@@ -35,6 +38,7 @@ __all__ = [
     "list_endpoints",
     "load_model",
     "register_endpoint",
+    "register_or_update_endpoint",
     "update_status",
     "load_template",
     "render_template",
