@@ -9,9 +9,11 @@ and the core-exception -> HTTP handlers.
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from endoscan_core.inference import ModelArtifactUnavailableError
 from endoscan_core.registry import find_repo_root, list_endpoints
@@ -26,6 +28,34 @@ API_DESCRIPTION = (
     "Serves the committed ER/AR models. Predictions are EXPERIMENTAL pre-screening "
     "hypotheses, not regulatory/clinical/diagnostic outputs — see each result's limitations."
 )
+
+#: Env var holding a comma-separated EXPLICIT allow-list of frontend origins (deployment).
+CORS_ORIGINS_ENV = "ENDOSCAN_CORS_ORIGINS"
+#: Default when the env var is unset: the local Vite dev origins (5173 default, plus 5174/5175
+#: fallback ports). NEVER a wildcard — the safe, explicit list is the default.
+DEFAULT_CORS_ORIGINS = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:5174",
+    "http://localhost:5174",
+    "http://127.0.0.1:5175",
+    "http://localhost:5175",
+]
+
+
+def _cors_origins() -> list[str]:
+    """Allowed CORS origins: exactly ``ENDOSCAN_CORS_ORIGINS`` when set, else the localhost default.
+
+    Parsed by splitting on commas, stripping whitespace, and dropping empties. There is NO wildcard
+    fallback — a deployer who truly wants ``*`` must set it explicitly in the env var (not
+    recommended for a deployed API); the default and recommended path are explicit origins.
+    """
+    raw = os.environ.get(CORS_ORIGINS_ENV)
+    if raw is not None:
+        parsed = [o.strip() for o in raw.split(",") if o.strip()]
+        if parsed:
+            return parsed
+    return list(DEFAULT_CORS_ORIGINS)
 
 
 def _warm_models(repo_root: Path) -> list[str]:
@@ -49,6 +79,18 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.state.repo_root = root
     app.state.explain_available = importlib.util.find_spec("shap") is not None
     app.state.endpoints_loaded = _warm_models(root)
+    app.state.cors_origins = _cors_origins()
+
+    # CORS: explicit allow-list only (browser cross-origin fetch fix for the local demo /
+    # deployment). Minimal surface — the GET/POST routes + OPTIONS preflight, Content-Type only,
+    # no credentials (keeps the surface minimal and sidesteps the credentials+wildcard CORS rule).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=app.state.cors_origins,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type"],
+        allow_credentials=False,
+    )
 
     register_exception_handlers(app)
     app.include_router(health.router)

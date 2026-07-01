@@ -28,6 +28,20 @@ React + Vite + TypeScript + Tailwind. `node_modules` is gitignored; `package.jso
 
 No credentials and no network beyond the local API are required.
 
+> **CORS.** The dev server proxies `/api` same-origin, so CORS isn't needed for the proxied flow.
+> For a direct browser fetch to the API (or a deployed frontend on a different origin), the API
+> allows the local Vite origins (`http://127.0.0.1:5173`/`5174`/`5175` and their `localhost`
+> equivalents) **by default**. For deployment, set `ENDOSCAN_CORS_ORIGINS` (comma-separated) on the
+> API to the exact frontend origin(s), e.g.:
+>
+> ```bash
+> ENDOSCAN_CORS_ORIGINS="https://app.example.org" \
+>   uv run uvicorn endoscan_api.app:create_app --factory --port 8000
+> ```
+>
+> The allow-list is explicit; a wildcard `*` is **not recommended** for a deployed API (and is
+> never the default).
+
 ## Scripts
 
 - `npm run dev` — Vite dev server (with the `/api` proxy).
