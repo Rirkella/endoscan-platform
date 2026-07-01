@@ -31,18 +31,31 @@ class GeneAttribution(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     gene: str
+    #: Signed per-gene contribution to the positive class. NOTE: the field is named
+    #: ``shap_value`` for historical reasons, but its MEANING depends on the attribution
+    #: method (see ``ExplanationResult.method``): for ``tree_shap`` it is a TreeSHAP value;
+    #: for ``linear_coefficient`` it is ``coef_i * standardized_x_i`` — a coefficient×value
+    #: contribution, NOT a SHAP value.
     shap_value: float
-    direction: str  # "toward" (pushes toward ER-modulation) | "away"
+    direction: str  # "toward" (pushes toward modulation) | "away"
 
 
 class ExplanationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     endpoint_id: str
+    #: The attribution mechanism that produced ``top_contributors`` / ``shap_value``:
+    #: ``"tree_shap"`` (TreeSHAP, tree models) or ``"linear_coefficient"`` (coef×value, linear
+    #: models). Explicit so a consumer never mistakes a linear contribution for a SHAP value.
+    method: str
     base_value: float
     n_features: int
     top_contributors: list[GeneAttribution]
     limitations: LimitationsBlock  # REQUIRED — no explanation without it
+
+
+class UnsupportedModelForExplanationError(Exception):
+    """No implemented attributor supports this model type (neither tree nor linear coef_)."""
 
 
 @runtime_checkable
@@ -50,16 +63,36 @@ class AttributionMethod(Protocol):
     """Compute per-feature signed attributions (positive class) for an aligned input.
 
     Returns ``(values, base_value)`` where ``values`` has shape ``(n_signatures,
-    n_features)`` in the model's feature order and ``base_value`` is the explainer's
-    expected value for the positive class. A future ``CoefficientAttribution`` (signed
-    ``coef_ * feature`` for a linear endpoint) implements the same protocol.
+    n_features)`` in the model's feature order and ``base_value`` is the positive-class
+    baseline (SHAP expected value for trees; the model intercept for linear models).
+    ``attribution_type`` labels the mechanism ("tree_shap" | "linear_coefficient").
     """
+
+    attribution_type: str
 
     def attribute(self, model: Any, X: np.ndarray) -> tuple[np.ndarray, float]: ...
 
 
+def _final_estimator(model: Any) -> Any:
+    """The last pipeline step (the classifier), or the model itself if it is bare."""
+    if hasattr(model, "named_steps") and "clf" in model.named_steps:
+        return model.named_steps["clf"]
+    if hasattr(model, "steps"):
+        return model.steps[-1][1]
+    return model
+
+
+def _preprocessor_transform(model: Any, X: np.ndarray) -> np.ndarray:
+    """Apply all-but-last pipeline steps (e.g. StandardScaler); identity for a bare model."""
+    if hasattr(model, "steps"):
+        return np.asarray(model[:-1].transform(X))
+    return np.asarray(X)
+
+
 class TreeSHAPAttribution:
     """Exact TreeSHAP attributions for a tree model inside a scaler+clf pipeline."""
+
+    attribution_type = "tree_shap"
 
     def attribute(self, model: Any, X: np.ndarray) -> tuple[np.ndarray, float]:
         import shap  # lazy: only needed when explaining; not a core dependency
@@ -89,6 +122,49 @@ class TreeSHAPAttribution:
         return values, base
 
 
+class LinearCoefficientAttribution:
+    """Exact additive attribution for a LINEAR model inside a scaler+clf pipeline.
+
+    Each gene's contribution is ``coef_i * x_scaled_i`` over the SAME standardized features
+    the model consumes (the pipeline's StandardScaler output). This is the exact additive
+    decomposition of the model's logit: ``logit = intercept + Σ coef_i·x_i``. It is NOT a
+    SHAP value — the ``ExplanationResult.method`` label ("linear_coefficient") makes that
+    explicit. Applies to ``coef_``-bearing linear models (LogisticRegression / ridge_logreg,
+    RidgeClassifier, linear SVM). Multiclass ``coef_`` uses the positive class (row -1).
+    """
+
+    attribution_type = "linear_coefficient"
+
+    def attribute(self, model: Any, X: np.ndarray) -> tuple[np.ndarray, float]:
+        clf = _final_estimator(model)
+        x_scaled = _preprocessor_transform(model, X)  # the vector the linear model consumes
+        coef = np.asarray(clf.coef_)
+        # Binary LogisticRegression: coef_ is (1, n_features); use the positive-class row.
+        w = coef[-1] if coef.ndim == 2 else coef
+        contributions = x_scaled * w  # broadcast -> (n_signatures, n_features)
+        intercept = np.asarray(clf.intercept_).ravel()
+        base = float(intercept[-1] if intercept.size else 0.0)  # logit baseline
+        return contributions, base
+
+
+def select_attribution_method(model: Any) -> AttributionMethod:
+    """Pick an attributor by model type: linear (``coef_``) -> LinearCoefficient; tree -> TreeSHAP.
+
+    Raises ``UnsupportedModelForExplanationError`` for a model that fits neither (the caller
+    maps that to a clean 501). Linear is checked first: linear models never have tree
+    attributes, and TreeSHAP cannot explain them.
+    """
+    clf = _final_estimator(model)
+    if hasattr(clf, "coef_"):
+        return LinearCoefficientAttribution()
+    if hasattr(clf, "estimators_") or hasattr(clf, "tree_"):
+        return TreeSHAPAttribution()
+    raise UnsupportedModelForExplanationError(
+        f"no implemented attributor for model type {type(clf).__name__!r} "
+        "(supported: tree ensembles via TreeSHAP; linear coef_ models via LinearCoefficient)"
+    )
+
+
 def explain(
     endpoint_id: str,
     signature,
@@ -100,14 +176,17 @@ def explain(
 ) -> ExplanationResult | list[ExplanationResult]:
     """Explain a prediction: top-N signed gene contributors + the limitations block.
 
-    Returns one ``ExplanationResult`` for a single signature or a list for a batch.
+    The attributor is auto-selected by model type (tree -> TreeSHAP, linear -> coefficient)
+    unless one is passed explicitly. Returns one ``ExplanationResult`` for a single signature
+    or a list for a batch. Read-only: loads the registered model, never fits it.
     """
     root, entry, schema, metrics = _resolve(endpoint_id, repo_root)
     X, is_single = align_signature(signature, schema, allow_extra=allow_extra)
     model = load_endpoint_model(endpoint_id, repo_root=root)
 
-    method = method or TreeSHAPAttribution()
+    method = method or select_attribution_method(model)
     values, base = method.attribute(model, X)
+    method_label = getattr(method, "attribution_type", "unknown")
     limitations = build_limitations(entry, metrics)
     features = list(schema.features)
 
@@ -125,6 +204,7 @@ def explain(
         results.append(
             ExplanationResult(
                 endpoint_id=entry.endpoint_id,
+                method=method_label,
                 base_value=base,
                 n_features=len(features),
                 top_contributors=contributors,
