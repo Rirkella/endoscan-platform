@@ -1,0 +1,90 @@
+{
+  "endpoint_id": "AR",
+  "biological_target": "Androgen Receptor",
+  "input_type": "transcriptomics",
+  "version": "0.1.0",
+  "status": "experimental",
+  "frozen": false,
+  "source_refs": [
+    "compara",
+    "lincs",
+    "pubchem"
+  ],
+  "variants": [
+    {
+      "variant_id": "AR",
+      "context": {
+        "cell_lines": null,
+        "label_sources": [
+          "compara",
+          "lincs",
+          "pubchem"
+        ],
+        "scope": "AR functional modulation (agonist or antagonist transactivation; binding EXCLUDED; direction not distinguished) in the androgen-responsive VCaP/LINCS context; not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim"
+      },
+      "status": "experimental",
+      "limitations": {
+        "endpoint_id": "AR",
+        "status": "experimental",
+        "is_experimental": true,
+        "missed_criteria": [
+          "auroc 95% CI lower bound 0.678 < 0.75 floor",
+          "auprc 95% CI lower bound 0.420 < 0.50 floor",
+          "balanced accuracy 95% CI lower bound 0.642 < 0.65 floor",
+          "brier score 95% CI upper bound 0.243 > 0.20 ceiling"
+        ],
+        "floors_recorded": true,
+        "floors_provenance": null,
+        "positives": 37,
+        "n_total": 131,
+        "prevalence": 0.2824427480916031,
+        "claim_scope": "AR functional modulation (agonist or antagonist transactivation; binding EXCLUDED; direction not distinguished) in the androgen-responsive VCaP/LINCS context; not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
+        "disclaimer": "Pre-screening / prioritization only; metrics are the honest compound-level cross-validated estimate, NOT regulatory-grade validation, and must be confirmed experimentally."
+      },
+      "metrics_summary": {
+        "auroc": 0.7679700977573318,
+        "auprc": 0.5236700289645189,
+        "balanced_accuracy": 0.7310235767682576,
+        "brier_score": 0.19119142211995774,
+        "uncertainty": {
+          "method": "grouped_bootstrap_oof",
+          "ci_level": 0.95,
+          "n_resamples_requested": 2000,
+          "seed": 0,
+          "note": "percentile bootstrap over compound-grouped resamples of the pooled out-of-fold predictions; at small positive counts the interval is wide and itself imprecise \u2014 a guard against lucky-split point estimates, not a precise interval.",
+          "auroc": {
+            "point": 0.7679700977573318,
+            "lo": 0.6781675596155824,
+            "hi": 0.8594711153850509,
+            "n_resamples": 2000
+          },
+          "auprc": {
+            "point": 0.5236700289645189,
+            "lo": 0.42045359285011785,
+            "hi": 0.6947781524284974,
+            "n_resamples": 2000
+          },
+          "balanced_accuracy": {
+            "point": 0.7310235767682576,
+            "lo": 0.6415576867189771,
+            "hi": 0.8212534751875049,
+            "n_resamples": 2000
+          },
+          "brier_score": {
+            "point": 0.19119142211995774,
+            "lo": 0.14003807924184913,
+            "hi": 0.2431488088433133,
+            "n_resamples": 2000
+          }
+        },
+        "evidence": {
+          "n_positives_total": 37,
+          "n_negatives_total": 94,
+          "min_positives_per_fold": 7,
+          "n_outer_folds": 5
+        }
+      },
+      "model_card_markdown": "# Model Card \u2014 AR\n\n> EndoScan is a **pre-screening / prioritization** tool, **not** a regulatory,\n> clinical, or diagnostic instrument. See *Limitations & Disclaimer* below.\n\n## Endpoint\n- **Endpoint ID:** AR\n- **Biological target:** Androgen Receptor\n- **Input type:** transcriptomics (transcriptomic signature \u2192 endocrine risk)\n- **Version:** 0.1.0\n- **Status:** experimental\n\n## Data\n- **Sources:** compara, lincs, pubchem\n- **Compounds (total / per class):** overlap=131, compounds_per_class={0: 94, 1: 37}\n- **Transcriptomic features:** 978 landmark genes\n- **Train/test split:** compound-level (no leakage)\n\n## Model\n- **Model type:** ridge_logreg\n- **Training summary:** compound-level nested evaluation; model chosen by a simplicity-aware scorecard over 5 sklearn models\n\n## Metrics\nAUROC=0.768, AUPRC=0.524, balanced_acc=0.731, F1=0.613, Brier=0.191 (honest nested estimate)\n\n## Recommended use\nResearch prioritization of androgen-receptor functional modulation from transcriptomic signatures.\n\n## NOT recommended / out of scope\nAny regulatory, clinical, or diagnostic decision.\n\n## Limitations & Disclaimer\n**Status \u2014 experimental:** a real-data methodology demonstration, NOT a validated predictor. Unmet validated_mvp criteria: auroc 95% CI lower bound 0.678 < 0.75 floor; auprc 95% CI lower bound 0.420 < 0.50 floor; balanced accuracy 95% CI lower bound 0.642 < 0.65 floor; brier score 95% CI upper bound 0.243 > 0.20 ceiling.\n\n**Statistical power:** 37 positives / 131 compounds (prevalence 0.282). Only ~7 positives per held-out fold (n_pos / 5).\n\n**Model-selection stability:** selection was consistent across folds (ridge_logreg); chosen by the automated simplicity-aware scorecard.\n\n**Coverage:** built from the intersection of approved labels and transcriptomic signatures (compound-level); it is coverage-limited and NOT representative of the full chemical space.\n\n**Scope of claim:** AR functional modulation (agonist or antagonist transactivation; binding EXCLUDED; direction not distinguished) in the androgen-responsive VCaP/LINCS context; not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim.\n\nPre-screening / prioritization only; metrics are the honest compound-level cross-validated estimate, NOT regulatory-grade validation, and must be confirmed experimentally.\n\nThis model has **not** undergone regulatory-grade validation. Predictions are\nhypotheses for prioritization only and must be confirmed experimentally.\n"
+    }
+  ]
+}

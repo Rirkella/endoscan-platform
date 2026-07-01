@@ -1,0 +1,8 @@
+{
+  "status": "ok",
+  "endpoints_loaded": [
+    "ER",
+    "AR"
+  ],
+  "explain_available": true
+}

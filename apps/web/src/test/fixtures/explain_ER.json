@@ -1,0 +1,65 @@
+{
+  "endpoint_id": "ER",
+  "method": "tree_shap",
+  "base_value": 0.5004848800834204,
+  "n_features": 978,
+  "top_contributors": [
+    {
+      "gene": "PHGDH",
+      "shap_value": -0.012214101658810251,
+      "direction": "away"
+    },
+    {
+      "gene": "NUCB2",
+      "shap_value": -0.011972469297682614,
+      "direction": "away"
+    },
+    {
+      "gene": "BAMBI",
+      "shap_value": -0.010080915199227446,
+      "direction": "away"
+    },
+    {
+      "gene": "TSC22D3",
+      "shap_value": -0.00974755691615571,
+      "direction": "away"
+    },
+    {
+      "gene": "ECH1",
+      "shap_value": -0.008429663756680009,
+      "direction": "away"
+    },
+    {
+      "gene": "MOK",
+      "shap_value": -0.008347521925613331,
+      "direction": "away"
+    },
+    {
+      "gene": "PCK2",
+      "shap_value": -0.007500020002783031,
+      "direction": "away"
+    },
+    {
+      "gene": "MYBL2",
+      "shap_value": -0.007217706014488746,
+      "direction": "away"
+    }
+  ],
+  "limitations": {
+    "endpoint_id": "ER",
+    "status": "experimental",
+    "is_experimental": true,
+    "missed_criteria": [
+      "auroc 95% CI lower bound 0.675 < 0.75 floor",
+      "auprc 95% CI lower bound 0.194 < 0.50 floor",
+      "balanced accuracy 95% CI lower bound 0.537 < 0.65 floor"
+    ],
+    "floors_recorded": true,
+    "floors_provenance": null,
+    "positives": 73,
+    "n_total": 959,
+    "prevalence": 0.07612095933263817,
+    "claim_scope": "ER functional modulation (agonist or antagonist transactivation; direction not distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
+    "disclaimer": "Pre-screening / prioritization only; metrics are the honest compound-level cross-validated estimate, NOT regulatory-grade validation, and must be confirmed experimentally."
+  }
+}
