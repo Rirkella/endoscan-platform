@@ -6,7 +6,7 @@ import { StatusBadge } from "./StatusBadge";
 export function EndpointCard({ endpoint }: { endpoint: EndpointSummary }) {
   return (
     <Link
-      to={`/endpoints/${encodeURIComponent(endpoint.endpoint_id)}`}
+      to={`/library/${encodeURIComponent(endpoint.endpoint_id)}`}
       className="block rounded-lg border border-line bg-white p-4 hover:border-brand transition-colors"
     >
       <div className="flex items-center justify-between gap-2">

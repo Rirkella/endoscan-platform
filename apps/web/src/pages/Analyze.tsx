@@ -1,122 +1,72 @@
-import { useMemo, useState } from "react";
+// Analyze — the primary, default flow. Bring a transcriptomic signature (demo picker / JSON
+// paste; upload is a disabled Phase-2 placeholder), run it across whatever /endpoints returns
+// (client-side fan-out), and explore per-endpoint signal cards + a count-adaptive comparison.
+// Nothing about the endpoint set is hardcoded.
+
+import { useState } from "react";
 
 import { api } from "../api/client";
+import type { Signature } from "../api/types";
+import { ComparisonViz } from "../components/ComparisonViz";
 import { ErrorNotice } from "../components/ErrorNotice";
-import { ExplanationResultView } from "../components/ExplanationResultView";
-import { PredictionResultView } from "../components/PredictionResultView";
+import { ScoreCardGrid } from "../components/ScoreCardGrid";
 import { SignatureInput } from "../components/SignatureInput";
-import type { ExplanationResult, PredictionResult, Signature } from "../api/types";
+import { useAnalyze } from "../hooks/useAnalyze";
 import { useAsync } from "../hooks/useAsync";
-
-type Result =
-  | { kind: "predict"; data: PredictionResult }
-  | { kind: "explain"; data: ExplanationResult };
 
 export function Analyze() {
   const endpoints = useAsync(() => api.listEndpoints(), []);
-  const [endpointId, setEndpointId] = useState("");
+  const analyze = useAnalyze(endpoints.data ?? []);
   const [signature, setSignature] = useState<Signature | null>(null);
-  const [result, setResult] = useState<Result | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
 
-  const selectedId = useMemo(() => {
-    if (endpointId) return endpointId;
-    return endpoints.data?.[0]?.endpoint_id ?? "";
-  }, [endpointId, endpoints.data]);
-
-  const target =
-    endpoints.data?.find((e) => e.endpoint_id === selectedId)?.biological_target ?? selectedId;
-
-  async function run(kind: "predict" | "explain") {
-    if (!signature || !selectedId) return;
-    setBusy(true);
-    setError(null);
-    setResult(null);
-    try {
-      if (kind === "predict") {
-        setResult({ kind, data: await api.predict(selectedId, signature) });
-      } else {
-        setResult({ kind, data: await api.explain(selectedId, signature) });
-      }
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const ready = (endpoints.data?.length ?? 0) > 0 && signature != null;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Analyze a signature</h1>
-        <p className="text-sm text-muted">
-          Pick a real demo signature or paste one as JSON, then predict or explain. Results are
-          experimental and carry their limitations.
+    <div className="space-y-8">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Analyze a signature</h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted">
+          Bring a transcriptomic signature and see which endpoint activity signals it is consistent
+          with, under EndoScan&rsquo;s experimental models. Results carry their limitations.
         </p>
-      </div>
+      </header>
 
-      {endpoints.error != null && <ErrorNotice error={endpoints.error} />}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-ink mb-1" htmlFor="endpoint-select">
-              Endpoint
-            </label>
-            <select
-              id="endpoint-select"
-              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
-              value={selectedId}
-              onChange={(e) => setEndpointId(e.target.value)}
-            >
-              {(endpoints.data ?? []).map((e) => (
-                <option key={e.endpoint_id} value={e.endpoint_id}>
-                  {e.biological_target} ({e.endpoint_id}) — {e.status}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <SignatureInput onSignature={setSignature} disabled={busy} />
-
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,22rem)_1fr]">
+        {/* Input column */}
+        <div className="space-y-3">
+          {endpoints.error != null && <ErrorNotice error={endpoints.error} />}
+          <SignatureInput onSignature={setSignature} disabled={analyze.running} />
           {signature && (
-            <div className="flex gap-3">
+            <div className="rounded-md border border-line bg-surface px-3 py-2">
+              <p className="text-xs text-muted">
+                Signature loaded ({Object.keys(signature).length} genes). The API validates the gene
+                set on analyze.
+              </p>
               <button
                 type="button"
-                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                disabled={busy}
-                onClick={() => run("predict")}
+                className="mt-2 w-full rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                disabled={!ready || analyze.running}
+                onClick={() => signature && analyze.run(signature)}
               >
-                Predict
-              </button>
-              <button
-                type="button"
-                className="rounded-md border border-line bg-white px-4 py-2 text-sm font-medium text-ink disabled:opacity-50"
-                disabled={busy}
-                onClick={() => run("explain")}
-              >
-                Explain
+                {analyze.running ? "Analyzing…" : "Analyze across endpoints"}
               </button>
             </div>
           )}
-          {signature && (
-            <p className="text-xs text-muted">
-              Signature loaded ({Object.keys(signature).length} genes). The API validates the gene
-              set.
-            </p>
-          )}
         </div>
 
-        <div className="space-y-4">
-          {busy && <p className="text-sm text-muted">Running…</p>}
-          {error != null && <ErrorNotice error={error} />}
-          {result?.kind === "predict" && (
-            <PredictionResultView result={result.data} target={target} />
+        {/* Results column */}
+        <div className="space-y-6">
+          {analyze.signals.length === 0 && !analyze.running && (
+            <p className="text-sm text-muted">
+              Load a signature and run Analyze — one signal card per registered endpoint will appear
+              here.
+            </p>
           )}
-          {result?.kind === "explain" && <ExplanationResultView result={result.data} />}
-          {!busy && !error && !result && (
-            <p className="text-sm text-muted">Results will appear here.</p>
+          {analyze.signature && analyze.signals.length > 0 && (
+            <>
+              <ComparisonViz signals={analyze.signals} />
+              <ScoreCardGrid signals={analyze.signals} signature={analyze.signature} />
+            </>
           )}
         </div>
       </div>

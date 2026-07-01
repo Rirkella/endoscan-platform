@@ -23,14 +23,19 @@ export default function App() {
           </span>
           <nav className="ml-auto flex items-center gap-1">
             <NavLink to="/" end className={navClass}>
-              Overview
-            </NavLink>
-            <NavLink to="/endpoints" className={navClass}>
-              Endpoints
-            </NavLink>
-            <NavLink to="/analyze" className={navClass}>
               Analyze
             </NavLink>
+            <NavLink to="/library" className={navClass}>
+              Model Library
+            </NavLink>
+            {/* Explore is reserved — a DISABLED "coming later" chip, not a route/page (no fake data). */}
+            <span
+              aria-disabled="true"
+              title="Coming later — pathway / analogue / embedding views need real data"
+              className="cursor-not-allowed rounded-md px-3 py-2 text-sm font-medium text-muted/60"
+            >
+              Explore <span className="text-[10px] uppercase">(coming later)</span>
+            </span>
           </nav>
         </div>
       </header>
