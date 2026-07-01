@@ -10,6 +10,10 @@ export interface DemoSignature {
   label: string;
   provenance: string; // real source: LINCS perturbagen/cell-line/dose/time or staged-row id
   expected_profile: { ER: number; AR: number };
+  // Which endpoints can explain this on CURRENT main: both true — ER via tree_shap, AR via the
+  // linear_coefficient attribution merged in PR #42. (The selecting server had a stale checkout
+  // that recorded AR=false; corrected here to match main.)
+  explain_available: { ER: boolean; AR: boolean };
   signature: Signature; // exactly the 978 landmark genes
 }
 

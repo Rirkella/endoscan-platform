@@ -34,6 +34,7 @@ export function SignatureInput({ onSignature, disabled }: Props) {
   const [text, setText] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
   const [demoId, setDemoId] = useState("");
+  const selectedDemo = demoSignatures.find((d) => d.id === demoId);
 
   function pickDemo(id: string) {
     setDemoId(id);
@@ -71,10 +72,15 @@ export function SignatureInput({ onSignature, disabled }: Props) {
             <option value="">Select a bundled demo signature…</option>
             {demoSignatures.map((d: DemoSignature) => (
               <option key={d.id} value={d.id}>
-                {d.label} — {d.provenance}
+                {d.label}
               </option>
             ))}
           </select>
+          {selectedDemo && (
+            <p className="mt-1 text-xs text-muted">
+              Real curated signature, illustrative only — {selectedDemo.provenance}
+            </p>
+          )}
         </div>
       ) : (
         <p className="text-xs text-muted rounded-md border border-line bg-surface px-3 py-2">
