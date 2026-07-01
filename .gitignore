@@ -40,6 +40,11 @@ venv/
 *.parquet
 *.pkl
 
+# AR serving artifact (Option A): the AR model binary is COMMITTED directly (small ~40 KB
+# RF/logreg), unlike ER's DVC-tracked model.pkl. This negation must follow the *.pkl rule
+# above (last-match wins) to re-include exactly this one file; all other *.pkl stay ignored.
+!/models/AR/model.pkl
+
 # OS cruft
 .DS_Store
 Thumbs.db

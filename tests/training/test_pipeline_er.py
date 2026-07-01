@@ -163,12 +163,13 @@ def test_missing_approval_blocks_training(
 
 
 def test_real_registry_registers_er_experimental() -> None:
-    # ER is the first real endpoint registered (Phase 2b). The committed registry holds
-    # exactly that ER entry, at status `experimental` (honest real-data demonstration,
-    # not a validated predictor). Updated from the earlier "registry stays empty" guard.
+    # ER is the first real endpoint registered (Phase 2b), at status `experimental` (honest
+    # real-data demonstration, not a validated predictor). The registry now also holds the
+    # AR endpoint (added separately); this test asserts ER's entry, not the registry size.
     index = json.loads((REPO_ROOT / "registry" / "models" / "endpoints.json").read_text())
-    assert [e["endpoint_id"] for e in index["endpoints"]] == ["ER"]
-    er = index["endpoints"][0]
+    ids = [e["endpoint_id"] for e in index["endpoints"]]
+    assert "ER" in ids
+    er = next(e for e in index["endpoints"] if e["endpoint_id"] == "ER")
     assert er["status"] == "experimental"
     assert er["input_type"] == "transcriptomics"
     assert er["source_refs"] == ["cerapp", "lincs", "pubchem"]

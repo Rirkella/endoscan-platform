@@ -1,0 +1,128 @@
+{
+  "auroc": 0.7679700977573318,
+  "auprc": 0.5236700289645189,
+  "balanced_accuracy": 0.7310235767682576,
+  "f1": 0.6133333333333333,
+  "brier_score": 0.19119142211995774,
+  "confusion_matrix": {
+    "tn": 79,
+    "fp": 15,
+    "fn": 14,
+    "tp": 23
+  },
+  "n_samples": 131,
+  "n_compounds": 131,
+  "selected_model": "ridge_logreg",
+  "threshold": 0.5,
+  "evaluation": {
+    "mode": "nested",
+    "outer_splits": 5,
+    "inner_splits": 3,
+    "per_fold_selected": [
+      "ridge_logreg",
+      "ridge_logreg",
+      "ridge_logreg",
+      "ridge_logreg",
+      "ridge_logreg"
+    ]
+  },
+  "validated_mvp_floors": {
+    "auroc": 0.75,
+    "auprc": 0.5,
+    "balanced_accuracy": 0.65
+  },
+  "validated_mvp_ceilings": {
+    "brier_score": 0.2
+  },
+  "claim_scope": "AR functional modulation (agonist or antagonist transactivation; binding EXCLUDED; direction not distinguished) in the androgen-responsive VCaP/LINCS context; not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
+  "estimate": "honest (nested-outer or held-out); not resubstitution/inner-CV",
+  "uncertainty": {
+    "method": "grouped_bootstrap_oof",
+    "ci_level": 0.95,
+    "n_resamples_requested": 2000,
+    "seed": 0,
+    "note": "percentile bootstrap over compound-grouped resamples of the pooled out-of-fold predictions; at small positive counts the interval is wide and itself imprecise \u2014 a guard against lucky-split point estimates, not a precise interval.",
+    "auroc": {
+      "point": 0.7679700977573318,
+      "lo": 0.6781675596155824,
+      "hi": 0.8594711153850509,
+      "n_resamples": 2000
+    },
+    "auprc": {
+      "point": 0.5236700289645189,
+      "lo": 0.42045359285011785,
+      "hi": 0.6947781524284974,
+      "n_resamples": 2000
+    },
+    "balanced_accuracy": {
+      "point": 0.7310235767682576,
+      "lo": 0.6415576867189771,
+      "hi": 0.8212534751875049,
+      "n_resamples": 2000
+    },
+    "brier_score": {
+      "point": 0.19119142211995774,
+      "lo": 0.14003807924184913,
+      "hi": 0.2431488088433133,
+      "n_resamples": 2000
+    }
+  },
+  "per_fold_metrics": [
+    {
+      "fold": 0,
+      "n_test": 27,
+      "n_pos": 8,
+      "n_neg": 19,
+      "auroc": 0.8289473684210527,
+      "auprc": 0.6483901515151516,
+      "balanced_accuracy": 0.805921052631579,
+      "brier_score": 0.19213290531997582
+    },
+    {
+      "fold": 1,
+      "n_test": 26,
+      "n_pos": 7,
+      "n_neg": 19,
+      "auroc": 0.6842105263157895,
+      "auprc": 0.5285845107273679,
+      "balanced_accuracy": 0.6278195488721805,
+      "brier_score": 0.2721443052765084
+    },
+    {
+      "fold": 2,
+      "n_test": 26,
+      "n_pos": 7,
+      "n_neg": 19,
+      "auroc": 0.849624060150376,
+      "auprc": 0.7876984126984126,
+      "balanced_accuracy": 0.7857142857142857,
+      "brier_score": 0.10833628299931776
+    },
+    {
+      "fold": 3,
+      "n_test": 26,
+      "n_pos": 7,
+      "n_neg": 19,
+      "auroc": 0.7443609022556391,
+      "auprc": 0.4563902484070551,
+      "balanced_accuracy": 0.706766917293233,
+      "brier_score": 0.21909317323763405
+    },
+    {
+      "fold": 4,
+      "n_test": 26,
+      "n_pos": 8,
+      "n_neg": 18,
+      "auroc": 0.7569444444444444,
+      "auprc": 0.7308712121212122,
+      "balanced_accuracy": 0.7222222222222222,
+      "brier_score": 0.1642142328740443
+    }
+  ],
+  "evidence": {
+    "n_positives_total": 37,
+    "n_negatives_total": 94,
+    "min_positives_per_fold": 7,
+    "n_outer_folds": 5
+  }
+}
