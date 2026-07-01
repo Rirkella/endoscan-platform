@@ -14,8 +14,8 @@
       "balanced_accuracy": 0.5742911036210149,
       "brier_score": 0.06579274998265475,
       "auroc_fold_std": 0.05196303625630729,
-      "train_seconds": 52.15242320800053,
-      "infer_seconds": 0.04225968799983093,
+      "train_seconds": 31.94296017900342,
+      "infer_seconds": 0.024811208990286104,
       "interpretability_tier": 3,
       "simplicity_tier": 3
     },
@@ -26,8 +26,8 @@
       "balanced_accuracy": 0.5560004947586505,
       "brier_score": 0.06669890510948906,
       "auroc_fold_std": 0.07190231072123122,
-      "train_seconds": 4.526938350999899,
-      "infer_seconds": 0.10886181400019268,
+      "train_seconds": 2.703322840985493,
+      "infer_seconds": 0.052487897002720274,
       "interpretability_tier": 3,
       "simplicity_tier": 2
     },
@@ -38,8 +38,8 @@
       "balanced_accuracy": 0.6019975880515787,
       "brier_score": 0.09222512273540524,
       "auroc_fold_std": 0.06644651330218282,
-      "train_seconds": 131.16148076699983,
-      "infer_seconds": 0.03242685899977005,
+      "train_seconds": 47.5924769580015,
+      "infer_seconds": 0.02052411598560866,
       "interpretability_tier": 1,
       "simplicity_tier": 1
     },
@@ -50,8 +50,8 @@
       "balanced_accuracy": 0.6082052629951451,
       "brier_score": 0.09024750113584488,
       "auroc_fold_std": 0.05966369035622987,
-      "train_seconds": 126.16627115900019,
-      "infer_seconds": 0.040424758999506594,
+      "train_seconds": 43.694106830022065,
+      "infer_seconds": 0.019956129995989613,
       "interpretability_tier": 1,
       "simplicity_tier": 1
     },
@@ -62,8 +62,8 @@
       "balanced_accuracy": 0.6185951946566066,
       "brier_score": 0.10319144574807085,
       "auroc_fold_std": 0.04368189614111162,
-      "train_seconds": 43.90642001199967,
-      "infer_seconds": 0.03780906899964975,
+      "train_seconds": 17.17035380800371,
+      "infer_seconds": 0.0212686879967805,
       "interpretability_tier": 1,
       "simplicity_tier": 1
     }

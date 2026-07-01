@@ -20,6 +20,15 @@
 - **Model type:** random_forest
 - **Training summary:** compound-level nested evaluation; model chosen by a simplicity-aware scorecard over 5 sklearn models, family selection unstable across folds (see Limitations)
 
+## Provenance & reproduction
+The original model binary was unavailable (DVC artifact lost). The model was
+deterministically regenerated from source (committed CERAPP experimental-functional labels
++ LINCS MCF7/A549 signatures re-extracted from the gctx, seed 0) through the reproducible
+gated pipeline. The regenerated binary is byte-identical to the original
+(md5 5bed2e0de503dbec65992db1e498212e), confirming faithful reproduction. Confidence-interval
+/ evidence blocks were added under the strengthened status logic; point metrics are unchanged
+from the original record.
+
 ## Metrics
 AUROC=0.740, AUPRC=0.256, balanced_acc=0.579, F1=0.250, Brier=0.070 (honest nested estimate)
 
@@ -30,7 +39,7 @@ Research prioritization of estrogen-receptor activity from signatures.
 Any regulatory, clinical, or diagnostic decision.
 
 ## Limitations & Disclaimer
-**Status — experimental:** a real-data methodology demonstration, NOT a validated predictor. Unmet validated_mvp criteria: balanced accuracy 0.579 < 0.60 floor.
+**Status — experimental:** a real-data methodology demonstration, NOT a validated predictor. Unmet validated_mvp criteria: auroc 95% CI lower bound 0.675 < 0.75 floor; auprc 95% CI lower bound 0.194 < 0.50 floor; balanced accuracy 95% CI lower bound 0.537 < 0.65 floor.
 
 **Statistical power:** 73 positives / 959 compounds (prevalence 0.076). Only ~15 positives per held-out fold (n_pos / 5).
 

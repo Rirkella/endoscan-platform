@@ -27,12 +27,102 @@
     ]
   },
   "validated_mvp_floors": {
-    "balanced_accuracy": 0.6
+    "auroc": 0.75,
+    "auprc": 0.5,
+    "balanced_accuracy": 0.65
   },
   "validated_mvp_ceilings": {
     "brier_score": 0.2
   },
   "claim_scope": "ER functional modulation (agonist or antagonist transactivation; direction not distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
-  "floors_provenance": "partial: balanced_accuracy floor (0.60) and brier ceiling (0.20) recovered from the committed card; auroc/auprc floors used at training were not persisted and are not recoverable from any committed artifact",
-  "estimate": "honest (nested-outer or held-out); not resubstitution/inner-CV"
+  "estimate": "honest (nested-outer or held-out); not resubstitution/inner-CV",
+  "uncertainty": {
+    "method": "grouped_bootstrap_oof",
+    "ci_level": 0.95,
+    "n_resamples_requested": 2000,
+    "seed": 0,
+    "note": "percentile bootstrap over compound-grouped resamples of the pooled out-of-fold predictions; at small positive counts the interval is wide and itself imprecise \u2014 a guard against lucky-split point estimates, not a precise interval.",
+    "auroc": {
+      "point": 0.7396951049816011,
+      "lo": 0.6750859533366977,
+      "hi": 0.8153358968899669,
+      "n_resamples": 2000
+    },
+    "auprc": {
+      "point": 0.25637241142364803,
+      "lo": 0.1942103187532924,
+      "hi": 0.3878306055101744,
+      "n_resamples": 2000
+    },
+    "balanced_accuracy": {
+      "point": 0.5788830823463929,
+      "lo": 0.5367690971693228,
+      "hi": 0.6218008898386514,
+      "n_resamples": 2000
+    },
+    "brier_score": {
+      "point": 0.070140394032221,
+      "lo": 0.059350314003470815,
+      "hi": 0.08278537361042952,
+      "n_resamples": 2000
+    }
+  },
+  "per_fold_metrics": [
+    {
+      "fold": 0,
+      "n_test": 192,
+      "n_pos": 15,
+      "n_neg": 177,
+      "auroc": 0.8664783427495292,
+      "auprc": 0.33938726403362507,
+      "balanced_accuracy": 0.5276836158192091,
+      "brier_score": 0.06612617187500001
+    },
+    {
+      "fold": 1,
+      "n_test": 192,
+      "n_pos": 15,
+      "n_neg": 177,
+      "auroc": 0.6429378531073445,
+      "auprc": 0.22893175812827887,
+      "balanced_accuracy": 0.5661016949152542,
+      "brier_score": 0.10340033757385536
+    },
+    {
+      "fold": 2,
+      "n_test": 192,
+      "n_pos": 15,
+      "n_neg": 177,
+      "auroc": 0.7696798493408663,
+      "auprc": 0.4019725859673331,
+      "balanced_accuracy": 0.6610169491525424,
+      "brier_score": 0.06439440104166666
+    },
+    {
+      "fold": 3,
+      "n_test": 192,
+      "n_pos": 14,
+      "n_neg": 178,
+      "auroc": 0.7620385232744784,
+      "auprc": 0.18374892233971785,
+      "balanced_accuracy": 0.49719101123595505,
+      "brier_score": 0.068575390625
+    },
+    {
+      "fold": 4,
+      "n_test": 191,
+      "n_pos": 14,
+      "n_neg": 177,
+      "auroc": 0.854317998385795,
+      "auprc": 0.5381999344123402,
+      "balanced_accuracy": 0.6400322841000807,
+      "brier_score": 0.04809082755350633
+    }
+  ],
+  "evidence": {
+    "n_positives_total": 73,
+    "n_negatives_total": 886,
+    "min_positives_per_fold": 14,
+    "n_outer_folds": 5
+  }
 }
