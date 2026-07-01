@@ -1,0 +1,25 @@
+{
+  "endpoint_id": "AR",
+  "probability": 0.24041191158691053,
+  "call": false,
+  "threshold": 0.5,
+  "standardized_input": true,
+  "limitations": {
+    "endpoint_id": "AR",
+    "status": "experimental",
+    "is_experimental": true,
+    "missed_criteria": [
+      "auroc 95% CI lower bound 0.678 < 0.75 floor",
+      "auprc 95% CI lower bound 0.420 < 0.50 floor",
+      "balanced accuracy 95% CI lower bound 0.642 < 0.65 floor",
+      "brier score 95% CI upper bound 0.243 > 0.20 ceiling"
+    ],
+    "floors_recorded": true,
+    "floors_provenance": null,
+    "positives": 37,
+    "n_total": 131,
+    "prevalence": 0.2824427480916031,
+    "claim_scope": "AR functional modulation (agonist or antagonist transactivation; binding EXCLUDED; direction not distinguished) in the androgen-responsive VCaP/LINCS context; not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
+    "disclaimer": "Pre-screening / prioritization only; metrics are the honest compound-level cross-validated estimate, NOT regulatory-grade validation, and must be confirmed experimentally."
+  }
+}

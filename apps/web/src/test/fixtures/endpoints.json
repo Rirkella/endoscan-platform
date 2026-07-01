@@ -1,0 +1,16 @@
+[
+  {
+    "endpoint_id": "ER",
+    "biological_target": "Estrogen Receptor",
+    "status": "experimental",
+    "input_type": "transcriptomics",
+    "frozen": true
+  },
+  {
+    "endpoint_id": "AR",
+    "biological_target": "Androgen Receptor",
+    "status": "experimental",
+    "input_type": "transcriptomics",
+    "frozen": false
+  }
+]

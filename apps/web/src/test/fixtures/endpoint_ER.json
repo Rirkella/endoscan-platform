@@ -1,0 +1,89 @@
+{
+  "endpoint_id": "ER",
+  "biological_target": "Estrogen Receptor",
+  "input_type": "transcriptomics",
+  "version": "0.1.0",
+  "status": "experimental",
+  "frozen": true,
+  "source_refs": [
+    "cerapp",
+    "lincs",
+    "pubchem"
+  ],
+  "variants": [
+    {
+      "variant_id": "ER",
+      "context": {
+        "cell_lines": null,
+        "label_sources": [
+          "cerapp",
+          "lincs",
+          "pubchem"
+        ],
+        "scope": "ER functional modulation (agonist or antagonist transactivation; direction not distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim"
+      },
+      "status": "experimental",
+      "limitations": {
+        "endpoint_id": "ER",
+        "status": "experimental",
+        "is_experimental": true,
+        "missed_criteria": [
+          "auroc 95% CI lower bound 0.675 < 0.75 floor",
+          "auprc 95% CI lower bound 0.194 < 0.50 floor",
+          "balanced accuracy 95% CI lower bound 0.537 < 0.65 floor"
+        ],
+        "floors_recorded": true,
+        "floors_provenance": null,
+        "positives": 73,
+        "n_total": 959,
+        "prevalence": 0.07612095933263817,
+        "claim_scope": "ER functional modulation (agonist or antagonist transactivation; direction not distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
+        "disclaimer": "Pre-screening / prioritization only; metrics are the honest compound-level cross-validated estimate, NOT regulatory-grade validation, and must be confirmed experimentally."
+      },
+      "metrics_summary": {
+        "auroc": 0.7396951049816011,
+        "auprc": 0.25637241142364803,
+        "balanced_accuracy": 0.5788830823463929,
+        "brier_score": 0.070140394032221,
+        "uncertainty": {
+          "method": "grouped_bootstrap_oof",
+          "ci_level": 0.95,
+          "n_resamples_requested": 2000,
+          "seed": 0,
+          "note": "percentile bootstrap over compound-grouped resamples of the pooled out-of-fold predictions; at small positive counts the interval is wide and itself imprecise \u2014 a guard against lucky-split point estimates, not a precise interval.",
+          "auroc": {
+            "point": 0.7396951049816011,
+            "lo": 0.6750859533366977,
+            "hi": 0.8153358968899669,
+            "n_resamples": 2000
+          },
+          "auprc": {
+            "point": 0.25637241142364803,
+            "lo": 0.1942103187532924,
+            "hi": 0.3878306055101744,
+            "n_resamples": 2000
+          },
+          "balanced_accuracy": {
+            "point": 0.5788830823463929,
+            "lo": 0.5367690971693228,
+            "hi": 0.6218008898386514,
+            "n_resamples": 2000
+          },
+          "brier_score": {
+            "point": 0.070140394032221,
+            "lo": 0.059350314003470815,
+            "hi": 0.08278537361042952,
+            "n_resamples": 2000
+          }
+        },
+        "evidence": {
+          "n_positives_total": 73,
+          "n_negatives_total": 886,
+          "min_positives_per_fold": 14,
+          "n_outer_folds": 5
+        }
+      },
+      "model_card_markdown": "# Model Card \u2014 ER\n\n> EndoScan is a **pre-screening / prioritization** tool, **not** a regulatory,\n> clinical, or diagnostic instrument. See *Limitations & Disclaimer* below.\n\n## Endpoint\n- **Endpoint ID:** ER\n- **Biological target:** Estrogen Receptor\n- **Input type:** transcriptomics (transcriptomic signature \u2192 endocrine risk)\n- **Version:** 0.1.0\n- **Status:** experimental\n\n## Data\n- **Sources:** cerapp, lincs, pubchem\n- **Compounds (total / per class):** overlap=963, compounds_per_class={0: 886, 1: 73}\n- **Transcriptomic features:** 978 landmark genes\n- **Train/test split:** compound-level (no leakage)\n\n## Model\n- **Model type:** random_forest\n- **Training summary:** compound-level nested evaluation; model chosen by a simplicity-aware scorecard over 5 sklearn models, family selection unstable across folds (see Limitations)\n\n## Provenance & reproduction\nThe original model binary was unavailable (DVC artifact lost). The model was\ndeterministically regenerated from source (committed CERAPP experimental-functional labels\n+ LINCS MCF7/A549 signatures re-extracted from the gctx, seed 0) through the reproducible\ngated pipeline. The regenerated binary is byte-identical to the original\n(md5 5bed2e0de503dbec65992db1e498212e), confirming faithful reproduction. Confidence-interval\n/ evidence blocks were added under the strengthened status logic; point metrics are unchanged\nfrom the original record.\n\n## Metrics\nAUROC=0.740, AUPRC=0.256, balanced_acc=0.579, F1=0.250, Brier=0.070 (honest nested estimate)\n\n## Recommended use\nResearch prioritization of estrogen-receptor activity from signatures.\n\n## NOT recommended / out of scope\nAny regulatory, clinical, or diagnostic decision.\n\n## Limitations & Disclaimer\n**Status \u2014 experimental:** a real-data methodology demonstration, NOT a validated predictor. Unmet validated_mvp criteria: auroc 95% CI lower bound 0.675 < 0.75 floor; auprc 95% CI lower bound 0.194 < 0.50 floor; balanced accuracy 95% CI lower bound 0.537 < 0.65 floor.\n\n**Statistical power:** 73 positives / 959 compounds (prevalence 0.076). Only ~15 positives per held-out fold (n_pos / 5).\n\n**Model-selection stability:** family selection was UNSTABLE across folds (per-fold picks: ['random_forest', 'lasso_logreg', 'random_forest', 'random_forest', 'gradient_boosting']); the registered model (random_forest) is the automated simplicity-aware scorecard pick on all data.\n\n**Coverage:** built from the intersection of approved labels and transcriptomic signatures (compound-level); it is coverage-limited and NOT representative of the full chemical space.\n\n**Scope of claim:** ER functional modulation (agonist or antagonist transactivation; direction not distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim.\n\nPre-screening / prioritization only; metrics are the honest compound-level cross-validated estimate, NOT regulatory-grade validation, and must be confirmed experimentally.\n\nThis model has **not** undergone regulatory-grade validation. Predictions are\nhypotheses for prioritization only and must be confirmed experimentally.\n"
+    }
+  ]
+}

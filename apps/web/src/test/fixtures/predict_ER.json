@@ -1,0 +1,24 @@
+{
+  "endpoint_id": "ER",
+  "probability": 0.095,
+  "call": false,
+  "threshold": 0.5,
+  "standardized_input": true,
+  "limitations": {
+    "endpoint_id": "ER",
+    "status": "experimental",
+    "is_experimental": true,
+    "missed_criteria": [
+      "auroc 95% CI lower bound 0.675 < 0.75 floor",
+      "auprc 95% CI lower bound 0.194 < 0.50 floor",
+      "balanced accuracy 95% CI lower bound 0.537 < 0.65 floor"
+    ],
+    "floors_recorded": true,
+    "floors_provenance": null,
+    "positives": 73,
+    "n_total": 959,
+    "prevalence": 0.07612095933263817,
+    "claim_scope": "ER functional modulation (agonist or antagonist transactivation; direction not distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic claim",
+    "disclaimer": "Pre-screening / prioritization only; metrics are the honest compound-level cross-validated estimate, NOT regulatory-grade validation, and must be confirmed experimentally."
+  }
+}

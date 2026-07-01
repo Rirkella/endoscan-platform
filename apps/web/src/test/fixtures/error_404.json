@@ -1,0 +1,5 @@
+{
+  "error": "endpoint_not_found",
+  "detail": "No endpoint with id 'NOPE' in registry",
+  "endpoint_id": null
+}
