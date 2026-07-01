@@ -6,8 +6,9 @@ Covers the strengthened status rule end to end at the unit level (fast, no heavy
 - the CI rule (point >= floor but CI lower bound < floor -> experimental; symmetric ceiling);
 - REACHABILITY (a well-powered, well-separated case still earns validated_mvp);
 - determinism (seeded bootstrap -> reproducible CI);
-- ER drift-pin (the frozen record's bytes + status are untouched; a read-only re-derivation
-  from its stored metrics returns experimental — graceful degrade, no rewrite).
+- ER rebaselined record (the byte-identical model regeneration added CI/evidence; status
+  stays experimental; a read-only re-derivation from its stored metrics returns experimental,
+  no rewrite).
 """
 
 from __future__ import annotations
@@ -187,20 +188,22 @@ def test_pooled_metrics_unchanged_vs_direct_evaluate() -> None:
     assert res.uncertainty["auroc"]["point"] == pytest.approx(res.outer_metrics.auroc)
 
 
-# --- ER frozen record: byte-identical + read-only re-derivation is a no-op --------------
+# --- ER rebaselined record: CI/evidence present + read-only re-derivation is a no-op ----
 
 
-def test_er_frozen_metrics_and_status_untouched(er_run: ModuleType) -> None:
+def test_er_rebaselined_metrics_and_status_untouched(er_run: ModuleType) -> None:
     metrics_path = REPO_ROOT / "models" / "ER" / "metrics.json"
     raw = metrics_path.read_text(encoding="utf-8")
     metrics = json.loads(raw)
-    # The frozen record predates the CI block — this PR does NOT add one to it.
-    assert "uncertainty" not in metrics and "evidence" not in metrics
-    # Registry status stays experimental.
+    # The rebaseline (byte-identical model regeneration) ADDED the CI + fold-evidence blocks
+    # under the strengthened status logic; the point metrics are unchanged from the original.
+    assert "uncertainty" in metrics and "evidence" in metrics
+    # Registry status stays experimental (the CI lower bounds miss the floors, min-evidence
+    # passes at 73 positives / 14 per fold).
     entries = json.loads((REPO_ROOT / "registry" / "models" / "endpoints.json").read_text())
     er = next(e for e in entries["endpoints"] if e["endpoint_id"] == "ER")
     assert er["status"] == "experimental"
-    # Read-only re-derivation from ER's stored metrics (no CI/evidence) -> experimental.
+    # Read-only re-derivation from ER's stored metrics (with CI/evidence) -> experimental.
     m = EvalMetrics(
         auroc=metrics["auroc"], auprc=metrics["auprc"],
         balanced_accuracy=metrics["balanced_accuracy"], f1=metrics["f1"],

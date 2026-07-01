@@ -327,15 +327,24 @@ def test_floor_or_ceiling_naming_absent_metric_raises() -> None:
         missed_criteria(metrics, {}, {"log_loss": 0.30})
 
 
-# --- real ER: PARTIAL floor record reads truthfully (structurally sourced) -------------
+# --- real ER: rebaselined full-floor CI record reads truthfully (structurally sourced) --
+
+# The rebaselined ER metrics.json (byte-identical model, added CI/evidence) records the FULL
+# validated_mvp floors + brier ceiling and carries a grouped-bootstrap CI + fold evidence.
+# Min-evidence PASSES (73 positives / 14 per fold); the three CI lower bounds are what demote
+# ER to experimental — the honest, structurally-sourced reasons, matching the model card.
+ER_CI_REASONS = [
+    "auroc 95% CI lower bound 0.675 < 0.75 floor",
+    "auprc 95% CI lower bound 0.194 < 0.50 floor",
+    "balanced accuracy 95% CI lower bound 0.537 < 0.65 floor",
+]
 
 
-def test_real_er_partial_floor_record_reads_like_the_card() -> None:
-    """The regenerated real-ER metrics.json carries a PARTIAL floor record: only the
-    ground-truth-recovered balanced_accuracy floor (0.60) + brier ceiling (0.20), plus
-    claim_scope and a floors_provenance note. The limitations block must now read
-    identically to the frozen model card — STRUCTURALLY sourced, not degrading — and
-    must NOT imply "all floors met" from the incomplete set.
+def test_real_er_full_floor_ci_record_reads_like_the_card() -> None:
+    """The rebaselined real-ER metrics.json carries the FULL floor record (auroc/auprc/
+    balanced_accuracy) + brier ceiling, plus a grouped-bootstrap CI, fold evidence and
+    claim_scope. The limitations block must read identically to the model card — STRUCTURALLY
+    sourced — reporting the three CI-lower-bound demotions, not a fabricated pass.
     """
     entries = json.loads((REPO_ROOT / "registry/models/endpoints.json").read_text())
     er = next(e for e in entries["endpoints"] if e["endpoint_id"] == "ER")
@@ -345,25 +354,21 @@ def test_real_er_partial_floor_record_reads_like_the_card() -> None:
     lim = build_limitations(entry, metrics)
     assert lim.status == "experimental" and lim.is_experimental
     assert lim.floors_recorded is True
-    # The honest evidence reasons (this frozen record predates CI evidence) + the single
-    # point floor miss — present key, evaluated (the #24 hardening does NOT raise). ER stays
-    # experimental; the strengthened rule makes the missing-CI fact explicit, not fabricated.
-    assert lim.missed_criteria == [*NO_EVIDENCE_REASONS, "balanced accuracy 0.579 < 0.60 floor"]
+    # Full floors are recorded, so the demotion is the three CI-lower-bound misses (min-evidence
+    # passes at 73 positives / 14 per fold) — the strengthened rule, sourced not fabricated.
+    assert lim.missed_criteria == ER_CI_REASONS
     assert "ER functional modulation" in lim.claim_scope  # verbatim scope, card-matching
-    # Provenance makes the partial record self-evident (auroc/auprc floors unrecorded).
-    assert lim.floors_provenance is not None
-    assert "not recoverable" in lim.floors_provenance
+    # Full floor record -> no partial-provenance note needed.
+    assert lim.floors_provenance is None
     assert lim.prevalence == pytest.approx(73 / 959)  # (fn+tp)=73 over n_samples=959
 
 
-def test_partial_floor_record_does_not_raise_on_present_key() -> None:
-    # The real-ER partial record has ONE floor key (balanced_accuracy), present in
-    # metrics -> hardened missed_criteria evaluates it without raising.
+def test_full_floor_record_evaluates_all_present_keys_via_ci() -> None:
+    # The rebaselined ER record has all three floor keys present in metrics -> hardened
+    # missed_criteria evaluates each via its CI lower bound without raising.
     metrics = json.loads((REPO_ROOT / "models" / "ER" / "metrics.json").read_text())
     floors = metrics["validated_mvp_floors"]
     ceilings = metrics["validated_mvp_ceilings"]
-    assert list(floors) == ["balanced_accuracy"]  # partial, single key
-    assert missed_criteria(metrics, floors, ceilings) == [
-        *NO_EVIDENCE_REASONS,
-        "balanced accuracy 0.579 < 0.60 floor",
-    ]
+    assert list(floors) == ["auroc", "auprc", "balanced_accuracy"]  # full floor record
+    assert list(ceilings) == ["brier_score"]
+    assert missed_criteria(metrics, floors, ceilings) == ER_CI_REASONS

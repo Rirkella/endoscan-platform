@@ -19,7 +19,8 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
-# Model artifacts: SMALL TEXT is git-tracked; the binary model.pkl is DVC-tracked.
+# Model artifacts: SMALL TEXT is git-tracked. Serve-ready model.pkl binaries are committed
+# directly (Option A) via per-endpoint negations below; anything else stays ignored.
 # (Re-include directories first so git can traverse into them, then track text.)
 /models/**
 !/models/**/
@@ -40,10 +41,14 @@ venv/
 *.parquet
 *.pkl
 
-# AR serving artifact (Option A): the AR model binary is COMMITTED directly (small ~40 KB
-# RF/logreg), unlike ER's DVC-tracked model.pkl. This negation must follow the *.pkl rule
-# above (last-match wins) to re-include exactly this one file; all other *.pkl stay ignored.
+# Serving artifacts (Option A): endpoint model.pkl binaries are COMMITTED directly. These
+# negations must follow the *.pkl rule above (last-match wins) to re-include exactly these
+# files; all other *.pkl stay ignored.
+# - AR: ~40 KB ridge_logreg pipeline.
+# - ER: ~1.5 MB random_forest; the DVC pointer (model.pkl.dvc) was removed after a proven-
+#   identical rebuild (md5 5bed2e0d…) — the real binary is now committed, not DVC-tracked.
 !/models/AR/model.pkl
+!/models/ER/model.pkl
 
 # OS cruft
 .DS_Store
