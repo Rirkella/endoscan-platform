@@ -1,0 +1,66 @@
+# ER endpoint pipeline config — the concrete REAL-run config for the re-baseline rebuild.
+#
+# Derived from config.real.example.yaml. Committed with approval.approved: FALSE (BLOCKED)
+# so it can never train/register on its own — the M5 agent injects approval ONLY at
+# promote() time via a valid, human-issued token (builder_agent.promote). Committing this
+# with approved: false is safe; the runbook's "do NOT commit a filled real config" warning
+# is specifically about approved: true.
+#
+# CONTEXT (documented, NOT a config field — DataConfig forbids extras): ER's signature
+# matrix (data/staged/er/lincs.parquet) is re-extracted from the real LINCS gctx over the
+# **MCF7 / A549** cell lines and fused per compound (the original ER context; see
+# staging/condition.py + docs/runbooks/er_rebaseline.md). The cell-line context lives in the
+# STAGED parquet, produced at extraction time — the pipeline consumes it pre-fused.
+#
+# MODE: ER's label is the CERAPP experimental **functional** call encoded directly in
+# data/staged/er/cerapp.csv (consensus_call active/inactive; label_provenance
+# "cerapp_experimental_functional"). It is consumed AS-IS — there is NO agonist∪antagonist
+# union step for ER (that union is an AR/CoMPARA-SDF construct, not applicable here).
+
+endpoint_id: ER
+biological_target: Estrogen Receptor
+version: "0.1.0"
+claim_scope: >-
+  ER functional modulation (agonist or antagonist transactivation; direction not
+  distinguished); not a physical-binding, pan-endocrine, or regulatory/clinical/diagnostic
+  claim
+
+data:
+  target: ER
+  adapter: staged                  # reads local Parquet/CSV extracts (no downloads)
+  staged_dir: data/staged/er       # cerapp.csv + pubchem.csv committed; lincs.parquet re-extracted
+  n_groups: 10                     # same as the original ER run (compound groups for the split)
+  seed: 0                          # same seed as the original ER run
+  required_label_sources: [cerapp]  # ER trains on the CERAPP experimental functional call
+
+gate:
+  thresholds_path: registry/data/quality_gates.yaml   # the SAME strict thresholds — UNCHANGED
+
+approval:
+  approved: false                  # BLOCKED here; the agent injects approval via a token at promote
+  approved_by: ""
+  note: ""
+
+evaluation:
+  mode: nested                     # nested grouped CV (honest estimate)
+  outer_splits: 5
+  inner_splits: 3
+  test_size: 0.25
+
+training:
+  models:
+    - ridge_logreg
+    - lasso_logreg
+    - elastic_net_logreg
+    - random_forest
+    - gradient_boosting
+  selection_tolerance: 0.02
+  # SAME floors as the standard endpoint config — NOT lowered for the rebuild. The rebuilt
+  # ER earns whatever status the strengthened evidence rule (uncertainty.py + _status_for)
+  # yields; it does NOT restate the original recorded metrics.
+  validated_mvp_floors:
+    auroc: 0.75
+    auprc: 0.50
+    balanced_accuracy: 0.65
+  validated_mvp_ceilings:
+    brier_score: 0.20
