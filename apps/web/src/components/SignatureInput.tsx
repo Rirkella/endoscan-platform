@@ -1,12 +1,13 @@
-// Signature input: (a) a picker of bundled REAL demo signatures (labeled), and (b) JSON paste.
-// Client-side we only check the shape is an object of gene->number; the API is the source of
-// truth for gene-set validation (its 422 message is surfaced verbatim on the results panel).
-// No random generation, ever.
+// Signature input: (a) a DISABLED upload zone (Phase 2 wires parsing), (b) a picker of bundled
+// REAL demo signatures (labeled), and (c) JSON paste. Client-side we only check the shape is an
+// object of gene->number; the API is the source of truth for gene-set validation (its 422
+// message is surfaced verbatim on the results panel). No random generation, ever.
 
 import { useState } from "react";
 
 import type { Signature } from "../api/types";
 import { type DemoSignature, demoSignatures } from "../demo-signatures";
+import { UploadZone } from "./UploadZone";
 
 interface Props {
   onSignature: (sig: Signature) => void;
@@ -57,6 +58,8 @@ export function SignatureInput({ onSignature, disabled }: Props) {
 
   return (
     <div className="space-y-3">
+      <UploadZone />
+
       {demoSignatures.length > 0 ? (
         <div>
           <label className="block text-sm font-medium text-ink mb-1" htmlFor="demo-select">
@@ -118,7 +121,7 @@ export function SignatureInput({ onSignature, disabled }: Props) {
         disabled={disabled || text.trim().length === 0}
         onClick={submit}
       >
-        Use this signature
+        Load signature
       </button>
     </div>
   );

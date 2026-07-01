@@ -1,24 +1,28 @@
+// Model Library — the endpoint catalogue + evidence, rendered from /endpoints (never hardcoded).
+// The detailed evidence/limitations live here (not on the landing page); Analyze is the primary flow.
+
 import { api } from "../api/client";
 import { EndpointCard } from "../components/EndpointCard";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { useAsync } from "../hooks/useAsync";
 
-export function EndpointsList() {
+export function ModelLibrary() {
   const { data, error, loading } = useAsync(() => api.listEndpoints(), []);
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Registered endpoints</h1>
+      <header>
+        <h1 className="text-xl font-semibold tracking-tight text-ink">Model Library</h1>
         <p className="text-sm text-muted">
-          Rendered from the API — status shown up front. All current endpoints are experimental.
+          Registered endpoints and their evidence — rendered from the API. All current endpoints are
+          experimental.
         </p>
-      </div>
+      </header>
 
       {loading && <p className="text-sm text-muted">Loading endpoints…</p>}
       {error != null && <ErrorNotice error={error} />}
       {data && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((e) => (
             <EndpointCard key={e.endpoint_id} endpoint={e} />
           ))}

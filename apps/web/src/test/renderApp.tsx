@@ -3,9 +3,8 @@ import { RouterProvider, createMemoryRouter } from "react-router-dom";
 
 import App from "../App";
 import { Analyze } from "../pages/Analyze";
-import { EndpointDetailPage } from "../pages/EndpointDetail";
-import { EndpointsList } from "../pages/EndpointsList";
-import { Landing } from "../pages/Landing";
+import { ModelEvidence } from "../pages/ModelEvidence";
+import { ModelLibrary } from "../pages/ModelLibrary";
 
 // Render the real App shell (so the honesty banner/footer are present) at a given route.
 export function renderApp(initialPath: string) {
@@ -15,10 +14,9 @@ export function renderApp(initialPath: string) {
         path: "/",
         element: <App />,
         children: [
-          { index: true, element: <Landing /> },
-          { path: "endpoints", element: <EndpointsList /> },
-          { path: "endpoints/:id", element: <EndpointDetailPage /> },
-          { path: "analyze", element: <Analyze /> },
+          { index: true, element: <Analyze /> },
+          { path: "library", element: <ModelLibrary /> },
+          { path: "library/:id", element: <ModelEvidence /> },
         ],
       },
     ],

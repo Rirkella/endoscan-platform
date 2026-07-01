@@ -3,7 +3,7 @@
 // endpoint's `variants` list.
 
 import type { ContextVariant } from "../api/types";
-import { LimitationsBlock } from "./LimitationsBlock";
+import { LimitationsPanel } from "./LimitationsPanel";
 import { MetricsTable } from "./MetricsTable";
 
 export function VariantView({ variant }: { variant: ContextVariant }) {
@@ -31,7 +31,7 @@ export function VariantView({ variant }: { variant: ContextVariant }) {
         <MetricsTable metrics={variant.metrics_summary} />
       </section>
 
-      <LimitationsBlock limitations={variant.limitations} />
+      <LimitationsPanel limitations={variant.limitations} />
 
       <section>
         <h3 className="text-sm font-semibold text-ink mb-2">Model card</h3>
