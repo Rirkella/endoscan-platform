@@ -20,6 +20,65 @@ source-download adapters are stubbed/TODO and wired in a later dedicated issue. 
 
 ---
 
+## Status snapshot — merged reality (as of PR #44)
+
+> **This section is the authoritative status.** The numbered issue specs further below are the
+> ORIGINAL plans, kept for provenance and annotated with a status banner where reality has moved
+> on. Treat this as a **point-in-time snapshot** (taken at the merge of PR #44); verify against the
+> merge history via the cited PRs rather than trusting it to stay current.
+
+**Milestones**
+
+| Milestone / feature | Status | Evidence |
+|---|---|---|
+| M0 — scaffolding, tooling, CI | ✅ complete | Issue 1 |
+| M1 — model/dataset registry contract | ✅ complete | Issue 2 |
+| M2 — dataset-construction toolchain | ✅ complete | Issue 3 |
+| M3 — ER endpoint via the toolchain | ✅ complete (ER `experimental`) | Issue 4 |
+| M4 — inference + explainability (+ `LimitationsBlock`) | ✅ complete | Issue 5 |
+| M5 — Builder Agent + approval chokepoint | ✅ complete | PR #27 |
+| M5.5 — job-runner (`endoscan_jobs`) | ✅ complete | `coverage` + `extract_signatures` jobs; memory-efficient LINCS gctx slicing |
+| CoMPARA SDF parser + the five modes | ✅ complete | `functional_modulation` = agonist ∪ antagonist, **binding excluded** |
+| Evidence-based, sample-aware status logic | ✅ complete | PR #37 — grouped-bootstrap CI + min-evidence gate (`MIN_POS_TOTAL=30`, `MIN_POS_PER_FOLD=5`, CI-lower-bound rule) |
+| Registry re-registration + frozen-endpoint protection | ✅ complete | PR #38 — `register_or_update_endpoint`, `FrozenEndpointError` |
+| M6 — second endpoint (AR) through the gated agent | ✅ complete (AR `experimental`) | PRs #36, #40 |
+| ER recovery / re-baseline (proven reproduction) | ✅ complete | PRs #39, #41 |
+| M7 — thin serving API (read-only FastAPI) | ✅ complete | PR #42 |
+| M8 — web frontend (data-driven React SPA) | ✅ complete | PRs #43, #44 |
+| M9 — report engine + docs + MVP packaging | ⏳ not yet implemented | — |
+
+**Hardening milestones (unroadmapped when the original plan was written, now recorded above):**
+the job-runner (`endoscan_jobs`), the CoMPARA parser + five-mode label logic, the evidence-based
+status logic (PR #37), and registry re-registration + frozen protection (PR #38). These were built
+between M5 and M8 and are the machinery behind the current endpoint statuses.
+
+**Current endpoints (snapshot — verify against the cited PRs):**
+
+- **ER** (Estrogen Receptor) — `experimental`, **frozen**, serve-ready from a **committed** `model.pkl`
+  (Option A, no DVC). It is a **proven byte-identical REPRODUCTION** of the lost original (md5
+  `5bed2e0d…`): the original binary was unavailable (DVC remote dead), deterministically regenerated
+  from source (committed CERAPP experimental-functional labels + re-extracted LINCS MCF7/A549
+  signatures, seed 0), through the reproducible gated pipeline — **point metrics unchanged** from the
+  original record. Landed via a deliberate un-freeze → re-register → re-freeze (PRs #39, #41). This is
+  a faithful reproduction, **not** a re-baseline with changed numbers.
+- **AR** (Androgen Receptor) — `experimental`, not frozen, serve-ready from a **committed** `model.pkl`
+  (Option A). Built through the gated Builder Agent over CoMPARA (`functional_modulation`, binding
+  excluded, VCaP/LINCS context); it was **honestly demoted** `validated_mvp` → `experimental` under
+  the evidence-based CI rule (PRs #36, #40).
+- Both are `experimental` for the **same honest reason**: under the evidence-based logic (PR #37) their
+  95% CI lower bounds miss the `validated_mvp` floors (thin positive counts), even where a point
+  estimate looks higher. **Thresholds and the gate were never weakened** to change this.
+- **Serving:** both load from the committed binary via the M7 API (`/predict` + `/explain`); ER is
+  explained with **TreeSHAP**, AR with **linear_coefficient** attribution. The registry stays **one row
+  per endpoint** (the variant-forward-compatible shape lives in the API response, not the registry).
+
+**Note on reporting (M4 vs M9):** M4 shipped the framework-free inference path and the structured
+`LimitationsBlock` attached to every prediction/explanation (the no-overclaiming guarantee) — **not**
+the full downloadable report engine. The report engine + one-command fresh-clone demo packaging (M9)
+remains open.
+
+---
+
 ## Issue 1 — M0: Repository scaffolding, tooling, and CI
 
 **1. Title** · `M0 — Repository scaffolding, tooling, and CI`
@@ -161,11 +220,15 @@ tests/fixtures/datasets/                                  # small offline extrac
 
 ## Issue 4 — M3: ER endpoint built through the toolchain (human-in-the-loop)
 
-> **Status — completed; ER registered as `experimental` (NOT `validated_mvp`).** The honest
-> nested estimate gave balanced accuracy 0.579 < the 0.60 floor, so the gate correctly
-> yielded `experimental`. That is the expected, honest outcome and the reference endpoint
-> the rest of the roadmap builds on — it must NOT be re-described as validated. The
-> `validated_mvp`/`experimental` wording below describes the gate *logic*, not a claim.
+> **Status — COMPLETE; ER registered as `experimental` (NOT `validated_mvp`).** ER is the
+> reference endpoint the rest of the roadmap builds on — it must NOT be re-described as
+> validated. **The rationale for `experimental` has since evolved:** the original run recorded
+> balanced accuracy 0.579 < a 0.60 floor; under the later **evidence-based, sample-aware status
+> logic (PR #37)** the endpoint is `experimental` because its 95% CI lower bounds miss the
+> `validated_mvp` floors on thin positives. ER's binary was subsequently **lost (dead DVC remote)
+> and deterministically reproduced byte-identical** from source, then committed serve-ready via a
+> deliberate un-freeze (PRs #39, #41). See the **Status snapshot** at the top for the current
+> reality; the `validated_mvp`/`experimental` wording below describes the gate *logic*, not a claim.
 
 **1. Title** · `M3 — ER endpoint built end-to-end through the toolchain (human-in-the-loop)`
 
@@ -254,14 +317,23 @@ tests/inference/   tests/explain/   tests/reporting/
 > tools — with gates, provenance, cards, and **HUMAN APPROVAL**. The differentiator is
 > **reproducible endpoint-building**, not a UI over one classifier.
 >
-> M0–M4 are complete (history above); ER is registered as `experimental`. **M5–M9 below are
-> proposed, not yet implemented.** The same rules apply to each: one issue = one branch =
-> one PR; stop after each for review; never weaken or bypass the gate (PROJECT_RULES §3.3),
-> never fabricate (§6.1), never claim regulatory-grade validation.
+> M0–M4 are complete (history above); ER is registered as `experimental`. **Status update
+> (see the Status snapshot at the top): M5 (PR #27), M6/AR (PRs #36, #40), M7 (PR #42), and M8
+> (PRs #43, #44) are now COMPLETE and merged; M9 (report engine + packaging) is not yet
+> implemented.** The issue specs below are the original plans, each annotated with its status.
+> The same rules applied to each and still apply to M9: one issue = one branch = one PR; stop
+> after each for review; never weaken or bypass the gate (PROJECT_RULES §3.3), never fabricate
+> (§6.1), never claim regulatory-grade validation.
 
 ---
 
 ## Issue 6 — M5: Builder Agent orchestrator + approval gate
+
+> **Status — COMPLETE (PR #27).** The Builder Agent sequences the tested M2 tools and stops at the
+> quality gate behind a structural human-approval token; it reimplements zero science. The
+> unroadmapped hardening that grew around it — the `endoscan_jobs` job-runner (M5.5), the CoMPARA
+> parser + five-mode label logic, the evidence-based status logic (PR #37), and registry
+> re-registration + frozen protection (PR #38) — is recorded in the Status snapshot at the top.
 
 **1. Title** · `M5 — Builder Agent orchestrator + approval gate`
 
@@ -304,6 +376,12 @@ tests/agent/                      # orchestration + boundary tests on fixtures
 
 ## Issue 7 — M6: Prove the thesis — agent builds a SECOND endpoint candidate
 
+> **Status — COMPLETE (PRs #36, #40); second endpoint = AR (Androgen Receptor).** Built through the
+> gated agent over CoMPARA (`functional_modulation`, binding excluded, VCaP/LINCS context). It was
+> **honestly demoted** `validated_mvp` → `experimental` under the evidence-based CI rule (thin
+> positives; CI lower bounds miss the floors) and committed serve-ready from a committed binary
+> (Option A). No bar was lowered. See the Status snapshot for AR's current reality.
+
 **1. Title** · `M6 — Prove the thesis: agent builds a SECOND endpoint candidate`
 
 **2. Goal** · Run the **M5 orchestrator** on a second candidate (e.g. **AR via CoMPARA**, or another feasible CERAPP-style target — **candidate TBD, decided at milestone start**). The point is **reproducing the BUILD WORKFLOW with minimal manual work**, NOT forcing a validated endpoint. If the data supports it → train/register **at the status the gate yields** (`experimental` or `validated_mvp`). If the data fails the gate → mark **`failed_qc`** with a clear dataset card + gate report. **BOTH outcomes are acceptable and successful** if honest and reproducible. State explicitly: **a documented `failed_qc` is a VALID, valuable outcome** — it proves the gate works on new data — and must not create pressure to lower any bar.
@@ -342,6 +420,14 @@ tests/agent/                                  # second-endpoint build + outcome 
 
 ## Issue 8 — M7: Thin FastAPI service
 
+> **Status — COMPLETE (PR #42).** Shipped as a **read-only** thin FastAPI over inference + registry:
+> `GET /health`, `GET /endpoints`, `GET /endpoints/{id}`, `POST /predict`, `POST /explain` — serving
+> BOTH endpoints (ER via TreeSHAP, AR via linear_coefficient), honesty-first responses (the full
+> `LimitationsBlock` on every result), and a variant-forward-compatible detail contract. **Scope
+> note:** the builder-admin routes (launch/status/approve/reject) in the original spec below were
+> **not** built — M7 landed as a read-only serving surface only; agent-admin-over-HTTP remains
+> possible future work.
+
 **1. Title** · `M7 — Thin FastAPI service`
 
 **2. Goal** · Serve inference/explainability for registered endpoints (`GET /endpoints`, `POST /predict`, `POST /explain`) **and** minimal **builder-admin** routes (launch build, check build status, view dataset quality report / gate verdict, approve/reject). **Thin**: NO science/business logic outside `endoscan_core` + the M5 agent.
@@ -376,6 +462,15 @@ tests/api/                                                                      
 ---
 
 ## Issue 9 — M8: Frontend (demo UI)
+
+> **Status — COMPLETE (PRs #43, #44).** Data-driven React + Vite + TypeScript + Tailwind SPA:
+> endpoint library + detail (limitations front-and-center, CI shown alongside each point metric),
+> and an Analyze "try-it" flow with **4 real, verified demo signatures** (JSON paste + picker;
+> profiles reproduced against current main; no fabricated/random signatures) → predict/explain with
+> honesty-first, no-overclaim copy and the correct attribution method label per endpoint. **Scope
+> note:** the internal **builder dashboard** in the original spec below was **not** built — M8 landed
+> as the screening/analysis UI over the read-only M7 API. Signature **upload** (CSV/Excel) and
+> compound lookup are deferred (see Deferred section).
 
 **1. Title** · `M8 — Frontend (demo UI)`
 
@@ -412,6 +507,11 @@ apps/web/tests/   # component/e2e (demo) checks
 
 ## Issue 10 — M9: Report engine + docs + MVP packaging
 
+> **Status — NOT yet implemented.** The honesty layer exists (M4's `LimitationsBlock` on every
+> result; the M8 UI surfaces limitations + verbatim scope), but the shareable downloadable **report
+> engine** and the one-command fresh-clone **demo packaging** are still open. This is the main
+> remaining MVP item.
+
 **1. Title** · `M9 — Report engine + docs + MVP packaging`
 
 **2. Goal** · A shareable **report** (prediction, score, top genes, limitations, provenance, endpoint status, model/dataset card links); **README + architecture diagram + demo walkthrough + example data + one-command local run**; portfolio/demo-ready.
@@ -445,13 +545,52 @@ tests/reporting/                                  # report-completeness checks
 
 ---
 
-## Deferred beyond MVP (must NOT block the MVP)
+## Deferred features (RECORDED, not started)
 
-Explicitly out of scope for the MVP; none of these may gate or delay M5–M9:
-- More endpoints beyond the second candidate.
-- Pathway / GO enrichment over the SHAP gene set.
-- DEDuCT / similar-compound contextualization.
-- Lasso / linear interpretability comparison (the `AttributionMethod` interface was left open in M4 for exactly this).
+Captured so they are not lost. **None of these is in progress** — this is a backlog, not a plan of
+record. Recording a feature here is not approval to build it; each remains a future milestone gated by
+the usual rules.
+
+**Endpoints & variants**
+- **Variant schema formalization.** An *endpoint* is a biological question; a *variant* is a
+  context-specific model (cell lines / dose / time). The M7 API already exposes a
+  **variant-forward-compatible** response shape and the registry is deliberately **one row per
+  endpoint**. Formalize a variant schema only **after ≥2 real variants exist** — not before.
+- **VCaP + A549 mixed-context AR variant** — the platform-scalability comparison; the
+  `extract_signatures` job is already parameterized for the cell-line set, so this is a data run + a
+  second AR variant, not new machinery.
+- **TR (thyroid receptor) — unresolved source-definition milestone.** There is **no allow-listed
+  experimental TR source** today; blocked on a ToxCast/Tox21 assay-selection decision (which assays
+  define the functional TR label). Must be resolved before a TR endpoint can be built through the gate.
+- More endpoints beyond ER/AR/TR.
+
+**Input & data-entry**
+- **Molecule-name → signature lookup / compound search** — name → CID/InChIKey resolution,
+  open-signature indexing, cell-line/dose/time selection, and explicit **"no open signature found"**
+  handling. Future milestone (kept out of M8).
+- **CSV/Excel signature upload** — needs format validation + UX decisions; follow-up (a minimal CSV
+  paste-alternative may be proposed separately if near-zero-cost).
+- **Compatibility checker** — does an uploaded signature match an endpoint's training context
+  (cell lines / platform / normalization) before predicting?
+
+**Explainability**
+- **Linear-model attribution is DONE** — AR uses `linear_coefficient` (PR #42). *Additional*
+  attribution methods would only be future work **if new model families appear** (the
+  `AttributionMethod` protocol stays open for that). Also still deferred: pathway/GO enrichment over
+  the attributed gene set; DEDuCT / similar-compound contextualization; nearest-neighbour
+  similar-signature lookup.
+
+**Serving, deployment & storage**
+- **Production API CORS + hosting** for a public demo URL (M8 uses a Vite dev proxy; the API is
+  read-only and CORS-free in dev).
+- **A proper artifact registry / object-storage DVC remote** once models grow beyond the current
+  ~≤3 MB *commit-the-binary-directly* (Option A) approach.
 - Batch prediction + batch reporting.
-- Production deployment / hosting + CI-CD.
-- Regulatory-grade validation / larger-N endpoints to reach `validated_mvp`.
+
+**Autonomy & governance**
+- **Data-scout / source-card / autonomous endpoint expansion** — remains **propose-only** per
+  PROJECT_RULES (§3.1a); recorded as future, kept as-is (no open-web scraping; allow-list only).
+
+**Quality**
+- Regulatory-grade validation / larger-N datasets to legitimately reach `validated_mvp` (must be
+  earned through the unchanged gate, never by lowering a bar).
