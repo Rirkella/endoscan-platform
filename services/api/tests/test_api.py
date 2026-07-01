@@ -123,14 +123,15 @@ def test_malformed_body_returns_422(client) -> None:
 
 
 # 9 -----------------------------------------------------------------------------------
-def test_explain_returns_contributors_for_tree_endpoint(client, full_signature) -> None:
-    # ER is random_forest -> TreeSHAP applies. (/explain is a clean 503 if shap is absent.)
+def test_explain_tree_endpoint_uses_tree_shap(client, full_signature) -> None:
+    # ER is random_forest -> TreeSHAP. (/explain is a clean 503 if shap is absent.)
     pytest.importorskip("shap")
     r = client.post(
         "/explain", json={"endpoint_id": "ER", "signature": full_signature("ER"), "top_n": 5}
     )
     assert r.status_code == 200
     body = r.json()
+    assert body["method"] == "tree_shap"  # unchanged behavior for the tree endpoint
     assert body["n_features"] == 978
     assert 1 <= len(body["top_contributors"]) <= 5
     assert all(c["direction"] in {"toward", "away"} for c in body["top_contributors"])
@@ -138,10 +139,34 @@ def test_explain_returns_contributors_for_tree_endpoint(client, full_signature) 
 
 
 # 9b ----------------------------------------------------------------------------------
-def test_explain_unsupported_for_linear_endpoint_is_clean_501(client, full_signature) -> None:
-    # AR is ridge_logreg -> the only implemented attributor (TreeSHAP) can't explain it.
-    # The API returns a clean 501 (not a 500); /predict for AR is unaffected (test 6).
-    pytest.importorskip("shap")
+def test_explain_linear_endpoint_uses_coefficient_attribution(client, full_signature) -> None:
+    # AR is ridge_logreg -> coefficient attribution (no shap needed). Returns 200 now.
+    r = client.post(
+        "/explain", json={"endpoint_id": "AR", "signature": full_signature("AR"), "top_n": 5}
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["method"] == "linear_coefficient"  # labeled honestly, NOT tree_shap
+    assert body["n_features"] == 978
+    assert 1 <= len(body["top_contributors"]) <= 5
+    assert all(c["direction"] in {"toward", "away"} for c in body["top_contributors"])
+    # The explanation still carries AR's honest limitations (experimental + the CI reasons).
+    assert body["limitations"]["is_experimental"] is True
+    assert AR_CI_REASONS <= set(body["limitations"]["missed_criteria"])
+
+
+# 9c ----------------------------------------------------------------------------------
+def test_explain_genuinely_unsupported_model_is_clean_501(
+    client, full_signature, monkeypatch
+) -> None:
+    # A model type that is neither tree nor linear still returns a clean 501 (not a 500).
+    from endoscan_api.routes import inference as inf
+    from endoscan_core.inference import UnsupportedModelForExplanationError
+
+    def _unsupported(*args, **kwargs):
+        raise UnsupportedModelForExplanationError("no implemented attributor for model type 'Foo'")
+
+    monkeypatch.setattr(inf, "explain", _unsupported)
     r = client.post("/explain", json={"endpoint_id": "AR", "signature": full_signature("AR")})
     assert r.status_code == 501
     assert r.json()["error"] == "explain_unsupported_for_model"

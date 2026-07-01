@@ -11,8 +11,11 @@ from .explain import (
     AttributionMethod,
     ExplanationResult,
     GeneAttribution,
+    LinearCoefficientAttribution,
     TreeSHAPAttribution,
+    UnsupportedModelForExplanationError,
     explain,
+    select_attribution_method,
 )
 from .limitations import LimitationsBlock, build_limitations, missed_criteria
 from .predict import (
@@ -35,10 +38,12 @@ __all__ = [
     "ExplanationResult",
     "GeneAttribution",
     "LimitationsBlock",
+    "LinearCoefficientAttribution",
     "ModelArtifactUnavailableError",
     "PredictionResult",
     "SignatureValidationError",
     "TreeSHAPAttribution",
+    "UnsupportedModelForExplanationError",
     "align_signature",
     "build_limitations",
     "endpoint_entry",
@@ -48,5 +53,6 @@ __all__ = [
     "missed_criteria",
     "predict",
     "predict_batch",
+    "select_attribution_method",
     "validate_signature",
 ]
