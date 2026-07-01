@@ -1,0 +1,20 @@
+"""Liveness + which committed endpoints are warmed and whether /explain is available."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
+
+from ..schemas import HealthResponse
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/", response_model=HealthResponse)
+@router.get("/health", response_model=HealthResponse)
+def health(request: Request) -> HealthResponse:
+    state = request.app.state
+    return HealthResponse(
+        status="ok",
+        endpoints_loaded=list(state.endpoints_loaded),
+        explain_available=bool(state.explain_available),
+    )
