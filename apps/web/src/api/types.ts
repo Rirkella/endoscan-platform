@@ -105,6 +105,48 @@ export interface ExplanationResult {
 
 export type Signature = Record<string, number>;
 
+// --- signature upload / parse (POST /signatures/parse) ---
+export interface ParsePreview {
+  n_detected: number;
+  n_matched: number;
+  n_missing: number;
+  n_extra: number;
+  missing_genes: string[];
+  extra_genes: string[];
+  samples: string[] | null;
+  selected_sample: string | null;
+  needs_sample: boolean;
+}
+
+export interface ParseResult {
+  aligned: boolean;
+  format: string;
+  schema_endpoint_id: string;
+  n_schema_genes: number;
+  preview: ParsePreview;
+  signature: Signature | null;
+}
+
+// --- analyze across all endpoints (POST /analyze) ---
+// The API's ErrorResponse shape (no HTTP status — this is a per-endpoint entry, top-level is 200).
+export interface ErrorBody {
+  error: string;
+  detail: string;
+  endpoint_id: string | null;
+}
+
+export interface AnalyzeEndpointResult {
+  endpoint_id: string;
+  biological_target: string;
+  ok: boolean;
+  result: PredictionResult | null;
+  error: ErrorBody | null;
+}
+
+export interface AnalyzeResponse {
+  results: AnalyzeEndpointResult[];
+}
+
 // A structured API error (the ErrorResponse shape) surfaced to the UI. `status` is the HTTP
 // code; `error`/`detail` come from the API verbatim (e.g. the gene-level 422 message).
 export interface ApiError {

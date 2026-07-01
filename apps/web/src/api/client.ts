@@ -4,11 +4,13 @@
 // {error, detail} (e.g. the gene-level 422 message) so the UI can render it verbatim.
 
 import type {
+  AnalyzeResponse,
   ApiError,
   EndpointDetail,
   EndpointSummary,
   ExplanationResult,
   Health,
+  ParseResult,
   PredictionResult,
   Signature,
 } from "./types";
@@ -83,4 +85,28 @@ export const api = {
     postJson<PredictionResult>("/predict", { endpoint_id, signature, allow_extra }),
   explain: (endpoint_id: string, signature: Signature, top_n = 10, allow_extra = false) =>
     postJson<ExplanationResult>("/explain", { endpoint_id, signature, top_n, allow_extra }),
+
+  // Run a signature across ALL endpoints in one call (per-endpoint isolation server-side).
+  analyze: (signature: Signature, allow_extra = false) =>
+    postJson<AnalyzeResponse>("/analyze", { signature, allow_extra }),
+
+  // Upload parse + validate (multipart). The server is the ONE gene validator — the client
+  // never validates genes; a 4xx here carries the API's verbatim message.
+  parseSignature: async (opts: {
+    file?: File;
+    content?: string;
+    format: "json" | "csv";
+    allow_extra?: boolean;
+    sample?: string | null;
+  }): Promise<ParseResult> => {
+    const fd = new FormData();
+    if (opts.file) fd.append("file", opts.file);
+    if (opts.content != null) fd.append("content", opts.content);
+    fd.append("format", opts.format);
+    if (opts.allow_extra) fd.append("allow_extra", "true");
+    if (opts.sample) fd.append("sample", opts.sample);
+    const res = await fetch(url("/signatures/parse"), { method: "POST", body: fd });
+    if (!res.ok) throw await toError(res);
+    return (await res.json()) as ParseResult;
+  },
 };

@@ -20,7 +20,7 @@ from endoscan_core.registry import find_repo_root, list_endpoints
 
 from .deps import get_cached_model
 from .errors import register_exception_handlers
-from .routes import endpoints, health, inference
+from .routes import analyze, endpoints, health, inference, signatures
 
 API_TITLE = "EndoScan Serving API"
 API_DESCRIPTION = (
@@ -96,4 +96,6 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(endpoints.router)
     app.include_router(inference.router)
+    app.include_router(signatures.router)
+    app.include_router(analyze.router)
     return app

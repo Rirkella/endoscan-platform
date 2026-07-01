@@ -1,0 +1,20 @@
+{
+  "aligned": true,
+  "format": "json",
+  "schema_endpoint_id": "ER",
+  "n_schema_genes": 978,
+  "preview": {
+    "n_detected": 978,
+    "n_matched": 978,
+    "n_missing": 0,
+    "n_extra": 0,
+    "missing_genes": [],
+    "extra_genes": [],
+    "samples": null,
+    "selected_sample": null,
+    "needs_sample": false
+  },
+  "signature": {
+    "A1BG": 0.0
+  }
+}

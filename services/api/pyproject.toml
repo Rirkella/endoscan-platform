@@ -13,6 +13,8 @@ dependencies = [
     "endoscan-core",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    # Required by FastAPI to parse multipart/form-data uploads (POST /signatures/parse).
+    "python-multipart>=0.0.9",
 ]
 
 # Explainability EXTRA — mirrors endoscan-core[explain]. TreeSHAP is only needed by

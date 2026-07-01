@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 
+import analyze from "./fixtures/analyze.json";
 import endpointAR from "./fixtures/endpoint_AR.json";
 import endpointER from "./fixtures/endpoint_ER.json";
 import endpoints from "./fixtures/endpoints.json";
@@ -8,6 +9,8 @@ import error422 from "./fixtures/error_422_signature.json";
 import explainAR from "./fixtures/explain_AR.json";
 import explainER from "./fixtures/explain_ER.json";
 import health from "./fixtures/health.json";
+import parseInvalid from "./fixtures/parse_invalid.json";
+import parseOk from "./fixtures/parse_ok.json";
 import predictAR from "./fixtures/predict_AR.json";
 import predictER from "./fixtures/predict_ER.json";
 
@@ -27,6 +30,8 @@ function defaultRoutes(): Record<string, Resolver> {
     "POST /api/explain": (b) => ({
       body: (b as { endpoint_id: string }).endpoint_id === "ER" ? explainER : explainAR,
     }),
+    "POST /api/analyze": { body: analyze },
+    "POST /api/signatures/parse": { body: parseOk },
   };
 }
 
@@ -40,7 +45,8 @@ export function installFetchMock(overrides: Record<string, Resolver> = {}): void
       const method = (init?.method ?? "GET").toUpperCase();
       const entry = routes[`${method} ${path}`];
       if (!entry) return new Response(JSON.stringify({ detail: "unmocked" }), { status: 500 });
-      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      // Only JSON string bodies are parsed for resolvers; multipart FormData (uploads) is ignored.
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
       const resolved = typeof entry === "function" ? entry(body) : entry;
       return new Response(JSON.stringify(resolved.body), {
         status: resolved.status ?? 200,
@@ -51,6 +57,7 @@ export function installFetchMock(overrides: Record<string, Resolver> = {}): void
 }
 
 export {
+  analyze,
   endpointAR,
   endpointER,
   endpoints,
@@ -58,6 +65,8 @@ export {
   error422,
   explainAR,
   explainER,
+  parseInvalid,
+  parseOk,
   predictAR,
   predictER,
 };

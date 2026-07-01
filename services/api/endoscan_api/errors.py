@@ -15,6 +15,7 @@ from endoscan_core.inference import (
 )
 from endoscan_core.registry import EndpointNotFoundError
 
+from .parsing import MalformedUploadError
 from .schemas import ErrorResponse
 
 
@@ -29,8 +30,14 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(SignatureValidationError)
     async def _bad_signature(request: Request, exc: SignatureValidationError) -> JSONResponse:
-        # Well-formed JSON but the signature failed the endpoint's schema contract.
+        # Parsed OK, but the signature content failed the endpoint's schema contract
+        # (missing/extra genes, non-finite values) — the model's own validator, verbatim.
         return JSONResponse(status_code=422, content=_payload("invalid_signature", str(exc)))
+
+    @app.exception_handler(MalformedUploadError)
+    async def _malformed_upload(request: Request, exc: MalformedUploadError) -> JSONResponse:
+        # The bytes could not be turned into a signature at all (structure/parse problem).
+        return JSONResponse(status_code=400, content=_payload("malformed_upload", str(exc)))
 
     @app.exception_handler(ModelArtifactUnavailableError)
     async def _model_unavailable(

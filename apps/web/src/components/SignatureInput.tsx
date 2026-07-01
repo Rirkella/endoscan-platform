@@ -58,7 +58,7 @@ export function SignatureInput({ onSignature, disabled }: Props) {
 
   return (
     <div className="space-y-3">
-      <UploadZone />
+      <UploadZone onSignature={onSignature} disabled={disabled} />
 
       {demoSignatures.length > 0 ? (
         <div>
