@@ -38,11 +38,11 @@ describe("Analyze-first IA + score cards", () => {
   it("Analyze is the default route (/)", async () => {
     renderApp("/");
     expect(await screen.findByRole("heading", { name: /Analyze a signature/i })).toBeInTheDocument();
-    // The disabled upload zone is present but non-functional (Phase 2 placeholder).
-    const upload = screen.getByText(/Upload a signature file/i).closest("div")!;
-    expect(upload).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText(/coming in the next update/i)).toBeInTheDocument();
-    // Explore is a disabled "coming later" chip — no route, no fake content.
+    // Phase 2: the upload zone is now ENABLED (a functional file input, not the disabled placeholder).
+    expect(screen.getByText(/Upload a signature file/i)).toBeInTheDocument();
+    const fileIn = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(fileIn).not.toBeDisabled();
+    // Explore is still a disabled "coming later" chip — no route, no fake content.
     const explore = screen.getByText(/Explore/i).closest("span")!;
     expect(explore).toHaveAttribute("aria-disabled", "true");
   });
@@ -68,11 +68,16 @@ describe("Analyze-first IA + score cards", () => {
       input_type: "transcriptomics",
       frozen: false,
     }));
+    const results = six.map((e) => ({
+      endpoint_id: e.endpoint_id,
+      biological_target: e.biological_target,
+      ok: true,
+      result: { ...predictAR, endpoint_id: e.endpoint_id },
+      error: null,
+    }));
     installFetchMock({
-      "GET /api/endpoints": { body: six },
-      "POST /api/predict": (b) => ({
-        body: { ...predictAR, endpoint_id: (b as { endpoint_id: string }).endpoint_id },
-      }),
+      "GET /api/endpoints": { body: six }, // so the Analyze button enables
+      "POST /api/analyze": { body: { results } },
     });
     const { container } = renderApp("/");
     await analyze();

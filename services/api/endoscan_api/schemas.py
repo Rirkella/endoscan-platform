@@ -20,6 +20,9 @@ from endoscan_core.inference import (
 )
 
 __all__ = [
+    "AnalyzeEndpointResult",
+    "AnalyzeRequest",
+    "AnalyzeResponse",
     "ContextBlock",
     "ContextVariant",
     "EndpointDetail",
@@ -30,6 +33,8 @@ __all__ = [
     "HealthResponse",
     "LimitationsBlock",
     "MetricsSummary",
+    "ParsePreview",
+    "ParseResult",
     "PredictRequest",
     "PredictionResult",
 ]
@@ -148,3 +153,68 @@ class ErrorResponse(BaseModel):
     error: str
     detail: str
     endpoint_id: str | None = None
+
+
+# --- signature upload / parse --------------------------------------------------------
+
+
+class ParsePreview(BaseModel):
+    """Real (never fabricated) summary of how the uploaded signature aligns to the schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    n_detected: int  # genes found in the upload
+    n_matched: int  # of the schema's genes, how many the upload supplied
+    n_missing: int
+    n_extra: int
+    missing_genes: list[str]  # truncated
+    extra_genes: list[str]  # truncated
+    samples: list[str] | None = None  # multi-column CSV: the sample column names
+    selected_sample: str | None = None
+    needs_sample: bool = False  # multi-column + no sample chosen -> the UI must pick one
+
+
+class ParseResult(BaseModel):
+    """Result of parsing + validating an uploaded signature against an endpoint's schema."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    aligned: bool
+    format: str
+    schema_endpoint_id: str  # which endpoint's schema it was validated against
+    n_schema_genes: int
+    preview: ParsePreview
+    # The aligned {gene: value} in schema order, ready to POST to /analyze. None when the upload
+    # needs a sample choice first (multi-column CSV) — never a fabricated signature.
+    signature: dict[str, float] | None = None
+
+
+# --- analyze across all endpoints ----------------------------------------------------
+
+
+class AnalyzeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signature: dict[str, float] = Field(
+        ..., description="A transcriptomic signature (gene->value)."
+    )
+    allow_extra: bool = Field(False, description="Drop genes not in an endpoint's schema.")
+
+
+class AnalyzeEndpointResult(BaseModel):
+    """One endpoint's outcome in a fan-out. `result` on success, `error` on failure — a failing
+    endpoint does NOT sink the others (per-endpoint isolation)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: str
+    biological_target: str
+    ok: bool
+    result: PredictionResult | None = None
+    error: ErrorResponse | None = None
+
+
+class AnalyzeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    results: list[AnalyzeEndpointResult]
