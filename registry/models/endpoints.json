@@ -19,6 +19,26 @@
         "lincs",
         "pubchem"
       ]
+    },
+    {
+      "endpoint_id": "AR",
+      "biological_target": "Androgen Receptor",
+      "input_type": "transcriptomics",
+      "model_path": "models/AR/model.pkl",
+      "feature_schema_path": "models/AR/feature_schema.json",
+      "metrics_path": "models/AR/metrics.json",
+      "explainer_path": null,
+      "model_card_path": "models/AR/model_card.md",
+      "dataset_card_path": "models/AR/dataset_card.md",
+      "status": "experimental",
+      "version": "0.1.0",
+      "created_at": "2026-06-30T19:49:56Z",
+      "frozen": false,
+      "source_refs": [
+        "compara",
+        "lincs",
+        "pubchem"
+      ]
     }
   ]
 }

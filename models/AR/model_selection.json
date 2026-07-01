@@ -1,0 +1,78 @@
+{
+  "selected_model": "ridge_logreg",
+  "tolerance": 0.02,
+  "primary_metrics": [
+    "auroc",
+    "auprc"
+  ],
+  "rule": "Among candidates within `tolerance` of the best AUROC and AUPRC, prefer the lowest (interpretability_tier, simplicity_tier). Measured cost is reported but not used in the automated tie-break. Final pick is human-approved.",
+  "candidates": [
+    {
+      "name": "ridge_logreg",
+      "auroc": 0.7107533064979874,
+      "auprc": 0.4937130845460808,
+      "balanced_accuracy": 0.6450546290971823,
+      "brier_score": 0.22014450019466558,
+      "auroc_fold_std": 0.09562249571874992,
+      "train_seconds": 1.637409752998792,
+      "infer_seconds": 0.01703185900259996,
+      "interpretability_tier": 1,
+      "simplicity_tier": 1
+    },
+    {
+      "name": "elastic_net_logreg",
+      "auroc": 0.7104657849338701,
+      "auprc": 0.4665013875302949,
+      "balanced_accuracy": 0.6441920644048303,
+      "brier_score": 0.2030560896324659,
+      "auroc_fold_std": 0.057572173559442726,
+      "train_seconds": 6.923813044995768,
+      "infer_seconds": 0.017459372993471334,
+      "interpretability_tier": 1,
+      "simplicity_tier": 1
+    },
+    {
+      "name": "lasso_logreg",
+      "auroc": 0.7081656124209316,
+      "auprc": 0.460104462093317,
+      "balanced_accuracy": 0.6364289821736631,
+      "brier_score": 0.20512626438637352,
+      "auroc_fold_std": 0.044146125322595355,
+      "train_seconds": 8.024711404999834,
+      "infer_seconds": 0.017820886998379137,
+      "interpretability_tier": 1,
+      "simplicity_tier": 1
+    },
+    {
+      "name": "random_forest",
+      "auroc": 0.6840138010350777,
+      "auprc": 0.4580242808750623,
+      "balanced_accuracy": 0.5737492811960897,
+      "brier_score": 0.19676354961832063,
+      "auroc_fold_std": 0.07618626803464991,
+      "train_seconds": 0.7141374359962356,
+      "infer_seconds": 0.03984687699994538,
+      "interpretability_tier": 3,
+      "simplicity_tier": 2
+    },
+    {
+      "name": "gradient_boosting",
+      "auroc": 0.6069580218516388,
+      "auprc": 0.45156973729243244,
+      "balanced_accuracy": 0.5606670500287522,
+      "brier_score": 0.2973252423394605,
+      "auroc_fold_std": 0.10481486028780644,
+      "train_seconds": 3.073407952004345,
+      "infer_seconds": 0.017217402000824222,
+      "interpretability_tier": 3,
+      "simplicity_tier": 3
+    }
+  ],
+  "nested_per_fold_selected": [
+    "ridge_logreg",
+    "ridge_logreg",
+    "ridge_logreg",
+    "ridge_logreg",
+    "ridge_logreg"
+  ]
+}

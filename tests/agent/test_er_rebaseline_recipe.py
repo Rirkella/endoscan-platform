@@ -64,12 +64,12 @@ def test_er_rebuild_uses_same_thresholds_and_floors_no_change() -> None:
     assert real.training.validated_mvp_ceilings == fixture.training.validated_mvp_ceilings
 
 
-def test_er_frozen_registry_entry_untouched_by_this_pr() -> None:
-    # This PR adds recipe/config/runbook only — it does NOT touch the registry. ER stays
-    # frozen + experimental; the un-freeze/re-baseline is a separate reviewed PR.
+def test_er_frozen_registry_entry_intact() -> None:
+    # ER's frozen baseline entry stays intact regardless of other endpoints being added
+    # (AR was registered separately). The rebaseline recipe/config PR does not touch it.
     index = json.loads((REPO_ROOT / "registry/models/endpoints.json").read_text())
     ids = [e["endpoint_id"] for e in index["endpoints"]]
-    assert ids == ["ER"]  # AR still not registered; registry unchanged
-    er = index["endpoints"][0]
+    assert "ER" in ids
+    er = next(e for e in index["endpoints"] if e["endpoint_id"] == "ER")
     assert er["frozen"] is True and er["status"] == "experimental"
     assert er["model_path"] == "models/ER/model.pkl"  # entry shape unchanged
