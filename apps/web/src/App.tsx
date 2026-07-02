@@ -28,14 +28,9 @@ export default function App() {
             <NavLink to="/library" className={navClass}>
               Model Library
             </NavLink>
-            {/* Explore is reserved — a DISABLED "coming later" chip, not a route/page (no fake data). */}
-            <span
-              aria-disabled="true"
-              title="Coming later — pathway / analogue / embedding views need real data"
-              className="cursor-not-allowed rounded-md px-3 py-2 text-sm font-medium text-muted/60"
-            >
-              Explore <span className="text-[10px] uppercase">(coming later)</span>
-            </span>
+            <NavLink to="/explore" className={navClass}>
+              Explore
+            </NavLink>
           </nav>
         </div>
       </header>

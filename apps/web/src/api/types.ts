@@ -155,3 +155,63 @@ export interface ApiError {
   detail: string;
   endpoint_id: string | null;
 }
+
+// --- Explore: the data-space (UMAP) view (GET /explore/{ctx}/umap, POST /explore/locate) ---
+// UMAP is a VISUALIZATION of the real training data, not a boundary/proof. A submitted
+// signature is placed APPROXIMATELY by nearest neighbours (no exact projection), and there is
+// no in-/out-of-domain flag — only a defined distance metric vs the training reference.
+
+export interface ExplorePoint {
+  compound_id: string;
+  x: number;
+  y: number;
+  label: string | null; // "active" | "inactive" | null (never fabricated)
+}
+
+export interface ExploreCounts {
+  n_total: number;
+  n_active: number;
+  n_inactive: number;
+  n_unlabeled: number;
+}
+
+export interface ExploreManifestSummary {
+  target: string;
+  n_compounds: number;
+  umap: Record<string, unknown>;
+  domain_metric_k: number;
+  label_status: string;
+  source_sha256: string;
+  built_at: string | null;
+}
+
+export interface ExploreMap {
+  context: string;
+  points: ExplorePoint[];
+  counts: ExploreCounts;
+  manifest: ExploreManifestSummary;
+}
+
+export interface ExploreNeighbor {
+  compound_id: string;
+  distance: number;
+  x: number;
+  y: number;
+  label: string | null;
+}
+
+export interface ExploreDomain {
+  metric: string;
+  k: number;
+  query_kth_distance: number;
+  training_reference_quantiles: Record<string, number>;
+  percentile: number;
+}
+
+export interface ExploreLocateResult {
+  context: string;
+  placement: string; // always "approximate_nearest_neighbor"
+  approx_xy: { x: number; y: number };
+  neighbors: ExploreNeighbor[];
+  domain: ExploreDomain;
+}

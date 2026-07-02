@@ -1,0 +1,29 @@
+{
+  "context": "ER",
+  "points": [
+    { "compound_id": "CID_00", "x": -3.1, "y": 1.2, "label": "active" },
+    { "compound_id": "CID_01", "x": -2.8, "y": 1.6, "label": "active" },
+    { "compound_id": "CID_02", "x": -3.4, "y": 0.9, "label": "active" },
+    { "compound_id": "CID_03", "x": 2.9, "y": -1.1, "label": "inactive" },
+    { "compound_id": "CID_04", "x": 3.2, "y": -0.7, "label": "inactive" },
+    { "compound_id": "CID_05", "x": 2.6, "y": -1.4, "label": "inactive" },
+    { "compound_id": "CID_06", "x": 0.1, "y": 0.2, "label": null }
+  ],
+  "counts": { "n_total": 7, "n_active": 3, "n_inactive": 3, "n_unlabeled": 1 },
+  "manifest": {
+    "target": "ER",
+    "n_compounds": 7,
+    "umap": {
+      "n_neighbors": 5,
+      "min_dist": 0.1,
+      "metric": "euclidean",
+      "n_components": 2,
+      "random_state": 42,
+      "umap_version": "0.5.12"
+    },
+    "domain_metric_k": 5,
+    "label_status": "joined",
+    "source_sha256": "fixturehash0000000000000000000000000000000000000000000000000000",
+    "built_at": "2026-07-02T00:00:00+00:00"
+  }
+}

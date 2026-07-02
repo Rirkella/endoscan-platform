@@ -9,6 +9,8 @@ import type {
   EndpointDetail,
   EndpointSummary,
   ExplanationResult,
+  ExploreLocateResult,
+  ExploreMap,
   Health,
   ParseResult,
   PredictionResult,
@@ -89,6 +91,13 @@ export const api = {
   // Run a signature across ALL endpoints in one call (per-endpoint isolation server-side).
   analyze: (signature: Signature, allow_extra = false) =>
     postJson<AnalyzeResponse>("/analyze", { signature, allow_extra }),
+
+  // Explore: the committed data-space (UMAP) map for a context (404 when not yet computed).
+  exploreUmap: (context: string) =>
+    getJson<ExploreMap>(`/explore/${encodeURIComponent(context)}/umap`),
+  // Place a signature by nearest neighbours (approximate; never an exact projection).
+  exploreLocate: (context: string, signature: Signature, allow_extra = false) =>
+    postJson<ExploreLocateResult>("/explore/locate", { context, signature, allow_extra }),
 
   // Upload parse + validate (multipart). The server is the ONE gene validator — the client
   // never validates genes; a 4xx here carries the API's verbatim message.

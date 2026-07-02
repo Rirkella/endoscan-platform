@@ -1,0 +1,73 @@
+{
+  "target": "EXPLORE_FIX",
+  "n_compounds": 12,
+  "feature_names": [
+    "GENE_A",
+    "GENE_B",
+    "GENE_C",
+    "GENE_D"
+  ],
+  "compound_ids": [
+    "CID_00",
+    "CID_01",
+    "CID_02",
+    "CID_03",
+    "CID_04",
+    "CID_05",
+    "CID_06",
+    "CID_07",
+    "CID_08",
+    "CID_09",
+    "CID_10",
+    "CID_11"
+  ],
+  "umap": {
+    "n_neighbors": 4,
+    "requested_n_neighbors": 4,
+    "min_dist": 0.1,
+    "metric": "euclidean",
+    "n_components": 2,
+    "random_state": 42,
+    "umap_version": "0.5.12"
+  },
+  "domain_metric": {
+    "metric": "distance_to_kth_training_neighbor",
+    "k": 3,
+    "requested_k": 3,
+    "quantiles": {
+      "min": 0.5640201009743462,
+      "p25": 0.587515746500116,
+      "median": 0.748559273332521,
+      "p75": 0.9258573560535964,
+      "p95": 0.9934754039027079,
+      "max": 1.0138746876755695
+    },
+    "training_kth_nn_distances": [
+      0.5640201009743462,
+      0.5747602716163657,
+      0.5868735377361884,
+      0.5877298160880918,
+      0.7112533773017277,
+      0.7112533773017277,
+      0.7858651693633145,
+      0.8510094160829338,
+      0.9216234493555655,
+      0.9385590761476893,
+      0.9767850808158212,
+      1.0138746876755695
+    ]
+  },
+  "labels": {
+    "status": "joined",
+    "n_total": 12,
+    "n_active": 6,
+    "n_inactive": 6,
+    "n_unlabeled": 0
+  },
+  "source": {
+    "key": "curated/EXPLORE_FIX/signatures.parquet",
+    "sha256": "acc577509e9e163c20e677339a33f083ec28452afd884c4b8bdaa18363f71280"
+  },
+  "support_sha256": "87203364be9865f2d63820dab78e3a07ea828144336154c82c56ad38f6d36c23",
+  "built_at": "2026-07-02T13:22:47.493534+00:00"
+}

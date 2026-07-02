@@ -20,6 +20,9 @@ dependencies = [
     "rdkit>=2024.3",
     # the LINCS gctx slicer (extract_signatures job) reads HDF5 via h5py (NumPy-2 safe).
     "h5py>=3.11",
+    # the build_explore_map job fits a seeded UMAP over curated signatures (server-side, heavy).
+    # UMAP lives HERE only — the serving API never imports it (it does light k-NN with numpy).
+    "umap-learn>=0.5",
 ]
 
 [build-system]

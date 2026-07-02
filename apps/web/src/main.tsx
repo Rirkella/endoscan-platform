@@ -5,6 +5,7 @@ import { RouterProvider, createBrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./index.css";
 import { Analyze } from "./pages/Analyze";
+import { Explore } from "./pages/Explore";
 import { ModelEvidence } from "./pages/ModelEvidence";
 import { ModelLibrary } from "./pages/ModelLibrary";
 
@@ -16,6 +17,7 @@ const router = createBrowserRouter([
       { index: true, element: <Analyze /> }, // Analyze is the default landing flow
       { path: "library", element: <ModelLibrary /> },
       { path: "library/:id", element: <ModelEvidence /> },
+      { path: "explore", element: <Explore /> },
     ],
   },
 ]);
