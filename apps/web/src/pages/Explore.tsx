@@ -16,6 +16,17 @@ import { SignatureInput } from "../components/SignatureInput";
 import { useAsync } from "../hooks/useAsync";
 import { useExplore } from "../hooks/useExplore";
 
+// Transparent percentile -> plain similarity band. `percentile` is the fraction of training
+// compounds whose own k-th-neighbour distance is <= the query's, so a HIGHER percentile means the
+// signature is MORE isolated (further) from the reference data. The cut is fixed and shown in the
+// Technical details, so "close/moderately close/far" is always traceable to the real number.
+type SimilarityBand = "close" | "moderately close" | "far";
+function similarityBand(percentile: number): SimilarityBand {
+  if (percentile <= 0.5) return "close";
+  if (percentile <= 0.9) return "moderately close";
+  return "far";
+}
+
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
     <span className="inline-flex items-center gap-1 text-xs text-muted">
@@ -48,11 +59,11 @@ export function Explore() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Explore the data space</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Reference landscape</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted">
-          A 2-D map of the transcriptomic signatures each endpoint model was trained on. This is a{" "}
-          <strong>visualization of the training data&rsquo;s structure</strong> — not a model
-          boundary and not proof of anything.
+          See where your signature sits among known reference signatures. Nearby compounds show
+          similar expression patterns — this can suggest comparisons worth investigating, but it
+          does not prove the same biological effect.
         </p>
       </header>
 
@@ -84,14 +95,14 @@ export function Explore() {
         {/* Map column */}
         <div className="space-y-3">
           {(map.loading || context == null) && (
-            <p className="text-sm text-muted">Loading the data-space map…</p>
+            <p className="text-sm text-muted">Loading the reference landscape…</p>
           )}
 
           {notComputed && context != null && (
             <div className="rounded-lg border border-line bg-surface p-6 text-sm text-muted">
-              <p className="font-medium text-ink">Data-space map not yet computed</p>
+              <p className="font-medium text-ink">Reference landscape not yet available</p>
               <p className="mt-1">
-                No UMAP artifact has been built for <strong>{context}</strong> yet. This view stays
+                No reference map has been built for <strong>{context}</strong> yet. This view stays
                 empty until a real map is computed on the server — no placeholder points are shown.
               </p>
             </div>
@@ -125,9 +136,8 @@ export function Explore() {
                 {map.data.counts.n_inactive > 0 && <LegendDot color="#475569" label="inactive" />}
               </div>
               <p className="text-xs text-muted">
-                UMAP is a visualization of how the training signatures relate — it is{" "}
-                <strong>not a model boundary and not proof</strong>. Distances used for placement
-                are computed in the full 978-gene space, not on this 2-D map.
+                This map shows how known reference signatures relate to each other. It&rsquo;s a
+                visual guide — <strong>not a model boundary, and not proof of anything</strong>.
               </p>
             </>
           )}
@@ -138,54 +148,123 @@ export function Explore() {
           <div className="rounded-md border border-line bg-surface p-3">
             <h2 className="text-sm font-medium text-ink">Place a signature</h2>
             <p className="mt-1 text-xs text-muted">
-              Bring a signature to see its nearest known compounds. Placement is{" "}
-              <strong>approximate</strong> (nearest neighbours) — not an exact projection.
+              Bring a signature to find the most similar known compounds. Its position is{" "}
+              <strong>approximate</strong> — based on the most similar signatures, not an exact
+              placement.
             </p>
             <div className="mt-3">
               <SignatureInput onSignature={onSignature} disabled={explore.running || !context} />
             </div>
           </div>
 
-          {explore.running && <p className="text-sm text-muted">Finding nearest neighbours…</p>}
+          {explore.running && <p className="text-sm text-muted">Finding similar compounds…</p>}
           {explore.error != null && <ErrorNotice error={explore.error} />}
 
           {explore.result && (
-            <div className="space-y-2 rounded-md border border-line bg-white p-3">
+            <div className="space-y-3 rounded-md border border-line bg-white p-3">
               <p className="text-sm font-medium text-ink">
-                Approximate placement (nearest neighbors)
+                Approximate position based on the most similar known signatures — not an exact
+                placement of your signature.
               </p>
-              <p className="text-xs text-muted">
-                Nearest known compound:{" "}
-                <span className="font-mono text-ink">
-                  {explore.result.neighbors[0]?.compound_id}
-                </span>{" "}
-                at distance {explore.result.neighbors[0]?.distance.toFixed(2)}.
-              </p>
-              <p className="text-xs text-muted">
-                Distance to the {explore.result.domain.k}-th nearest training compound:{" "}
-                <strong>{explore.result.domain.query_kth_distance.toFixed(2)}</strong>. Typical
-                training range (p25–p95):{" "}
-                {explore.result.domain.training_reference_quantiles.p25?.toFixed(2)}–
-                {explore.result.domain.training_reference_quantiles.p95?.toFixed(2)}. This
-                signature&rsquo;s isolation is at the{" "}
-                {Math.round(explore.result.domain.percentile * 100)}th percentile of the training
-                set.
-              </p>
-              <p className="text-[11px] text-muted">
-                These are computed distances, shown for your judgement — EndoScan makes{" "}
-                <strong>no domain-membership verdict</strong> (neither inside nor outside).
-              </p>
-              <ul className="mt-1 space-y-0.5 text-xs">
-                {explore.result.neighbors.map((n) => (
-                  <li key={n.compound_id} className="flex justify-between gap-2">
-                    <span className="font-mono text-ink">{n.compound_id}</span>
-                    <span className="text-muted">
-                      {n.distance.toFixed(2)}
-                      {n.label ? ` · ${n.label}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+
+              {/* Plain, graded similarity readout — mapped transparently from the real percentile
+                  (the number + the band cut live in Technical details below). */}
+              <div>
+                <p className="text-xs font-medium text-ink">
+                  How similar is this signature to known data?
+                </p>
+                <p className="mt-0.5 text-xs text-muted" data-testid="similarity-readout">
+                  This signature is{" "}
+                  <strong>{similarityBand(explore.result.domain.percentile)}</strong> to
+                  EndoScan&rsquo;s reference data.
+                </p>
+                <p className="mt-1 text-[11px] text-muted">
+                  EndoScan makes <strong>no domain-membership verdict</strong> (neither inside nor
+                  outside) — this is a graded comparison, not a pass/fail.
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-ink">
+                  Compounds with similar expression patterns
+                </p>
+                <p className="mt-0.5 text-[11px] text-muted">
+                  These may be useful comparisons. Similar patterns do not prove the same effect.
+                </p>
+                <ul className="mt-1 space-y-0.5 text-xs" data-testid="similar-compounds">
+                  {explore.result.neighbors.map((n) => (
+                    <li key={n.compound_id} className="flex justify-between gap-2">
+                      <span className="font-mono text-ink">{n.compound_id}</span>
+                      {n.label && <span className="text-muted">{n.label}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Technical details — one level deeper. Nothing is removed: every technical field
+                  the API returns lives here, so the plain "close/far" above is fully traceable. */}
+              <details data-testid="explore-technical" className="rounded border border-line bg-surface p-2">
+                <summary className="cursor-pointer text-xs font-medium text-ink">
+                  Technical details
+                </summary>
+                <dl className="mt-2 space-y-1 text-[11px] text-muted">
+                  <div>
+                    <dt className="inline font-medium">Similarity metric:</dt>{" "}
+                    <dd className="inline">
+                      distance to the {explore.result.domain.k}-th nearest reference signature ={" "}
+                      {explore.result.domain.query_kth_distance.toFixed(3)} (
+                      {explore.result.domain.metric}); typical training range p25–p95:{" "}
+                      {explore.result.domain.training_reference_quantiles.p25?.toFixed(3)}–
+                      {explore.result.domain.training_reference_quantiles.p95?.toFixed(3)}.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="inline font-medium">Percentile → band:</dt>{" "}
+                    <dd className="inline">
+                      percentile ={" "}
+                      <strong>{(explore.result.domain.percentile * 100).toFixed(1)}%</strong> of
+                      training compounds are at least this isolated. Bands: ≤50% → close, 50–90% →
+                      moderately close, &gt;90% → far. There is no in-domain / out-of-domain
+                      boolean.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="inline font-medium">Feature space:</dt>{" "}
+                    <dd className="inline">
+                      landmark-gene expression space (the endpoint&rsquo;s feature schema); k ={" "}
+                      {explore.result.domain.k}.
+                    </dd>
+                  </div>
+                  {map.data && (
+                    <>
+                      <div>
+                        <dt className="inline font-medium">Projection:</dt>{" "}
+                        <dd className="inline">
+                          UMAP (n_neighbors={String(map.data.manifest.umap.n_neighbors)}, min_dist=
+                          {String(map.data.manifest.umap.min_dist)}, metric=
+                          {String(map.data.manifest.umap.metric)}, random_state=
+                          {String(map.data.manifest.umap.random_state)}, v
+                          {String(map.data.manifest.umap.umap_version)}). Visualization only.
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="inline font-medium">Reference dataset:</dt>{" "}
+                        <dd className="inline">
+                          {map.data.manifest.n_compounds} compounds ({context}); labels:{" "}
+                          {map.data.manifest.label_status}.
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="inline font-medium">Version:</dt>{" "}
+                        <dd className="inline">
+                          source {map.data.manifest.source_sha256.slice(0, 12)}; built{" "}
+                          {map.data.manifest.built_at ?? "unknown"}.
+                        </dd>
+                      </div>
+                    </>
+                  )}
+                </dl>
+              </details>
             </div>
           )}
         </div>

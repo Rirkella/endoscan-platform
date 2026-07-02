@@ -103,7 +103,7 @@ export function ExploreScatter({ points, locate }: Props) {
             stroke="#7c3aed"
             strokeWidth={1.5}
           />
-          <title>approximate placement (nearest neighbors)</title>
+          <title>Approximate position based on the most similar known signatures</title>
         </g>
       )}
     </svg>
