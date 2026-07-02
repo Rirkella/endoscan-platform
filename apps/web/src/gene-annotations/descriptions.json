@@ -1,0 +1,27 @@
+{
+  "_provenance": {
+    "status": "empty",
+    "reason": "Real source data (NCBI Gene / HGNC) was UNREACHABLE from the build environment (proxy returned 403 for eutils.ncbi.nlm.nih.gov, rest.genenames.org, mygene.info, ebi.ac.uk). Descriptions are intentionally NOT populated — none were fabricated or LLM-generated. Every gene therefore renders links-only + 'annotation unavailable'. Run scripts/extract_gene_annotations.py in a network-enabled environment to populate `genes`.",
+    "generator": "scripts/extract_gene_annotations.py",
+    "license_basis": {
+      "ncbi_gene": {
+        "text_is": "US public domain (work of the U.S. National Library of Medicine)",
+        "policy_urls": [
+          "https://www.nlm.nih.gov/web_policies.html",
+          "https://www.ncbi.nlm.nih.gov/home/about/policies/"
+        ]
+      },
+      "hgnc": {
+        "text_is": "CC0 1.0 (public domain dedication)",
+        "policy_url": "https://www.genenames.org/about/"
+      }
+    },
+    "schema_per_gene": {
+      "description": "the sourced summary text, verbatim",
+      "source": "e.g. 'NCBI Gene'",
+      "source_version": "extraction/retrieval date (YYYY-MM-DD)",
+      "license": "e.g. 'public domain (NLM)' | 'CC0 (HGNC)'"
+    }
+  },
+  "genes": {}
+}
