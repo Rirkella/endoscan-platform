@@ -1,9 +1,10 @@
 // Top gene contributions from /explain — improved card presentation. The method LABEL is
 // rendered from the API's `method` (never assumed); a linear coefficient×value is never
-// SHAP-labeled. Each card has an EMPTY annotation slot (Phase 3 fills gene descriptions/links;
-// no fabricated text now). Contributions explain THIS model's decision, not biology.
+// SHAP-labeled. Each card's annotation slot shows deterministic external links + a SOURCED
+// description when available (never fabricated). Contributions explain THIS model's decision.
 
 import type { ExplanationResult } from "../api/types";
+import { GeneAnnotation } from "./GeneAnnotation";
 
 const METHOD_LABELS: Record<string, string> = {
   tree_shap: "TreeSHAP",
@@ -38,8 +39,7 @@ export function GeneContributionCards({ explanation }: { explanation: Explanatio
                 </span>
               </span>
             </div>
-            {/* Annotation slot — intentionally empty until Phase 3 (no fabricated descriptions). */}
-            <div data-annotation-slot="" aria-hidden="true" />
+            <GeneAnnotation gene={c.gene} />
           </li>
         ))}
       </ul>
