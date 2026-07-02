@@ -30,6 +30,14 @@ __all__ = [
     "ErrorResponse",
     "ExplainRequest",
     "ExplanationResult",
+    "ExploreCounts",
+    "ExploreDomain",
+    "ExploreLocateRequest",
+    "ExploreLocateResponse",
+    "ExploreManifestSummary",
+    "ExploreMapResponse",
+    "ExploreNeighbor",
+    "ExplorePoint",
     "HealthResponse",
     "LimitationsBlock",
     "MetricsSummary",
@@ -218,3 +226,106 @@ class AnalyzeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     results: list[AnalyzeEndpointResult]
+
+
+# --- Explore: the data-space (UMAP) view ---------------------------------------------
+#
+# UMAP is a VISUALIZATION of how the real training signatures relate — not a model
+# boundary and not proof of anything. A submitted signature is NOT projected with
+# ``UMAP.transform``; it is placed APPROXIMATELY at the centroid of its nearest training
+# neighbours (found in the original 978-gene space). There is NO in-/out-of-domain flag:
+# the honest domain signal is a DEFINED, computed metric (distance to the k-th training
+# neighbour) shown against the training reference distribution — the human judges.
+
+
+class ExplorePoint(BaseModel):
+    """One real training compound's position on the 2-D map. ``label`` is null when uncoloured."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    compound_id: str
+    x: float
+    y: float
+    label: str | None = None  # "active" | "inactive" | null (never fabricated)
+
+
+class ExploreCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    n_total: int
+    n_active: int
+    n_inactive: int
+    n_unlabeled: int
+
+
+class ExploreManifestSummary(BaseModel):
+    """The map's provenance surfaced to the client (params + seed + source hash + built_at)."""
+
+    model_config = ConfigDict(extra="allow")  # tolerate manifest gaining fields later
+
+    target: str
+    n_compounds: int
+    umap: dict
+    domain_metric_k: int
+    label_status: str
+    source_sha256: str
+    built_at: str | None = None
+
+
+class ExploreMapResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context: str
+    points: list[ExplorePoint]
+    counts: ExploreCounts
+    manifest: ExploreManifestSummary
+
+
+class ExploreLocateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context: str = Field(..., description="Endpoint id whose map to place against, e.g. 'ER'.")
+    signature: dict[str, float] = Field(
+        ..., description="A transcriptomic signature (gene->value)."
+    )
+    allow_extra: bool = Field(False, description="Drop genes not in the map's feature set.")
+
+
+class ExploreNeighbor(BaseModel):
+    """A real nearest training compound (distance in the ORIGINAL gene space, + its map coords)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    compound_id: str
+    distance: float
+    x: float
+    y: float
+    label: str | None = None
+
+
+class ExploreDomain(BaseModel):
+    """The DEFINED, computed domain signal — NOT an asserted in-/out-of-domain verdict.
+
+    ``query_kth_distance`` is the submitted signature's distance to its k-th nearest TRAINING
+    neighbour; ``training_reference_quantiles`` is that same metric across the training set;
+    ``percentile`` is the fraction of training points whose own k-th-neighbour distance is <=
+    the query's. The human reads these numbers — the API asserts no membership.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    metric: str
+    k: int
+    query_kth_distance: float
+    training_reference_quantiles: dict[str, float]
+    percentile: float
+
+
+class ExploreLocateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context: str
+    placement: str  # always "approximate_nearest_neighbor" — never an exact projection
+    approx_xy: dict[str, float]  # centroid of the neighbours' precomputed map coords
+    neighbors: list[ExploreNeighbor]
+    domain: ExploreDomain

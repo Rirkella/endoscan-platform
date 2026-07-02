@@ -29,6 +29,10 @@ venv/
 !/models/**/*.dvc
 !/models/**/*.json
 !/models/**/*.md
+# Explore data-space support vectors: the committed, checksum-transferred k-NN backing for
+# models/<ENDPOINT>/explore/ (transferred after review, like model.pkl). JSON/manifest are
+# already tracked by the *.json rule above; this re-includes the small numeric .npy too.
+!/models/**/explore/*.npy
 
 # Raw / large data (never committed to raw git). The staged-data root keeps a
 # .gitkeep; staged extracts under data/staged/<endpoint>/ are DVC-tracked.

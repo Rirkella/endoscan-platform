@@ -42,9 +42,8 @@ describe("Analyze-first IA + score cards", () => {
     expect(screen.getByText(/Upload a signature file/i)).toBeInTheDocument();
     const fileIn = document.querySelector('input[type="file"]') as HTMLInputElement;
     expect(fileIn).not.toBeDisabled();
-    // Explore is still a disabled "coming later" chip — no route, no fake content.
-    const explore = screen.getByText(/Explore/i).closest("span")!;
-    expect(explore).toHaveAttribute("aria-disabled", "true");
+    // Explore is now an enabled nav route (the data-space view), no longer a disabled chip.
+    expect(screen.getByRole("link", { name: /^Explore$/i })).toHaveAttribute("href", "/explore");
   });
 
   it("score cards render from the mocked API (ER + AR), not hardcoded", async () => {

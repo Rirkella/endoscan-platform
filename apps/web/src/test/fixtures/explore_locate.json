@@ -1,0 +1,24 @@
+{
+  "context": "ER",
+  "placement": "approximate_nearest_neighbor",
+  "approx_xy": { "x": -3.1, "y": 1.23 },
+  "neighbors": [
+    { "compound_id": "CID_00", "distance": 0.42, "x": -3.1, "y": 1.2, "label": "active" },
+    { "compound_id": "CID_01", "distance": 0.55, "x": -2.8, "y": 1.6, "label": "active" },
+    { "compound_id": "CID_02", "distance": 0.61, "x": -3.4, "y": 0.9, "label": "active" }
+  ],
+  "domain": {
+    "metric": "distance_to_kth_training_neighbor",
+    "k": 3,
+    "query_kth_distance": 0.61,
+    "training_reference_quantiles": {
+      "min": 0.3,
+      "p25": 0.45,
+      "median": 0.6,
+      "p75": 0.8,
+      "p95": 1.1,
+      "max": 1.4
+    },
+    "percentile": 0.42
+  }
+}

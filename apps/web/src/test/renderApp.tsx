@@ -3,6 +3,7 @@ import { RouterProvider, createMemoryRouter } from "react-router-dom";
 
 import App from "../App";
 import { Analyze } from "../pages/Analyze";
+import { Explore } from "../pages/Explore";
 import { ModelEvidence } from "../pages/ModelEvidence";
 import { ModelLibrary } from "../pages/ModelLibrary";
 
@@ -17,6 +18,7 @@ export function renderApp(initialPath: string) {
           { index: true, element: <Analyze /> },
           { path: "library", element: <ModelLibrary /> },
           { path: "library/:id", element: <ModelEvidence /> },
+          { path: "explore", element: <Explore /> },
         ],
       },
     ],

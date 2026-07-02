@@ -93,10 +93,15 @@ class JobContext:
 
 # Job registry — populated at import time from the jobs subpackage.
 def _load_jobs() -> dict[str, Callable[[JobContext], JobOutcome]]:
+    from .jobs.build_explore_map import build_explore_map_job
     from .jobs.coverage import coverage_job
     from .jobs.extract_signatures import extract_signatures_job
 
-    return {"coverage": coverage_job, "extract_signatures": extract_signatures_job}
+    return {
+        "coverage": coverage_job,
+        "extract_signatures": extract_signatures_job,
+        "build_explore_map": build_explore_map_job,
+    }
 
 
 JOBS: dict[str, Callable[[JobContext], JobOutcome]] = _load_jobs()

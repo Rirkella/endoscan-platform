@@ -60,6 +60,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--slice-batch", type=int, default=None, help="sig_ids per hyperslab read")
     run.add_argument("--rdcc-bytes", type=int, default=None, help="HDF5 chunk-cache bound (bytes)")
+    # build_explore_map job: a SEEDED UMAP over curated/<TARGET>/signatures.parquet. All params
+    # are recorded in the manifest; labels are OPTIONAL (uncoloured map if absent, never faked).
+    run.add_argument("--labels-csv", default=None, help="optional compound_id->label CSV to colour")
+    run.add_argument(
+        "--labels-id-col", default=None, help="labels CSV id column (default compound_id)"
+    )
+    run.add_argument(
+        "--labels-label-col", default=None, help="labels CSV label column (default label)"
+    )
+    run.add_argument("--umap-seed", type=int, default=None, help="UMAP random_state (default 42)")
+    run.add_argument(
+        "--umap-neighbors", type=int, default=None, help="UMAP n_neighbors (default 15)"
+    )
+    run.add_argument(
+        "--umap-min-dist", type=float, default=None, help="UMAP min_dist (default 0.1)"
+    )
+    run.add_argument("--umap-metric", default=None, help="UMAP/kNN metric (default euclidean)")
+    run.add_argument("--nn-k", type=int, default=None, help="k for the domain metric (default 5)")
     return parser
 
 
@@ -98,6 +116,14 @@ def main(argv: list[str] | None = None) -> int:
         "cell_lines": args.cell_lines,
         "slice_batch": args.slice_batch,
         "rdcc_bytes": args.rdcc_bytes,
+        "labels_csv": args.labels_csv,
+        "labels_id_col": args.labels_id_col,
+        "labels_label_col": args.labels_label_col,
+        "umap_seed": args.umap_seed,
+        "umap_neighbors": args.umap_neighbors,
+        "umap_min_dist": args.umap_min_dist,
+        "umap_metric": args.umap_metric,
+        "nn_k": args.nn_k,
     }
     result = run_job(args.job, args.target, storage=storage, run_id=args.run_id, options=options)
     print(f"status={result.status} exit={result.exit_code} verdict={result.verdict}")

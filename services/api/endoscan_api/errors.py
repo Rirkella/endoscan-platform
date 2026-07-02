@@ -15,6 +15,7 @@ from endoscan_core.inference import (
 )
 from endoscan_core.registry import EndpointNotFoundError
 
+from .explore_store import ExploreArtifactCorruptError, ExploreArtifactUnavailableError
 from .parsing import MalformedUploadError
 from .schemas import ErrorResponse
 
@@ -45,3 +46,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         # Defensive: both ER/AR binaries are committed, so this should not occur in serving.
         return JSONResponse(status_code=500, content=_payload("model_unavailable", str(exc)))
+
+    @app.exception_handler(ExploreArtifactUnavailableError)
+    async def _explore_unavailable(
+        request: Request, exc: ExploreArtifactUnavailableError
+    ) -> JSONResponse:
+        # No committed data-space map for this endpoint yet — an honest empty state, not an error.
+        return JSONResponse(status_code=404, content=_payload("explore_map_unavailable", str(exc)))
+
+    @app.exception_handler(ExploreArtifactCorruptError)
+    async def _explore_corrupt(request: Request, exc: ExploreArtifactCorruptError) -> JSONResponse:
+        # The support artifact does not match its manifest hash — refuse to place against it.
+        return JSONResponse(status_code=500, content=_payload("explore_artifact_corrupt", str(exc)))

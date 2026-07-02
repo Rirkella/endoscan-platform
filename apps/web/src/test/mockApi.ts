@@ -8,6 +8,9 @@ import error404 from "./fixtures/error_404.json";
 import error422 from "./fixtures/error_422_signature.json";
 import explainAR from "./fixtures/explain_AR.json";
 import explainER from "./fixtures/explain_ER.json";
+import explore404 from "./fixtures/explore_404.json";
+import exploreLocate from "./fixtures/explore_locate.json";
+import exploreUmap from "./fixtures/explore_umap.json";
 import health from "./fixtures/health.json";
 import parseInvalid from "./fixtures/parse_invalid.json";
 import parseOk from "./fixtures/parse_ok.json";
@@ -32,6 +35,9 @@ function defaultRoutes(): Record<string, Resolver> {
     }),
     "POST /api/analyze": { body: analyze },
     "POST /api/signatures/parse": { body: parseOk },
+    "GET /api/explore/ER/umap": { body: exploreUmap },
+    "GET /api/explore/AR/umap": { status: 404, body: explore404 },
+    "POST /api/explore/locate": { body: exploreLocate },
   };
 }
 
@@ -65,6 +71,9 @@ export {
   error422,
   explainAR,
   explainER,
+  explore404,
+  exploreLocate,
+  exploreUmap,
   parseInvalid,
   parseOk,
   predictAR,
