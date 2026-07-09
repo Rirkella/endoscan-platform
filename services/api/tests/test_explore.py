@@ -65,8 +65,9 @@ def test_umap_serves_points_counts_and_manifest(fixture_client: TestClient) -> N
 
 
 def test_missing_map_is_honest_404(client: TestClient) -> None:
-    # The real committed repo has no explore map for ER yet -> "not yet computed", not points.
-    r = client.get("/explore/ER/umap")
+    # An endpoint with no committed explore map -> "not yet computed", not fabricated points.
+    # (ER/AR maps ARE now committed; a context that was never built stays a graceful 404.)
+    r = client.get("/explore/ZZZ_UNBUILT/umap")
     assert r.status_code == 404
     body = r.json()
     assert body["error"] == "explore_map_unavailable"
