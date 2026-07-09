@@ -49,6 +49,21 @@ describe("Explore reference-landscape view", () => {
     expect(screen.getByText(/not a model boundary, and not proof of anything/i)).toBeInTheDocument();
   });
 
+  it("supports an unknown (unlabeled) state as a DISTINCT, non-class point — never colored as a class", async () => {
+    // The fixture map carries one compound with no endpoint label (n_unlabeled=1). Real ER/AR
+    // currently have 0 unknown, but the code path must keep unknown distinct (grey), not defaulted.
+    renderApp("/explore");
+    await screen.findByTestId("explore-scatter");
+    const unlabeled = document.querySelectorAll("circle[data-label='unlabeled']");
+    const active = document.querySelectorAll("circle[data-label='active']");
+    const inactive = document.querySelectorAll("circle[data-label='inactive']");
+    expect(unlabeled.length).toBe(1); // the unknown compound is its own state...
+    expect(active.length).toBe(3);
+    expect(inactive.length).toBe(3); // ...NOT folded into active/inactive
+    // The caption honestly surfaces the unlabeled count (never hidden, never defaulted to a class).
+    expect((document.body.textContent ?? "").toLowerCase()).toContain("1 unlabeled");
+  });
+
   it("placement uses biological wording: similar compounds + a graded close/far readout", async () => {
     renderApp("/explore");
     await screen.findByTestId("explore-scatter");
