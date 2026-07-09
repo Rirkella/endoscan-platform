@@ -40,6 +40,10 @@ venv/
 !/data/staged/
 /data/staged/*
 !/data/staged/.gitkeep
+# Reactome enrichment gene-set artifact: committed reference data the API reads (transferred
+# via operator checksum after extraction, since reactome.org is network-blocked here). Small JSON.
+!/data/reactome/
+!/data/reactome/**
 *.h5
 *.h5ad
 *.parquet

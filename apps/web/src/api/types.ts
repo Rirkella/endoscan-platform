@@ -215,3 +215,44 @@ export interface ExploreLocateResult {
   neighbors: ExploreNeighbor[];
   domain: ExploreDomain;
 }
+
+// --- Biological pathways (POST /interpret/pathways) ---
+// Pathways over-represented among the genes that INFLUENCED THIS RESULT (model-contributing).
+// Clues for investigation — never proof the compound acts through them. Technical stats live in
+// the method block (rendered only in the collapsible Technical details).
+
+export interface PathwayCard {
+  pathway_id: string;
+  name: string;
+  description: string | null; // Reactome's own text only
+  genes_influencing_result: string[]; // the actual overlap from this result
+  overlap_count: number;
+  pathway_size_in_universe: number;
+  input_size_in_universe: number;
+  p_value: number;
+  q_value: number;
+  evidence: string; // High | Medium | Low
+}
+
+export interface PathwayMethodBlock {
+  input_gene_rule: string;
+  pinned_top_n: number;
+  n_toward_genes: number;
+  n_input_genes: number;
+  universe_size: number;
+  min_pathway_overlap: number;
+  test: string;
+  correction: string;
+  family_size: number;
+  evidence_mapping: Record<string, string>;
+  reactome: Record<string, unknown> | null;
+}
+
+export interface PathwaysResponse {
+  endpoint_id: string;
+  method: string;
+  status: "ok" | "unavailable" | "too_few_genes";
+  reason: string | null;
+  pathways: PathwayCard[];
+  method_block: PathwayMethodBlock | null;
+}

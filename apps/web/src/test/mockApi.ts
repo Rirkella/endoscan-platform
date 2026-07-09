@@ -14,6 +14,8 @@ import exploreUmap from "./fixtures/explore_umap.json";
 import health from "./fixtures/health.json";
 import parseInvalid from "./fixtures/parse_invalid.json";
 import parseOk from "./fixtures/parse_ok.json";
+import pathwaysOk from "./fixtures/pathways_ok.json";
+import pathwaysUnavailable from "./fixtures/pathways_unavailable.json";
 import predictAR from "./fixtures/predict_AR.json";
 import predictER from "./fixtures/predict_ER.json";
 
@@ -35,6 +37,9 @@ function defaultRoutes(): Record<string, Resolver> {
     }),
     "POST /api/analyze": { body: analyze },
     "POST /api/signatures/parse": { body: parseOk },
+    // Default to the honest "unavailable" state so existing Explain tests are undisturbed;
+    // the pathways test overrides this with the ok fixture.
+    "POST /api/interpret/pathways": { body: pathwaysUnavailable },
     "GET /api/explore/ER/umap": { body: exploreUmap },
     "GET /api/explore/AR/umap": { status: 404, body: explore404 },
     "POST /api/explore/locate": { body: exploreLocate },
@@ -76,6 +81,8 @@ export {
   exploreUmap,
   parseInvalid,
   parseOk,
+  pathwaysOk,
+  pathwaysUnavailable,
   predictAR,
   predictER,
 };

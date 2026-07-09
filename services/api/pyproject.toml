@@ -15,6 +15,9 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     # Required by FastAPI to parse multipart/form-data uploads (POST /signatures/parse).
     "python-multipart>=0.0.9",
+    # Standard ORA statistics for POST /interpret/pathways (hypergeometric tail; BH is local).
+    # API-side only — no statistics live in endoscan_core. Present transitively via sklearn too.
+    "scipy>=1.11",
 ]
 
 # Explainability EXTRA — mirrors endoscan-core[explain]. TreeSHAP is only needed by
