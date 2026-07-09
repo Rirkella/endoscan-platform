@@ -1,14 +1,16 @@
-"""POST /interpret/pathways route — honest states, method block, framing (fixture Reactome).
+"""POST /interpret/pathways route — honest states, method block, framing.
 
-Enrichment is exercised against a SYNTHETIC fixture Reactome artifact (clearly marked
-``is_fixture``), NOT real Reactome data — real Reactome is blocked in this environment. ``explain``
-is monkeypatched so the toward-gene set is controlled and the outcome is deterministic; the real
-enrichment math (``run_enrichment``) and the real ER feature schema (the 978-landmark universe) are
-used unchanged.
+Deterministic route tests exercise a SYNTHETIC fixture Reactome artifact (clearly marked
+``is_fixture``) with ``explain`` monkeypatched, so the toward-gene set and outcome are controlled.
+The final tests use the REAL committed Reactome artifact (``data/reactome/reactome_pathways.json``,
+v97) to prove the feature is live (an empty pathway list there is a real result, not "unavailable").
+The real enrichment math and the real ER/AR feature schemas (the 978-landmark universe) are used
+unchanged throughout.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -129,9 +131,9 @@ def test_explain_method_parity(client, monkeypatch) -> None:
     assert results["tree_shap"] == results["linear_coefficient"]
 
 
-def test_missing_reactome_artifact_is_graceful(client_real: TestClient) -> None:
-    # The real committed repo has NO data/reactome artifact -> honest "unavailable", zero pathways.
-    r = client_real.post(
+def test_missing_reactome_artifact_is_graceful(client_no_reactome: TestClient) -> None:
+    # A repo WITHOUT a data/reactome artifact -> honest "unavailable", zero pathways.
+    r = client_no_reactome.post(
         "/interpret/pathways", json={"endpoint_id": "ER", "signature": {"DDR1": 0.1}}
     )
     assert r.status_code == 200
@@ -142,6 +144,62 @@ def test_missing_reactome_artifact_is_graceful(client_real: TestClient) -> None:
 
 
 @pytest.fixture(scope="module")
-def client_real() -> TestClient:
-    # Real committed repo root (no Reactome artifact committed) — for the unavailable path.
-    return TestClient(create_app(repo_root=REPO_ROOT))
+def client_no_reactome() -> TestClient:
+    """A tmp repo with the registry + schemas but NO Reactome artifact (the unavailable path)."""
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix="pathways-noreactome-"))
+    shutil.copytree(REPO_ROOT / "registry", root / "registry")
+    for ep in ("ER", "AR"):
+        (root / "models" / ep).mkdir(parents=True)
+        shutil.copy(
+            REPO_ROOT / "models" / ep / "feature_schema.json",
+            root / "models" / ep / "feature_schema.json",
+        )
+    return TestClient(create_app(repo_root=root))
+
+
+# --- REAL committed Reactome artifact (data/reactome/reactome_pathways.json) -------------------
+
+
+def test_real_reactome_artifact_loads_with_provenance() -> None:
+    from endoscan_api.reactome_store import load_reactome
+
+    data = load_reactome(REPO_ROOT)
+    prov = data.provenance
+    assert prov["reactome_version"] and prov["source_url"] and prov["license"]
+    assert prov.get("is_fixture") in (None, False)  # the REAL artifact, not the test fixture
+    assert len(data.pathways) == prov["n_pathways"] >= 1000  # thousands of human pathways
+
+
+def _demo_signature(name: str) -> dict:
+    doc = json.loads((REPO_ROOT / "apps" / "web" / "src" / "demo-signatures" / name).read_text())
+    return doc.get("signature", doc)
+
+
+def test_real_pathways_live_on_ar_linear() -> None:
+    # AR is linear_coefficient (no shap) — proves the feature is LIVE on the real committed
+    # Reactome artifact. An empty pathway list is a REAL result (never relaxed), not "unavailable".
+    client = TestClient(create_app(repo_root=REPO_ROOT))
+    r = client.post(
+        "/interpret/pathways",
+        json={
+            "endpoint_id": "AR",
+            "signature": _demo_signature("demo_ar_high.json"),
+            "allow_extra": True,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"  # ran on real Reactome (NOT "unavailable")
+    assert body["method"] == "linear_coefficient"
+    mb = body["method_block"]
+    assert mb["pinned_top_n"] == 50 and mb["universe_size"] > 0 and mb["family_size"] > 0
+    assert mb["reactome"]["reactome_version"]  # real version recorded
+    assert mb["reactome"].get("is_fixture") in (None, False)
+    for p in body["pathways"]:  # any shown card is a real, thresholded result
+        assert p["evidence"] in {"High", "Medium", "Low"} and p["q_value"] < 0.10
+    text = r.text.lower()
+    assert "in_domain" not in text
+    for banned in ("activates", "causes", "perturbed", "affected gene"):
+        assert banned not in text
