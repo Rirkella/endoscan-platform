@@ -43,6 +43,10 @@ __all__ = [
     "MetricsSummary",
     "ParsePreview",
     "ParseResult",
+    "PathwayCard",
+    "PathwayMethodBlock",
+    "PathwaysRequest",
+    "PathwaysResponse",
     "PredictRequest",
     "PredictionResult",
 ]
@@ -329,3 +333,70 @@ class ExploreLocateResponse(BaseModel):
     approx_xy: dict[str, float]  # centroid of the neighbours' precomputed map coords
     neighbors: list[ExploreNeighbor]
     domain: ExploreDomain
+
+
+# --- Biological pathways (Reactome over-representation for an /explain result) --------
+#
+# Reports which Reactome pathways are over-represented among the genes that drove THIS MODEL
+# toward an active call. Field names carry the honest framing: the genes INFLUENCED THIS RESULT
+# (model-contributing) — they are NOT "affected"/"perturbed" genes, and a pathway appearing is a
+# clue for investigation, NOT proof the compound activates it.
+
+
+class PathwaysRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: str = Field(..., description="Registered endpoint id, e.g. 'ER' or 'AR'.")
+    signature: dict[str, float] = Field(
+        ..., description="A transcriptomic signature (gene->value)."
+    )
+    allow_extra: bool = Field(False, description="Drop genes not in the endpoint's schema.")
+
+
+class PathwayCard(BaseModel):
+    """One over-represented pathway. ``genes_influencing_result`` is the ACTUAL overlap from this
+    result (toward-signal genes ∩ pathway ∩ universe) — never the pathway's full membership."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pathway_id: str
+    name: str
+    description: str | None = None  # Reactome's own text only — never generated
+    genes_influencing_result: list[str]
+    overlap_count: int
+    pathway_size_in_universe: int
+    input_size_in_universe: int
+    p_value: float
+    q_value: float
+    evidence: str  # High | Medium | Low (transparently derived from q_value + overlap_count)
+
+
+class PathwayMethodBlock(BaseModel):
+    """Everything a reader needs to verify the labels — surfaced in the UI's Technical details."""
+
+    model_config = ConfigDict(extra="allow")
+
+    input_gene_rule: str
+    pinned_top_n: int
+    n_toward_genes: int
+    n_input_genes: int  # toward genes intersected with the universe
+    universe_size: int
+    min_pathway_overlap: int
+    test: str
+    correction: str
+    family_size: int
+    evidence_mapping: dict[str, str]
+    reactome: dict | None = None  # version / source_url / retrieval_date / license / counts
+
+
+class PathwaysResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: str
+    method: str  # the /explain attribution method used (tree_shap | linear_coefficient)
+    #: "ok" (ran; pathways may be empty if none cleared the threshold), "unavailable" (no
+    #: Reactome artifact), or "too_few_genes" (toward-set below the minimum to test).
+    status: str
+    reason: str | None = None
+    pathways: list[PathwayCard]
+    method_block: PathwayMethodBlock | None = None

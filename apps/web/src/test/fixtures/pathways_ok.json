@@ -1,0 +1,54 @@
+{
+  "endpoint_id": "ER",
+  "method": "tree_shap",
+  "status": "ok",
+  "reason": null,
+  "pathways": [
+    {
+      "pathway_id": "R-HSA-FIX-1",
+      "name": "Signaling by Nuclear Receptors",
+      "description": "Nuclear receptor signaling events.",
+      "genes_influencing_result": ["ESR1", "GREB1", "PGR"],
+      "overlap_count": 3,
+      "pathway_size_in_universe": 12,
+      "input_size_in_universe": 18,
+      "p_value": 0.00012,
+      "q_value": 0.0034,
+      "evidence": "High"
+    },
+    {
+      "pathway_id": "R-HSA-FIX-2",
+      "name": "Generic Transcription Pathway",
+      "description": null,
+      "genes_influencing_result": ["XBP1", "DNAJB1"],
+      "overlap_count": 2,
+      "pathway_size_in_universe": 40,
+      "input_size_in_universe": 18,
+      "p_value": 0.03,
+      "q_value": 0.08,
+      "evidence": "Low"
+    }
+  ],
+  "method_block": {
+    "input_gene_rule": "toward-signal contributors: all direction='toward' genes among the pinned top 50 /explain contributors",
+    "pinned_top_n": 50,
+    "n_toward_genes": 18,
+    "n_input_genes": 18,
+    "universe_size": 870,
+    "min_pathway_overlap": 3,
+    "test": "Fisher exact, one-sided (over-representation)",
+    "correction": "Benjamini-Hochberg FDR (across the tested pathway family)",
+    "family_size": 420,
+    "evidence_mapping": {
+      "High": "q < 0.01 and overlap >= 3",
+      "Medium": "q < 0.05",
+      "Low": "q < 0.10",
+      "not shown": "q >= 0.10"
+    },
+    "reactome": {
+      "reactome_version": "FIXTURE-not-real",
+      "license": "CC0 1.0 (per https://reactome.org/license)",
+      "is_fixture": true
+    }
+  }
+}

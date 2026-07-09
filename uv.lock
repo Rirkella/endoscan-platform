@@ -898,6 +898,8 @@ dependencies = [
     { name = "endoscan-core" },
     { name = "fastapi" },
     { name = "python-multipart" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -912,6 +914,7 @@ requires-dist = [
     { name = "endoscan-core", editable = "packages/endoscan_core" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "scipy", specifier = ">=1.11" },
     { name = "shap", marker = "extra == 'explain'", specifier = ">=0.44" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]

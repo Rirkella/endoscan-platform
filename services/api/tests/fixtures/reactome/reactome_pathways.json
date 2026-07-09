@@ -1,0 +1,63 @@
+{
+  "reactome_version": "FIXTURE-not-real",
+  "source_url": "(synthetic test fixture \u2014 NOT real Reactome data)",
+  "retrieval_date": "2026-01-01",
+  "license": "CC0 1.0 (per https://reactome.org/license) \u2014 recorded basis; this file is a FIXTURE",
+  "is_fixture": true,
+  "n_pathways": 5,
+  "n_genes": 20,
+  "pathways": [
+    {
+      "id": "FIX:PA",
+      "name": "Fixture pathway A (synthetic)",
+      "genes": [
+        "DDR1",
+        "PAX8",
+        "RPS5",
+        "ABCF1"
+      ]
+    },
+    {
+      "id": "FIX:PB",
+      "name": "Fixture pathway B (synthetic)",
+      "genes": [
+        "SPAG7",
+        "RHOA",
+        "RNPS1"
+      ]
+    },
+    {
+      "id": "FIX:PC",
+      "name": "Fixture pathway C (synthetic)",
+      "genes": [
+        "RPS6",
+        "USP22",
+        "APP"
+      ]
+    },
+    {
+      "id": "FIX:PD",
+      "name": "Fixture pathway D too small (synthetic)",
+      "genes": [
+        "DDR1",
+        "PAX8"
+      ]
+    },
+    {
+      "id": "FIX:PE",
+      "name": "Fixture pathway E background (synthetic)",
+      "genes": [
+        "SMNDC1",
+        "ATP6V0B",
+        "CLTC",
+        "MLEC",
+        "CSRP1",
+        "CALM3",
+        "PTPRF",
+        "DNAJB1",
+        "XBP1",
+        "GRN"
+      ]
+    }
+  ]
+}

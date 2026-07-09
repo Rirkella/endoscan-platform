@@ -11,6 +11,7 @@ import type { EndpointSignal } from "../hooks/useAnalyze";
 import { ErrorNotice } from "./ErrorNotice";
 import { GeneContributionCards } from "./GeneContributionCards";
 import { LimitationsPanel } from "./LimitationsPanel";
+import { PathwaysPanel } from "./PathwaysPanel";
 import { StatusBadge } from "./StatusBadge";
 
 interface ExplainState {
@@ -109,7 +110,11 @@ export function EndpointSignalCard({
         ) : ex.error != null ? (
           <ErrorNotice error={ex.error} />
         ) : ex.result ? (
-          <GeneContributionCards explanation={ex.result} />
+          <>
+            <GeneContributionCards explanation={ex.result} />
+            {/* Biological pathways for THIS explain result (its own honest empty states). */}
+            <PathwaysPanel endpointId={signal.endpoint_id} signature={signature} />
+          </>
         ) : null}
       </div>
     </article>

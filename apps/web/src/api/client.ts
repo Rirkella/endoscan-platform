@@ -13,6 +13,7 @@ import type {
   ExploreMap,
   Health,
   ParseResult,
+  PathwaysResponse,
   PredictionResult,
   Signature,
 } from "./types";
@@ -91,6 +92,10 @@ export const api = {
   // Run a signature across ALL endpoints in one call (per-endpoint isolation server-side).
   analyze: (signature: Signature, allow_extra = false) =>
     postJson<AnalyzeResponse>("/analyze", { signature, allow_extra }),
+
+  // Biological pathways for an explain result (Reactome over-representation; honest empty states).
+  interpretPathways: (endpoint_id: string, signature: Signature, allow_extra = false) =>
+    postJson<PathwaysResponse>("/interpret/pathways", { endpoint_id, signature, allow_extra }),
 
   // Explore: the committed data-space (UMAP) map for a context (404 when not yet computed).
   exploreUmap: (context: string) =>
