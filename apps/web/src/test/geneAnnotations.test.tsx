@@ -1,6 +1,6 @@
-// Gene annotations — TIER 1 deterministic links (always) + graceful "annotation unavailable"
-// when the sourced-description artifact has no entry (its committed state today, since the source
-// data was unreachable). No fabricated text anywhere.
+// Gene annotations — TIER 1 deterministic links (always) + TIER 2 sourced descriptions from the
+// committed NCBI Gene artifact (305/978 landmarks covered); genes with no entry render "annotation
+// unavailable". No fabricated text anywhere.
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -36,12 +36,27 @@ describe("deterministic gene links (Tier 1)", () => {
   });
 });
 
+describe("sourced gene descriptions (Tier 2, real NCBI Gene artifact)", () => {
+  it("a covered gene shows its sourced description + attribution (never fabricated)", () => {
+    // BAMBI is one of the 305 landmark genes with a real committed NCBI Gene description.
+    render(<GeneAnnotation gene="BAMBI" />);
+    expect(screen.getByText(/source: NCBI Gene/i)).toBeInTheDocument();
+    expect(screen.queryByText("annotation unavailable")).not.toBeInTheDocument();
+  });
+});
+
 describe("gene contribution cards carry annotations + the honesty caption", () => {
-  it("each contributor shows the links + unavailable; the caption persists", () => {
+  it("each contributor shows links + EITHER a sourced description OR 'annotation unavailable'", () => {
     render(<GeneContributionCards explanation={explainER as unknown as ExplanationResult} />);
     const n = (explainER as unknown as ExplanationResult).top_contributors.length;
+    // Every gene has deterministic links.
     expect(screen.getAllByRole("link", { name: "NCBI Gene" })).toHaveLength(n);
-    expect(screen.getAllByText("annotation unavailable")).toHaveLength(n);
+    // Each gene is EITHER described-with-attribution OR "annotation unavailable" — never blank,
+    // never fabricated. The two states partition the contributors exactly.
+    const described = screen.queryAllByText(/source: NCBI Gene/i).length;
+    const unavailable = screen.queryAllByText("annotation unavailable").length;
+    expect(described + unavailable).toBe(n);
+    expect(described).toBeGreaterThan(0); // BAMBI is covered in this fixture
     expect(screen.getByText(/not biological causality or regulatory validation/i)).toBeInTheDocument();
   });
 });
