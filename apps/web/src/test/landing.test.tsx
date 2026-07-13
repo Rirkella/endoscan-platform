@@ -1,4 +1,5 @@
-// Landing page (production, "/"). Locks the honest framing + that CTAs go to REAL screens only.
+// Landing page (production, "/"), ported from prototype-v2. Locks the honest framing (experimental
+// / research-use only) and that every call-to-action points at a REAL route — no fake pages.
 
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -6,46 +7,57 @@ import { describe, expect, it } from "vitest";
 import { installFetchMock } from "./mockApi";
 import { renderApp } from "./renderApp";
 
+const REAL_ROUTES = new Set(["/analyze", "/library", "/explore"]);
+
 describe("Landing page", () => {
-  it('is the default route "/" and states research-use / experimental framing', async () => {
+  it('is the default route "/" with the prototype hero and research-use framing', async () => {
     installFetchMock();
     renderApp("/");
     expect(
-      await screen.findByRole("heading", {
-        name: /A platform for understanding molecular toxicity/i,
-      }),
+      await screen.findByRole("heading", { name: /See biological signals earlier/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Research use only\. Experimental models\./i)).toBeInTheDocument();
+    // Honest positioning: experimental research platform, research-use only (never a safety claim).
+    expect(screen.getAllByText(/Experimental research platform/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Experimental research use only/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/EndoScan does not replace experimental validation/i),
+    ).toBeInTheDocument();
   });
 
-  it("CTAs navigate ONLY to existing real screens (/analyze, /explore)", async () => {
+  it("every CTA navigates ONLY to existing real routes", async () => {
     installFetchMock();
     renderApp("/");
-    await screen.findByRole("heading", { name: /molecular toxicity/i });
-    // Every primary CTA points at a real route — no fake pages.
-    for (const link of screen.getAllByRole("link", { name: /Analyze your data/i })) {
+    await screen.findByRole("heading", { name: /See biological signals earlier/i });
+    // Primary workspace CTAs.
+    for (const link of screen.getAllByRole("link", { name: /Open the workspace/i })) {
       expect(link).toHaveAttribute("href", "/analyze");
     }
-    expect(screen.getByRole("link", { name: /Explore the platform/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Review model evidence/i })).toHaveAttribute(
+      "href",
+      "/library",
+    );
+    expect(screen.getByRole("link", { name: /Explore reference data/i })).toHaveAttribute(
       "href",
       "/explore",
     );
-    expect(screen.getByRole("link", { name: /Explore EndoScan/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Enter the EndoScan workspace/i })).toHaveAttribute(
       "href",
-      "/explore",
+      "/analyze",
     );
+    // No CTA points anywhere outside the real route set.
+    for (const link of screen.getAllByRole("link")) {
+      const href = link.getAttribute("href") ?? "";
+      if (href.startsWith("/")) expect(REAL_ROUTES.has(href) || href === "/").toBe(true);
+    }
   });
 
-  it("separates current scope from future, and marks unsupported features as Planned", async () => {
+  it("shows the current-scope proof strip (real, honest anchors)", async () => {
     installFetchMock();
     renderApp("/");
-    await screen.findByRole("heading", { name: /molecular toxicity/i });
-    // The honest anchor + future separation are both present and visible.
-    expect(screen.getByText(/Current scope/i)).toBeInTheDocument();
-    expect(screen.getByText(/early endocrine endpoint models, including ER and AR/i)).toBeInTheDocument();
-    expect(screen.getByText(/Future direction/i)).toBeInTheDocument();
-    // Report export + broader endpoints are not shown as already-working ("Planned" markers exist).
-    expect(screen.getAllByText(/^Planned$/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/^Available now$/i)).toBeInTheDocument();
+    await screen.findByRole("heading", { name: /See biological signals earlier/i });
+    expect(screen.getByText(/landmark genes checked before analysis/i)).toBeInTheDocument();
+    expect(screen.getByText(/registered endocrine endpoint models/i)).toBeInTheDocument();
+    expect(screen.getByText(/evidence layers: genes, pathways, references/i)).toBeInTheDocument();
+    expect(screen.getAllByText("978").length).toBeGreaterThan(0);
   });
 });

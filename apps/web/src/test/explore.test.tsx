@@ -32,9 +32,9 @@ async function placeSignature() {
 describe("Explore reference-landscape view", () => {
   beforeEach(() => installFetchMock());
 
-  it("Explore nav is enabled (not the old disabled 'coming later' chip)", async () => {
-    renderApp("/");
-    const link = await screen.findByRole("link", { name: /^Explore$/i });
+  it("Reference-data nav points to the real /explore route", async () => {
+    renderApp("/analyze");
+    const link = await screen.findByRole("link", { name: /Reference data/i });
     expect(link).toHaveAttribute("href", "/explore");
   });
 

@@ -1,443 +1,321 @@
-// Landing / marketing entry for EndoScan (production app, real routes — NO mock API data).
-// Positioning copy is the product owner's source of truth. Honesty guardrails applied:
-//  - "Research use only. Experimental models." framing is prominent.
-//  - Current scope is separated from future direction (a dedicated, distinct "Current scope" block).
-//  - Features the backend does not support yet (report export, SMILES→transcriptomics, the broader
-//    endpoint library beyond ER/AR, literature, similar-compounds/data search) are marked "Planned"
-//    or clearly framed as future — never shown as already-working product features.
-//  - CTAs navigate ONLY to existing real screens (/analyze, /explore). No fake pages.
+// Landing / product entry — ported from prototype-v2's LandingPage, rendered full-bleed OUTSIDE
+// the workspace shell. Copy follows the prototype; the only deviations from the prototype are
+// honesty-driven: every call-to-action navigates to a REAL route (/analyze, /library, /explore),
+// and prototype-only "mock results" phrasing is replaced with experimental/research-use framing.
+// No API data is used here.
 
 import { Link } from "react-router-dom";
 
-function Planned() {
-  return (
-    <span className="ml-2 inline-flex items-center rounded-full border border-warn-line bg-warn-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warn align-middle">
-      Planned
-    </span>
-  );
-}
-
-function Available() {
-  return (
-    <span className="ml-2 inline-flex items-center rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand align-middle">
-      Available now
-    </span>
-  );
-}
-
-function Developing() {
-  return (
-    <span className="ml-2 inline-flex items-center rounded-full border border-warn-line bg-warn-bg px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warn align-middle">
-      Developing
-    </span>
-  );
-}
-
-function Section({
-  eyebrow,
-  title,
-  children,
-}: {
-  eyebrow?: string;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="border-t border-line py-12">
-      {eyebrow && (
-        <p className="text-[11px] font-bold uppercase tracking-widest text-brand">{eyebrow}</p>
-      )}
-      <h2 className="mt-1 text-2xl font-bold tracking-tight text-ink">{title}</h2>
-      <div className="mt-5 space-y-5 text-[15px] leading-relaxed text-muted">{children}</div>
-    </section>
-  );
-}
-
-function Bullets({ items }: { items: string[] }) {
-  return (
-    <ul className="grid gap-1.5 sm:grid-cols-2">
-      {items.map((it) => (
-        <li key={it} className="flex gap-2">
-          <span aria-hidden className="mt-2 h-1.5 w-1.5 flex-none rounded-full bg-accent" />
-          <span>{it}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function QA({
-  q,
-  badge,
-  children,
-}: {
-  q: string;
-  badge?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl border border-line bg-card p-4 shadow-card">
-      <h3 className="text-base font-semibold text-ink">
-        {q}
-        {badge}
-      </h3>
-      <p className="mt-1.5 text-sm leading-relaxed text-muted">{children}</p>
-    </div>
-  );
-}
-
-function Step({ n, title, children }: { n: number; title: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <li className="flex gap-3">
-      <span
-        aria-hidden
-        className="grid h-7 w-7 flex-none place-items-center rounded-full bg-brand text-xs font-bold text-white"
-      >
-        {n}
-      </span>
-      <div>
-        <p className="font-semibold text-ink">{title}</p>
-        <p className="mt-0.5 text-sm leading-relaxed text-muted">{children}</p>
-      </div>
-    </li>
-  );
-}
+import heroImage from "../assets/endoscan-hero.png";
 
 export function Landing() {
   return (
-    <div className="mx-auto max-w-3xl">
-      {/* Hero */}
-      <section className="pb-2 pt-2">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-brand">EndoScan</p>
-        <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-ink sm:text-5xl">
-          A platform for understanding molecular toxicity
-        </h1>
-        <div className="mt-5 space-y-4 text-[16px] leading-relaxed text-muted">
-          <p>
-            EndoScan is a toxicology platform for studying how molecules may affect biological
-            systems.
+    <div className="landing-page">
+      <section className="landing-hero" style={{ backgroundImage: `url(${heroImage})` }}>
+        <header className="landing-nav">
+          <button
+            className="landing-brand"
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            aria-label="EndoScan home"
+          >
+            <span className="landing-brand-mark">E</span>
+            <span>
+              Endo<span>Scan</span>
+            </span>
+          </button>
+          <nav aria-label="Landing navigation">
+            <a href="#approach">Approach</a>
+            <a href="#evidence">Evidence</a>
+            <a href="#value">Value</a>
+          </nav>
+          <Link className="landing-nav-action" to="/analyze">
+            Open workspace
+          </Link>
+        </header>
+
+        <div className="landing-hero-content">
+          <p className="landing-overline">Transcriptomics-first endocrine intelligence</p>
+          <h1>EndoScan</h1>
+          <h2>See biological signals earlier.</h2>
+          <p className="landing-hero-copy">
+            EndoScan turns measured gene-expression responses into explainable endocrine endpoint
+            signals, helping research teams prioritize what to investigate next.
           </p>
+          <div className="landing-actions">
+            <Link className="landing-primary-action" to="/analyze">
+              Open the workspace
+            </Link>
+            <Link className="landing-secondary-action" to="/library">
+              Review model evidence
+            </Link>
+          </div>
+          <div className="landing-hero-facts" aria-label="Platform principles">
+            <span>Measured biological response</span>
+            <span>Endpoint-level explanation</span>
+            <span>Auditable research context</span>
+          </div>
+        </div>
+
+        <div className="landing-visual-caption">
+          <span>01</span>
           <p>
-            It brings together public toxicology data, transcriptomic analysis, endpoint models,
-            biological pathways, known compound effects, and scientific literature in one place.
-          </p>
-          <p>
-            The goal is not only to estimate whether a molecule may be risky, but to explain why:
-            which genes changed, which pathways were affected, which known molecules show similar
-            effects, and what evidence supports the result.
+            <strong>From cellular response to research evidence</strong>Transcriptomic signature,
+            model signal, genes, pathways and reference context.
           </p>
         </div>
-        <div className="mt-7 flex flex-wrap items-center gap-3">
-          <Link
-            to="/analyze"
-            className="rounded-md bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-dark"
-          >
-            Analyze your data
-          </Link>
-          <Link
-            to="/explore"
-            className="rounded-md border border-brand/40 bg-card px-5 py-2.5 text-sm font-semibold text-brand transition-colors hover:bg-surface"
-          >
-            Explore the platform
-          </Link>
-        </div>
-        <p className="mt-4 inline-flex items-center gap-2 rounded-full border border-warn-line bg-warn-bg px-3 py-1 text-xs font-semibold text-warn">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />
-          Research use only. Experimental models.
-        </p>
       </section>
 
-      {/* What EndoScan helps you do */}
-      <Section eyebrow="Capabilities" title="What EndoScan helps you do">
+      <section className="landing-proof-strip" aria-label="Current platform scope">
         <div>
-          <h3 className="text-lg font-semibold text-ink">Explore existing toxicology data</h3>
-          <p className="mt-2">
-            A large amount of toxicology data is already public, but it is spread across many
-            databases, papers, assays, and formats. EndoScan makes this data easier to explore.
-          </p>
-          <p className="mt-3 font-medium text-ink">
-            EndoScan is being built to help researchers search and compare:
-          </p>
-          <div className="mt-2">
-            <Bullets
-              items={[
-                "molecules",
-                "experimental conditions",
-                "cell types and tissues",
-                "doses and exposure times",
-                "measured gene-expression responses",
-                "toxicological endpoints",
-                "affected genes and pathways",
-                "similar compounds with known effects, where reference data are available",
-              ]}
-            />
-          </div>
-          <p className="mt-3">
-            This helps researchers understand what is already known before starting a new analysis.
-          </p>
+          <strong>978</strong>
+          <span>landmark genes checked before analysis</span>
         </div>
-
-        <div className="pt-4">
-          <h3 className="text-lg font-semibold text-ink">Analyze your own molecules</h3>
-          <p className="mt-2">
-            If you have transcriptomic data from an experiment, EndoScan can help you analyze it
-            across available toxicology models. You upload a gene-expression signature, and the
-            platform checks whether it is compatible with the available endpoint models.
-          </p>
-          <p className="mt-3 font-medium text-ink">Then EndoScan shows:</p>
-          <div className="mt-2">
-            <Bullets
-              items={[
-                "which toxicological signals were detected",
-                "how strong the signal is",
-                "which endpoint models were used",
-                "which genes contributed to the result",
-                "which biological pathways may be involved",
-                "which known compounds show similar responses",
-                "which scientific evidence supports the interpretation",
-              ]}
-            />
-          </div>
+        <div>
+          <strong>2</strong>
+          <span>registered endocrine endpoint models</span>
         </div>
-      </Section>
-
-      {/* Why transcriptomics */}
-      <Section eyebrow="Approach" title="Why transcriptomics?">
-        <p>A molecule&rsquo;s effect cannot be understood from its name or chemical structure alone.</p>
-        <p>
-          The same molecule may behave differently depending on the dose, exposure time, tissue,
-          cell type, organism, and experimental conditions.
-        </p>
-        <p>
-          Transcriptomics measures how thousands of genes respond after exposure to a molecule. This
-          gives a broad picture of what is happening inside the biological system.
-        </p>
-        <p className="font-medium text-ink">Gene-expression changes can reveal early signs of:</p>
-        <Bullets
-          items={[
-            "hormone disruption",
-            "liver stress",
-            "DNA damage",
-            "inflammation",
-            "oxidative stress",
-            "mitochondrial dysfunction",
-            "immune response",
-            "developmental or reproductive toxicity",
-          ]}
-        />
-        <p>
-          That is why EndoScan uses transcriptomic signatures as a central input for toxicology
-          analysis.
-        </p>
-      </Section>
-
-      {/* Endpoint library */}
-      <Section eyebrow="Endpoints" title="A growing library of toxicology endpoints">
-        <p>Toxicity is not one single thing.</p>
-        <p>
-          A molecule can affect many different biological systems. EndoScan is being built around a
-          large library of endpoint models, where each model focuses on a specific toxicological
-          effect.
-        </p>
-        <div className="rounded-xl border border-line bg-card p-4 shadow-card">
-          <p className="text-sm font-semibold text-ink">
-            Available today
-            <Available />
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            Estrogen receptor (ER) activity and androgen receptor (AR) activity — the first,
-            endocrine-related endpoint models. Both are experimental.
-          </p>
-          <p className="mt-3 text-sm font-semibold text-ink">
-            Planned areas
-            <Planned />
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            liver toxicity; DNA damage; oxidative stress; immune activation; mitochondrial toxicity;
-            developmental toxicity; reproductive toxicity.
-          </p>
+        <div>
+          <strong>3</strong>
+          <span>evidence layers: genes, pathways, references</span>
         </div>
         <p>
-          The first models focus on endocrine-related endpoints. Over time, the library will expand
-          to cover more areas of preclinical toxicology.
+          <span className="proof-dot" />
+          Experimental research platform
         </p>
-      </Section>
+      </section>
 
-      {/* Built from open data */}
-      <Section eyebrow="Data & provenance" title="Built from open toxicology data">
-        <p>EndoScan is designed to grow from public scientific data.</p>
-        <p>
-          Many useful toxicology datasets already exist, but they are difficult to find, compare,
-          and reuse.
-        </p>
-        <p>
-          The platform will use an agent-assisted workflow to help discover relevant datasets,
-          prepare them, train endpoint models, evaluate model quality, and record where each dataset
-          and model came from. This allows the endpoint library to grow while keeping the process
-          transparent and traceable.
-        </p>
-        <p className="font-medium text-ink">For each model, users should be able to see:</p>
-        <Bullets
-          items={[
-            "what endpoint it detects",
-            "what data it was trained on",
-            "how the endpoint was defined",
-            "how well the model performs",
-            "what input data it requires",
-            "what the model can and cannot conclude",
-          ]}
-        />
-      </Section>
-
-      {/* Explanation, not just prediction */}
-      <Section eyebrow="Explainability" title="Not just prediction — explanation">
-        <p>EndoScan is not meant to be a black-box risk score.</p>
-        <p>A useful toxicology result should explain the biology behind the signal.</p>
-        <p className="font-medium text-ink">For each endpoint result, EndoScan helps answer:</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <QA q="Which genes mattered?">
-            See the genes that had the strongest influence on the model result.
-          </QA>
-          <QA q="Which pathways were affected?">
-            Understand whether the response is linked to processes such as hormone signaling,
-            inflammation, DNA repair, cell cycle, apoptosis, metabolism, or oxidative stress.
-          </QA>
-          <QA q="Are there similar known molecules?" badge={<Developing />}>
-            Compare your molecule&rsquo;s response with compounds that have already been studied and
-            may have known toxicological risks, as the reference layer expands.
-          </QA>
-          <QA q="What does the literature say?" badge={<Planned />}>
-            Future literature support should help connect important genes, pathways, and mechanisms
-            to relevant scientific publications.
-          </QA>
-          <QA q="How reliable is the result?">
-            Review model quality, input compatibility, endpoint limitations, and the difference
-            between measured data and predicted data.
-          </QA>
+      <section className="landing-section landing-problem">
+        <div className="landing-section-intro">
+          <p className="landing-kicker">The opportunity</p>
+          <h2>Endocrine signals are expensive to discover late.</h2>
+          <p>
+            Research teams generate rich biological data, but turning that response into a traceable
+            screening hypothesis still requires fragmented tools and specialist interpretation.
+          </p>
         </div>
-        <p className="text-sm text-muted">
-          Gene and pathway context are current analysis layers. Similar-molecule comparison and
-          literature support are developing evidence layers, marked above.
-        </p>
-      </Section>
-
-      {/* How it works */}
-      <Section eyebrow="Workflow" title="How it works">
-        <ol className="space-y-4">
-          <Step n={1} title="Start with data">
-            Upload your own transcriptomic signature or explore a molecule with available public
-            data.
-          </Step>
-          <Step n={2} title="Check compatibility">
-            EndoScan verifies the gene identifiers, expression values, data columns, coverage, and
-            experimental context.
-          </Step>
-          <Step n={3} title="Run endpoint models">
-            The platform applies all compatible toxicology models to the transcriptomic response.
-          </Step>
-          <Step n={4} title="Review the signals">
-            See which endpoints show a potential signal and how strong each result is.
-          </Step>
-          <Step n={5} title="Understand the biology">
-            Explore the genes, pathways, similar compounds, and literature behind the result.
-          </Step>
-          <Step
-            n={6}
-            title={
-              <>
-                Export a report
-                <Planned />
-              </>
-            }
-          >
-            Save the analysis with methods, model versions, evidence, limitations, and provenance.
-          </Step>
-        </ol>
-      </Section>
-
-      {/* Future direction */}
-      <Section eyebrow="Future direction" title="From chemical structure to predicted biological response">
-        <p>Today, the main workflow starts with measured transcriptomic data.</p>
-        <p>In the future, EndoScan aims to support another route:</p>
-        <p className="rounded-lg border border-line bg-surface px-4 py-3 font-mono text-sm text-ink">
-          SMILES → predicted transcriptomic response → endpoint models → biological explanation
-        </p>
-        <p>
-          This would allow researchers to screen molecules earlier, even before transcriptomic
-          experiments are available.
-        </p>
-        <p>
-          Predicted transcriptomic data will always be clearly marked and separated from real
-          experimental data.
-        </p>
-        <p className="font-medium text-ink">Also on the roadmap:</p>
-        <Bullets
-          items={[
-            "SMILES to predicted transcriptomic response",
-            "broader endpoint coverage",
-            "better literature support",
-            "full multi-endpoint reports",
-          ]}
-        />
-      </Section>
-
-      {/* Current scope — the honest anchor */}
-      <section className="border-t border-line py-12">
-        <div className="rounded-2xl border border-brand/25 bg-card p-6 shadow-card">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-brand">Current scope</p>
-          <h2 className="mt-1 text-xl font-bold tracking-tight text-ink">
-            What the prototype does today
-          </h2>
-          <p className="mt-3 text-[15px] leading-relaxed text-muted">
-            The current prototype focuses on:
-          </p>
-          <div className="mt-3 text-[15px] leading-relaxed text-muted">
-            <Bullets
-              items={[
-                "measured transcriptomic signatures",
-                "input checking",
-                "early endocrine endpoint models, including ER and AR",
-                "endpoint scores and thresholds",
-                "contributing genes",
-                "pathway context",
-                "reference signatures",
-                "model limitations",
-              ]}
-            />
-          </div>
-          <p className="mt-4 text-[15px] leading-relaxed text-muted">
-            EndoScan is being built toward a broader platform for preclinical toxicology, with more
-            endpoints, more public datasets, better literature support, and full multi-endpoint
-            reports.
-          </p>
+        <div className="landing-problem-grid">
+          <article>
+            <span>01</span>
+            <h3>Data arrives before clarity</h3>
+            <p>
+              Gene-expression measurements contain signal, but raw matrices do not tell a team which
+              endocrine endpoints deserve attention.
+            </p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>Black-box scores are not enough</h3>
+            <p>
+              A number without genes, pathways, model status and applicability context is difficult
+              to trust or act on.
+            </p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>Confirmation is resource-intensive</h3>
+            <p>
+              Teams need a defensible way to prioritize follow-up experiments, not a replacement for
+              those experiments.
+            </p>
+          </article>
         </div>
       </section>
 
-      {/* Final CTA */}
-      <section className="border-t border-line py-12 text-center">
-        <h2 className="text-2xl font-bold tracking-tight text-ink">
-          Understand toxicity before it becomes a black box
-        </h2>
-        <p className="mx-auto mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
-          EndoScan helps researchers explore public toxicology data, analyze new molecular
-          responses, and understand the biological evidence behind each possible toxicological
-          signal.
-        </p>
-        <div className="mt-6 flex justify-center gap-3">
-          <Link
-            to="/analyze"
-            className="rounded-md bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-dark"
-          >
-            Analyze your data
-          </Link>
-          <Link
-            to="/explore"
-            className="rounded-md border border-brand/40 bg-card px-5 py-2.5 text-sm font-semibold text-brand transition-colors hover:bg-surface"
-          >
-            Explore EndoScan
+      <section className="landing-approach" id="approach">
+        <div className="landing-section approach-inner">
+          <div className="landing-section-intro landing-section-intro-light">
+            <p className="landing-kicker">The EndoScan approach</p>
+            <h2>Start with what biology actually did.</h2>
+            <p>
+              EndoScan is built around measured transcriptomic response. Molecule identity can
+              retrieve a public signature, but it is never treated as the result itself.
+            </p>
+          </div>
+          <div className="landing-flow" aria-label="EndoScan workflow">
+            <article>
+              <span>01</span>
+              <div>
+                <strong>Add response</strong>
+                <p>Upload a signature or select a measured public perturbation.</p>
+              </div>
+            </article>
+            <article>
+              <span>02</span>
+              <div>
+                <strong>Verify fit</strong>
+                <p>Confirm columns, gene coverage and experimental context.</p>
+              </div>
+            </article>
+            <article>
+              <span>03</span>
+              <div>
+                <strong>Assess endpoints</strong>
+                <p>Run registered models with visible thresholds and status.</p>
+              </div>
+            </article>
+            <article>
+              <span>04</span>
+              <div>
+                <strong>Inspect evidence</strong>
+                <p>Review genes, pathways, neighbors and limitations.</p>
+              </div>
+            </article>
+          </div>
+          <Link className="landing-inline-action button" to="/analyze">
+            Walk through the analysis flow
           </Link>
         </div>
       </section>
+
+      <section className="landing-section landing-evidence" id="evidence">
+        <div className="landing-evidence-copy">
+          <p className="landing-kicker">Explainability by design</p>
+          <h2>A result that can be questioned, traced and discussed.</h2>
+          <p>
+            Every endpoint signal stays connected to the evidence behind it. The interface separates
+            the prediction for one signature from the quality and limitations of the model itself.
+          </p>
+          <dl>
+            <div>
+              <dt>Signal</dt>
+              <dd>Score, decision threshold and model call</dd>
+            </div>
+            <div>
+              <dt>Explanation</dt>
+              <dd>Contributing genes and pathway context</dd>
+            </div>
+            <div>
+              <dt>Reference</dt>
+              <dd>Nearby measured signatures and provenance</dd>
+            </div>
+            <div>
+              <dt>Boundary</dt>
+              <dd>Model status and interpretation limitations</dd>
+            </div>
+          </dl>
+          <Link className="landing-text-action" to="/library">
+            Open the model library
+          </Link>
+        </div>
+
+        <div className="landing-product-preview" aria-label="Example EndoScan endpoint result">
+          <div className="preview-topline">
+            <span>SCREENING RESULT / ER</span>
+            <b>Experimental model</b>
+          </div>
+          <div className="preview-summary">
+            <div>
+              <span>Endpoint signal score</span>
+              <strong>0.82</strong>
+            </div>
+            <span className="preview-call">Above threshold</span>
+          </div>
+          <div className="preview-track">
+            <span />
+            <i />
+          </div>
+          <div className="preview-meta">
+            <div>
+              <span>Threshold</span>
+              <strong>0.50</strong>
+            </div>
+            <div>
+              <span>Input coverage</span>
+              <strong>978 / 978</strong>
+            </div>
+            <div>
+              <span>Model call</span>
+              <strong>Active</strong>
+            </div>
+          </div>
+          <div className="preview-evidence">
+            <p>Top contributing evidence</p>
+            <div>
+              <strong>ESR1</strong>
+              <span>
+                <i style={{ width: "91%" }} />
+              </span>
+              <b>0.091</b>
+            </div>
+            <div>
+              <strong>FOXA1</strong>
+              <span>
+                <i style={{ width: "76%" }} />
+              </span>
+              <b>0.076</b>
+            </div>
+            <div>
+              <strong>GATA3</strong>
+              <span>
+                <i style={{ width: "62%" }} />
+              </span>
+              <b>0.062</b>
+            </div>
+          </div>
+          <div className="preview-footnote">
+            <span />
+            Illustrative example. Pattern similarity is a research signal, not a safety conclusion.
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-value" id="value">
+        <div className="landing-section">
+          <div className="landing-value-heading">
+            <p className="landing-kicker">Why it matters</p>
+            <h2>More informed prioritization before costly confirmation.</h2>
+          </div>
+          <div className="landing-value-grid">
+            <article>
+              <span>For research teams</span>
+              <h3>One coherent path from signature to hypothesis</h3>
+              <p>
+                Reduce manual switching between data validation, model output and biological context.
+              </p>
+            </article>
+            <article>
+              <span>For R&amp;D programs</span>
+              <h3>Prioritize candidates with visible reasoning</h3>
+              <p>
+                Use endpoint evidence to decide which compounds and experiments deserve deeper
+                investigation.
+              </p>
+            </article>
+            <article>
+              <span>For platform growth</span>
+              <h3>A reusable framework for additional endpoints</h3>
+              <p>
+                Registered models, evidence contracts and reproducible reports create a foundation
+                that can expand.
+              </p>
+            </article>
+          </div>
+          <div className="landing-positioning">
+            <p>
+              <strong>EndoScan does not replace experimental validation.</strong> It is designed to
+              make the path toward validation more focused, explainable and reproducible.
+            </p>
+            <Link to="/explore">Explore reference data</Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-final-cta">
+        <div>
+          <p className="landing-kicker">Experimental research platform</p>
+          <h2>Follow a biological response from input to evidence.</h2>
+          <p>
+            Work through the analysis flow on your own transcriptomic signature. Endpoint models are
+            experimental and for research use only.
+          </p>
+        </div>
+        <Link to="/analyze">Enter the EndoScan workspace</Link>
+      </section>
+
+      <footer className="landing-footer">
+        <span>EndoScan / transcriptomics-first endocrine pre-screening</span>
+        <span>Experimental research use only</span>
+      </footer>
     </div>
   );
 }

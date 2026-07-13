@@ -1,75 +1,502 @@
-// Analyze — the primary, default flow. Bring a transcriptomic signature (demo picker / JSON
-// paste; upload is a disabled Phase-2 placeholder), run it across whatever /endpoints returns
-// (client-side fan-out), and explore per-endpoint signal cards + a count-adaptive comparison.
-// Nothing about the endpoint set is hardcoded.
+// Analyze — the primary flow, ported from prototype-v2's stepped workspace (source → validate →
+// running → result) and wired to the REAL API underneath:
+//   source     : upload a signature (POST /signatures/parse) OR paste JSON / pick a bundled demo.
+//                A "Known molecule" tab is present for parity but is a PLANNED/mock lookup that
+//                never fabricates an analysis (EndoScan will not infer a result from identity alone).
+//   validate   : real gene coverage (from the parse preview) + real endpoint compatibility (/endpoints).
+//   running    : shown while POST /analyze is in flight.
+//   result     : overview (real scores/calls/thresholds/status), evidence (real /explain + pathways +
+//                limitations), reference (real /explore/locate), report (PLANNED preview of exports).
+// The endpoint set is always whatever /endpoints returns — never hardcoded ER/AR. Wording stays
+// honest: endpoint signal score / model call (Active/Inactive), below-threshold is neutral, and the
+// report/known-molecule areas are explicitly badged as not-yet-available.
 
 import { useState } from "react";
 
 import { api } from "../api/client";
-import type { Signature } from "../api/types";
-import { ComparisonViz } from "../components/ComparisonViz";
-import { ErrorNotice } from "../components/ErrorNotice";
-import { ScoreCardGrid } from "../components/ScoreCardGrid";
-import { SignatureInput } from "../components/SignatureInput";
-import { useAnalyze } from "../hooks/useAnalyze";
+import type { EndpointSummary, ParseResult, Signature } from "../api/types";
+import { PlannedBadge } from "../components/PlannedBadge";
+import { EvidencePanel } from "../components/analyze/EvidencePanel";
+import { ReferencePanel } from "../components/analyze/ReferencePanel";
+import { SourceStep } from "../components/analyze/SourceStep";
+import { ValidationStep } from "../components/analyze/ValidationStep";
+import { type EndpointSignal, useAnalyze } from "../hooks/useAnalyze";
 import { useAsync } from "../hooks/useAsync";
+
+export type AnalyzeStep = "source" | "validate" | "running" | "result";
+export type ResultTab = "overview" | "evidence" | "reference" | "report";
+
+// What the user prepared, for display in validate/result headers. `signature` is the REAL payload.
+export interface PreparedInput {
+  title: string;
+  subtitle: string;
+  kind: "file" | "paste" | "demo";
+  signature: Signature;
+  parse: ParseResult | null; // present for uploads (carries real coverage), null for paste/demo
+}
+
+function endpointCodeClass(id: string): string {
+  const k = id.toLowerCase();
+  return k === "er" ? "code-er" : k === "ar" ? "code-ar" : "code-generic";
+}
 
 export function Analyze() {
   const endpoints = useAsync(() => api.listEndpoints(), []);
-  const analyze = useAnalyze(endpoints.data ?? []);
-  const [signature, setSignature] = useState<Signature | null>(null);
+  const endpointList = endpoints.data ?? [];
+  const analyze = useAnalyze(endpointList);
 
-  const ready = (endpoints.data?.length ?? 0) > 0 && signature != null;
+  const [step, setStep] = useState<AnalyzeStep>("source");
+  const [prepared, setPrepared] = useState<PreparedInput | null>(null);
+  const [resultTab, setResultTab] = useState<ResultTab>("overview");
+  const [runError, setRunError] = useState<unknown>(null);
+
+  function onPrepared(input: PreparedInput) {
+    setPrepared(input);
+    setStep("validate");
+  }
+
+  async function onRun() {
+    if (!prepared) return;
+    setStep("running");
+    setRunError(null);
+    try {
+      await analyze.run(prepared.signature);
+    } catch (e) {
+      setRunError(e);
+    } finally {
+      setResultTab("overview");
+      setStep("result");
+    }
+  }
+
+  function reset() {
+    setStep("source");
+    setPrepared(null);
+    setResultTab("overview");
+    setRunError(null);
+  }
 
   return (
-    <div className="space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Analyze a signature</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          Bring a transcriptomic signature and see which endpoint activity signals it is consistent
-          with, under EndoScan&rsquo;s experimental models. Results carry their limitations.
-        </p>
-      </header>
-
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,22rem)_1fr]">
-        {/* Input column */}
-        <div className="space-y-3">
-          {endpoints.error != null && <ErrorNotice error={endpoints.error} />}
-          <SignatureInput onSignature={setSignature} disabled={analyze.running} />
-          {signature && (
-            <div className="rounded-md border border-line bg-surface px-3 py-2">
-              <p className="text-xs text-muted">
-                Signature loaded ({Object.keys(signature).length} genes). The API validates the gene
-                set on analyze.
+    <div className="analyze-page">
+      {step !== "result" && (
+        <>
+          <div className="page-header">
+            <div>
+              <p className="eyebrow">New screening</p>
+              <h1>Analyze a transcriptomic response</h1>
+              <p className="page-copy">
+                Start from your own signature or a measured public perturbation. Every input is
+                checked before a model is run. Results are experimental endpoint signals, not
+                clinical, regulatory or safety conclusions.
               </p>
-              <button
-                type="button"
-                className="mt-2 w-full rounded-md bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                disabled={!ready || analyze.running}
-                onClick={() => signature && analyze.run(signature)}
-              >
-                {analyze.running ? "Analyzing…" : "Analyze across endpoints"}
-              </button>
             </div>
-          )}
-        </div>
+          </div>
+          <WorkflowSteps current={step} />
+        </>
+      )}
 
-        {/* Results column */}
-        <div className="space-y-6">
-          {analyze.signals.length === 0 && !analyze.running && (
-            <p className="text-sm text-muted">
-              Load a signature and run Analyze — one signal card per registered endpoint will appear
-              here.
-            </p>
-          )}
-          {analyze.signature && analyze.signals.length > 0 && (
-            <>
-              <ComparisonViz signals={analyze.signals} />
-              <ScoreCardGrid signals={analyze.signals} signature={analyze.signature} />
-            </>
-          )}
+      {step === "source" && (
+        <SourceStep onPrepared={onPrepared} endpointCount={endpointList.length} />
+      )}
+
+      {step === "validate" && prepared && (
+        <ValidationStep
+          input={prepared}
+          endpoints={endpointList}
+          onBack={() => setStep("source")}
+          onRun={onRun}
+        />
+      )}
+
+      {step === "running" && prepared && <RunningStep title={prepared.title} />}
+
+      {step === "result" && prepared && (
+        <ResultWorkspace
+          input={prepared}
+          endpoints={endpointList}
+          signals={analyze.signals}
+          runError={runError}
+          tab={resultTab}
+          setTab={setResultTab}
+          onNew={reset}
+        />
+      )}
+    </div>
+  );
+}
+
+function WorkflowSteps({ current }: { current: AnalyzeStep }) {
+  const order: AnalyzeStep[] = ["source", "validate", "running", "result"];
+  const currentIndex = order.indexOf(current);
+  const labels = ["Add input", "Check fit", "Run models", "Review result"];
+  return (
+    <ol className="workflow-steps" aria-label="Analysis progress">
+      {labels.map((label, index) => (
+        <li key={label} className={index <= currentIndex ? "step-active" : ""}>
+          <span>{index < currentIndex ? "OK" : index + 1}</span>
+          <strong>{label}</strong>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function RunningStep({ title }: { title: string }) {
+  return (
+    <section className="running-panel">
+      <div className="running-indicator">
+        <span />
+        <span />
+        <span />
+      </div>
+      <p className="eyebrow">Analysis in progress</p>
+      <h2>Assessing {title}</h2>
+      <p>
+        Running the registered endpoint models on your signature and preparing per-endpoint
+        evidence.
+      </p>
+    </section>
+  );
+}
+
+function ResultWorkspace({
+  input,
+  endpoints,
+  signals,
+  runError,
+  tab,
+  setTab,
+  onNew,
+}: {
+  input: PreparedInput;
+  endpoints: EndpointSummary[];
+  signals: EndpointSignal[];
+  runError: unknown;
+  tab: ResultTab;
+  setTab: (t: ResultTab) => void;
+  onNew: () => void;
+}) {
+  const scored = signals.filter((s) => s.result != null);
+  const nAbove = scored.filter((s) => s.result!.call).length;
+
+  return (
+    <div className="result-workspace">
+      <div className="result-header">
+        <div>
+          <button className="back-link" onClick={onNew}>
+            Back to new analysis
+          </button>
+          <p className="eyebrow">Screening result</p>
+          <h1>{input.title}</h1>
+          <p>{input.subtitle}</p>
+        </div>
+        <div className="result-actions">
+          <button className="button primary" onClick={() => setTab("report")}>
+            Open report
+          </button>
         </div>
       </div>
+
+      <nav className="result-tabs" aria-label="Result sections">
+        {(["overview", "evidence", "reference", "report"] as ResultTab[]).map((item) => (
+          <button
+            key={item}
+            className={tab === item ? "result-tab-active" : ""}
+            onClick={() => setTab(item)}
+          >
+            {item === "reference" ? "Reference context" : item[0].toUpperCase() + item.slice(1)}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "overview" && (
+        <OverviewTab
+          input={input}
+          signals={signals}
+          nAbove={nAbove}
+          nScored={scored.length}
+          runError={runError}
+          onEvidence={() => setTab("evidence")}
+          onReference={() => setTab("reference")}
+        />
+      )}
+      {tab === "evidence" && <EvidencePanel signals={signals} signature={input.signature} />}
+      {tab === "reference" && <ReferencePanel endpoints={endpoints} signature={input.signature} />}
+      {tab === "report" && <ReportTab input={input} signals={signals} nAbove={nAbove} />}
+    </div>
+  );
+}
+
+function OverviewTab({
+  input,
+  signals,
+  nAbove,
+  nScored,
+  runError,
+  onEvidence,
+  onReference,
+}: {
+  input: PreparedInput;
+  signals: EndpointSignal[];
+  nAbove: number;
+  nScored: number;
+  runError: unknown;
+  onEvidence: () => void;
+  onReference: () => void;
+}) {
+  const preview = input.parse?.preview;
+  return (
+    <div className="overview-layout">
+      <div className="overview-main">
+        <section className="executive-summary">
+          <div>
+            <p className="eyebrow">Screening summary</p>
+            <h2>
+              {nAbove > 0
+                ? `${nAbove} of ${nScored} endpoint ${nScored === 1 ? "model is" : "models are"} above threshold`
+                : "No endpoint model is above its threshold"}
+            </h2>
+            <p>
+              Each score reflects similarity to a learned endpoint-associated expression pattern.
+              Interpret every result with the endpoint evidence and limitations — a score is not a
+              clinical, regulatory or safety conclusion.
+            </p>
+          </div>
+          <span className="summary-status">
+            <span
+              className={`status-dot ${nAbove > 0 ? "status-dot-coral" : ""}`}
+              aria-hidden
+            />
+            {nAbove} of {nScored} above threshold
+          </span>
+        </section>
+
+        {runError != null && (
+          <div className="no-signature" role="alert">
+            <strong>The analysis request failed.</strong>
+            <p>The models could not be run for this signature. Try again or adjust the input.</p>
+          </div>
+        )}
+
+        <div className="endpoint-results">
+          {signals.map((s) => (
+            <EndpointResultCard
+              key={s.endpoint_id}
+              signal={s}
+              onEvidence={onEvidence}
+            />
+          ))}
+        </div>
+      </div>
+
+      <aside className="overview-aside">
+        <section>
+          <p className="aside-label">Input</p>
+          <dl className="metadata-list">
+            <div>
+              <dt>Source</dt>
+              <dd>{input.kind === "file" ? "Uploaded file" : input.kind === "demo" ? "Bundled demo" : "Pasted signature"}</dd>
+            </div>
+            <div>
+              <dt>Genes provided</dt>
+              <dd>{Object.keys(input.signature).length}</dd>
+            </div>
+            {preview && (
+              <div>
+                <dt>Schema coverage</dt>
+                <dd>
+                  {preview.n_matched} / {input.parse!.n_schema_genes}
+                </dd>
+              </div>
+            )}
+          </dl>
+        </section>
+        <section>
+          <p className="aside-label">Reference placement</p>
+          <p className="mini-reference-copy">
+            See where this signature sits among known reference signatures. Distance is descriptive
+            context, not a prediction.
+          </p>
+          <button className="detail-link" onClick={onReference}>
+            Open reference context
+          </button>
+        </section>
+        <section className="limitations-summary">
+          <p className="aside-label">Interpretation boundary</p>
+          <p>
+            This screen reports experimental model signals, not biological mechanism or endocrine
+            safety. Review each endpoint&rsquo;s limitations before use.
+          </p>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function EndpointResultCard({
+  signal,
+  onEvidence,
+}: {
+  signal: EndpointSignal;
+  onEvidence: () => void;
+}) {
+  const code = endpointCodeClass(signal.endpoint_id);
+
+  if (signal.result == null) {
+    return (
+      <article className="endpoint-result">
+        <div className="endpoint-result-top">
+          <span className={`endpoint-code ${code}`}>{signal.endpoint_id}</span>
+          <span className="status-chip status-note">Not available</span>
+        </div>
+        <h3>{signal.biological_target}</h3>
+        <p className="endpoint-result-note">
+          This endpoint could not score the signature. The other endpoints are unaffected.
+        </p>
+        <button className="detail-link" onClick={onEvidence}>
+          Inspect {signal.endpoint_id} evidence
+        </button>
+      </article>
+    );
+  }
+
+  const r = signal.result;
+  const above = r.call;
+  const pct = Math.max(0, Math.min(100, Math.round(r.probability * 100)));
+  const thresholdPct = Math.max(0, Math.min(100, Math.round(r.threshold * 100)));
+
+  return (
+    <article className={`endpoint-result ${above ? "endpoint-positive" : ""}`}>
+      <div className="endpoint-result-top">
+        <span className={`endpoint-code ${code}`}>{signal.endpoint_id}</span>
+        {/* Above-threshold = warm SIGNAL chip (attention, not hazard). Below = neutral, never green. */}
+        <span className={`status-chip ${above ? "status-signal" : "status-neutral"}`}>
+          {above ? "Above threshold" : "Below threshold"}
+        </span>
+      </div>
+      <h3>{signal.biological_target}</h3>
+      <p>Endpoint signal score</p>
+      <div className="score-row">
+        <strong className="tabular">{r.probability.toFixed(2)}</strong>
+        <span>Threshold {r.threshold.toFixed(2)}</span>
+      </div>
+      <div className={`score-track ${above ? "" : "score-track-low"}`}>
+        <span style={{ width: `${pct}%` }} />
+        <i style={{ left: `${thresholdPct}%` }} />
+      </div>
+      <dl>
+        <div>
+          <dt>Model call</dt>
+          <dd className={above ? "call-signal" : ""}>{above ? "Active" : "Inactive"}</dd>
+        </div>
+        <div>
+          <dt>Model status</dt>
+          <dd>{r.limitations.status}</dd>
+        </div>
+        <div>
+          <dt>Input fit</dt>
+          <dd>Technical schema met</dd>
+        </div>
+      </dl>
+      <button className="detail-link" onClick={onEvidence}>
+        Inspect {signal.endpoint_id} evidence
+      </button>
+    </article>
+  );
+}
+
+function ReportTab({
+  input,
+  signals,
+  nAbove,
+}: {
+  input: PreparedInput;
+  signals: EndpointSignal[];
+  nAbove: number;
+}) {
+  const scored = signals.filter((s) => s.result != null);
+  return (
+    <div className="report-layout">
+      <aside className="report-toc">
+        <p className="aside-label">Report contents</p>
+        {[
+          "Executive summary",
+          "Input and compatibility",
+          "Endpoint overview",
+          "Evidence",
+          "Reference context",
+          "Methods and limitations",
+        ].map((item, index) => (
+          <button key={item} className={index === 0 ? "selected" : ""} disabled>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            {item}
+          </button>
+        ))}
+      </aside>
+      <article className="report-document">
+        <div className="report-document-header">
+          <div>
+            <p>ENDOSCAN SCREENING REPORT</p>
+            <span>Preview — export is a planned capability</span>
+          </div>
+          <div>
+            <PlannedBadge label="Report export: planned" />
+          </div>
+        </div>
+        <div className="report-title">
+          <div>
+            <p className="eyebrow">Executive summary</p>
+            <h1>Endpoint screening result</h1>
+            <p>Transcriptomics-based pre-screening across the registered experimental endpoints.</p>
+          </div>
+          <span className="summary-status">
+            <span className={`status-dot ${nAbove > 0 ? "status-dot-coral" : ""}`} aria-hidden />
+            {nAbove} of {scored.length} above threshold
+          </span>
+        </div>
+        <div className="report-metrics">
+          {scored.map((s) => (
+            <div key={s.endpoint_id}>
+              <span>{s.endpoint_id} endpoint</span>
+              <strong className="tabular">{s.result!.probability.toFixed(2)}</strong>
+              <small>{s.result!.call ? "Active" : "Inactive"}</small>
+            </div>
+          ))}
+        </div>
+        <section className="report-section">
+          <h2>Input and compatibility</h2>
+          <div className="report-info-grid">
+            <div>
+              <span>Signature</span>
+              <strong>{input.title}</strong>
+            </div>
+            <div>
+              <span>Genes provided</span>
+              <strong>{Object.keys(input.signature).length}</strong>
+            </div>
+            {input.parse?.preview && (
+              <div>
+                <span>Schema coverage</span>
+                <strong>
+                  {input.parse.preview.n_matched} / {input.parse.n_schema_genes}
+                </strong>
+              </div>
+            )}
+            <div>
+              <span>Endpoints assessed</span>
+              <strong>{scored.length}</strong>
+            </div>
+          </div>
+        </section>
+        <footer className="report-footer">
+          <strong>Experimental research use only</strong>
+          <p>
+            A downloadable, reproducible report (HTML / PDF / JSON with full provenance, model cards
+            and limitations) is a planned capability and is not generated yet. EndoScan does not
+            provide clinical, diagnostic, regulatory or safety conclusions.
+          </p>
+        </footer>
+      </article>
     </div>
   );
 }
