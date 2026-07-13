@@ -35,8 +35,8 @@ function cardFor(target: string): HTMLElement {
 describe("Analyze-first IA + score cards", () => {
   beforeEach(() => installFetchMock());
 
-  it("Analyze is the default route (/)", async () => {
-    renderApp("/");
+  it("Analyze screen renders at /analyze", async () => {
+    renderApp("/analyze");
     expect(await screen.findByRole("heading", { name: /Analyze a signature/i })).toBeInTheDocument();
     // Phase 2: the upload zone is now ENABLED (a functional file input, not the disabled placeholder).
     expect(screen.getByText(/Upload a signature file/i)).toBeInTheDocument();
@@ -47,7 +47,7 @@ describe("Analyze-first IA + score cards", () => {
   });
 
   it("score cards render from the mocked API (ER + AR), not hardcoded", async () => {
-    renderApp("/");
+    renderApp("/analyze");
     await analyze();
     const cards = await screen.findAllByRole("article");
     expect(cards).toHaveLength(2);
@@ -78,7 +78,7 @@ describe("Analyze-first IA + score cards", () => {
       "GET /api/endpoints": { body: six }, // so the Analyze button enables
       "POST /api/analyze": { body: { results } },
     });
-    const { container } = renderApp("/");
+    const { container } = renderApp("/analyze");
     await analyze();
 
     const cards = await screen.findAllByRole("article");
@@ -89,7 +89,7 @@ describe("Analyze-first IA + score cards", () => {
   });
 
   it("2-endpoint comparison bar renders", async () => {
-    const { container } = renderApp("/");
+    const { container } = renderApp("/analyze");
     await analyze();
     await screen.findAllByRole("article");
     expect(container.querySelector('[data-viz="bars"]')).not.toBeNull();
@@ -101,7 +101,7 @@ describe("gene contribution cards — correct method label per endpoint", () => 
   beforeEach(() => installFetchMock());
 
   it("ER explain shows TreeSHAP", async () => {
-    renderApp("/");
+    renderApp("/analyze");
     await analyze();
     await screen.findAllByRole("article");
     const erCard = cardFor("Estrogen Receptor");
@@ -112,7 +112,7 @@ describe("gene contribution cards — correct method label per endpoint", () => 
   });
 
   it("AR explain shows the linear-coefficient label (never SHAP)", async () => {
-    renderApp("/");
+    renderApp("/analyze");
     await analyze();
     await screen.findAllByRole("article");
     const arCard = cardFor("Androgen Receptor");
@@ -135,7 +135,7 @@ describe("gene contribution cards — correct method label per endpoint", () => 
         },
       },
     });
-    renderApp("/");
+    renderApp("/analyze");
     await analyze();
     await screen.findAllByRole("article");
     const arCard = cardFor("Androgen Receptor");
@@ -150,7 +150,7 @@ describe("integrated limitations + honesty", () => {
   beforeEach(() => installFetchMock());
 
   it("limitations are present and readable with every result (status + CI reason + scope + disclaimer)", async () => {
-    renderApp("/");
+    renderApp("/analyze");
     await analyze();
     await screen.findAllByRole("article");
     const erCard = cardFor("Estrogen Receptor");
@@ -164,7 +164,7 @@ describe("integrated limitations + honesty", () => {
   });
 
   it("the experimental banner is present and no overclaiming copy appears", async () => {
-    renderApp("/");
+    renderApp("/analyze");
     await analyze();
     await screen.findAllByRole("article");
     expect(screen.getByRole("note")).toHaveTextContent(

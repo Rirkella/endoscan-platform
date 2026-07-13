@@ -4,6 +4,7 @@ import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import App from "../App";
 import { Analyze } from "../pages/Analyze";
 import { Explore } from "../pages/Explore";
+import { Landing } from "../pages/Landing";
 import { ModelEvidence } from "../pages/ModelEvidence";
 import { ModelLibrary } from "../pages/ModelLibrary";
 
@@ -15,7 +16,8 @@ export function renderApp(initialPath: string) {
         path: "/",
         element: <App />,
         children: [
-          { index: true, element: <Analyze /> },
+          { index: true, element: <Landing /> },
+          { path: "analyze", element: <Analyze /> },
           { path: "library", element: <ModelLibrary /> },
           { path: "library/:id", element: <ModelEvidence /> },
           { path: "explore", element: <Explore /> },

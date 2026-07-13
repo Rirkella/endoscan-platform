@@ -20,13 +20,13 @@ describe("signature upload", () => {
   beforeEach(() => installFetchMock());
 
   it("the upload zone is enabled (not the Phase-1 disabled placeholder)", async () => {
-    renderApp("/");
+    renderApp("/analyze");
     await screen.findByRole("heading", { name: /Analyze a signature/i });
     expect(fileInput()).not.toBeDisabled();
   });
 
   it("upload CSV → real preview → analyze → score-card grid", async () => {
-    renderApp("/");
+    renderApp("/analyze");
     await screen.findByRole("heading", { name: /Analyze a signature/i });
     uploadCsv();
     // Preview reflects the real parse result (n_matched from the API, not fabricated).
@@ -40,7 +40,7 @@ describe("signature upload", () => {
 
   it("invalid upload shows the API's gene-level message VERBATIM", async () => {
     installFetchMock({ "POST /api/signatures/parse": { status: 422, body: parseInvalid } });
-    renderApp("/");
+    renderApp("/analyze");
     await screen.findByRole("heading", { name: /Analyze a signature/i });
     uploadCsv();
     expect(await screen.findByText(parseInvalid.detail)).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe("signature upload", () => {
 
   it("the frontend does NO independent gene validation — it calls the API to validate", async () => {
     installFetchMock();
-    renderApp("/");
+    renderApp("/analyze");
     await screen.findByRole("heading", { name: /Analyze a signature/i });
     uploadCsv();
     await screen.findByText(/Aligned to 978 schema genes/i);
@@ -58,7 +58,7 @@ describe("signature upload", () => {
   });
 
   it("demo picker + JSON paste still work alongside upload", async () => {
-    renderApp("/");
+    renderApp("/analyze");
     await screen.findByRole("heading", { name: /Analyze a signature/i });
     // JSON paste path
     fireEvent.change(screen.getByLabelText(/Signature \(JSON/i), {

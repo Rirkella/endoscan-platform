@@ -6,6 +6,7 @@ import App from "./App";
 import "./index.css";
 import { Analyze } from "./pages/Analyze";
 import { Explore } from "./pages/Explore";
+import { Landing } from "./pages/Landing";
 import { ModelEvidence } from "./pages/ModelEvidence";
 import { ModelLibrary } from "./pages/ModelLibrary";
 
@@ -14,7 +15,8 @@ const router = createBrowserRouter([
     path: "/",
     element: <App />,
     children: [
-      { index: true, element: <Analyze /> }, // Analyze is the default landing flow
+      { index: true, element: <Landing /> }, // "/" is the landing page
+      { path: "analyze", element: <Analyze /> }, // the API-connected Analyze flow
       { path: "library", element: <ModelLibrary /> },
       { path: "library/:id", element: <ModelEvidence /> },
       { path: "explore", element: <Explore /> },

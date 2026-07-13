@@ -8,6 +8,15 @@
 
 body {
   @apply bg-surface text-ink antialiased;
+  /* Inter first (progressive enhancement — no bundled font/network), system fallback. Mirrors
+     the prototype-v2 type reference. */
   font-family:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numeric readouts (scores, thresholds) read as data. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
