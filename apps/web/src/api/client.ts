@@ -6,6 +6,8 @@
 import type {
   AnalyzeResponse,
   ApiError,
+  CatalogueSearchResponse,
+  CatalogueSignatureDetail,
   EndpointDetail,
   EndpointSummary,
   ExplanationResult,
@@ -95,6 +97,15 @@ export const api = {
   // Run only explicitly selected compatible endpoints (or all when omitted).
   analyze: (signature: Signature, endpoint_ids?: string[], allow_extra = false) =>
     postJson<AnalyzeResponse>("/analyze", { signature, endpoint_ids, allow_extra }),
+
+  searchCatalogue: (query: string, limit = 10) =>
+    getJson<CatalogueSearchResponse>(
+      `/catalogue/v1/compounds?query=${encodeURIComponent(query)}&limit=${limit}`,
+    ),
+  getCatalogueSignature: (signatureId: string) =>
+    getJson<CatalogueSignatureDetail>(
+      `/catalogue/v1/signatures/${encodeURIComponent(signatureId)}`,
+    ),
 
   // Biological pathways for an explain result (Reactome over-representation; honest empty states).
   interpretPathways: (endpoint_id: string, signature: Signature, allow_extra = false) =>

@@ -44,7 +44,7 @@ export function ValidationStep({
 
         <div className="input-summary">
           <div className="file-mark">
-            {input.kind === "file" ? "CSV" : input.kind === "demo" ? "DEMO" : "JSON"}
+            {input.kind === "file" ? "CSV" : input.kind === "demo" ? "DEMO" : input.kind === "catalogue" ? "PUBLIC" : "JSON"}
           </div>
           <div>
             <strong>{input.title}</strong>

@@ -1,6 +1,8 @@
 import { vi } from "vitest";
 
 import analyze from "./fixtures/analyze.json";
+import catalogueSearch from "./fixtures/catalogue_search.json";
+import catalogueSignature from "./fixtures/catalogue_signature.json";
 import endpointAR from "./fixtures/endpoint_AR.json";
 import endpointER from "./fixtures/endpoint_ER.json";
 import endpoints from "./fixtures/endpoints.json";
@@ -37,6 +39,10 @@ function defaultRoutes(): Record<string, Resolver> {
     }),
     "POST /api/analyze": { body: analyze },
     "POST /api/signatures/parse": { body: parseOk },
+    "GET /api/catalogue/v1/compounds": { body: catalogueSearch },
+    "GET /api/catalogue/v1/signatures/lincs-gse92742-caffeic-acid-mcf7-a549": {
+      body: catalogueSignature,
+    },
     "GET /examples/lincs-caffeic-acid-mcf7-a549.csv": {
       body: "gene,value\nA1BG,0.1\n",
     },
@@ -75,6 +81,8 @@ export function installFetchMock(overrides: Record<string, Resolver> = {}): void
 
 export {
   analyze,
+  catalogueSearch,
+  catalogueSignature,
   endpointAR,
   endpointER,
   endpoints,

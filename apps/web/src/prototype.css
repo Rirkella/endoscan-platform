@@ -207,6 +207,17 @@ button, input, select { color: inherit; font: inherit; letter-spacing: 0; }
 .no-signature { padding: 18px; border: 1px solid #ddcf9f; border-radius: 5px; background: #fffaf0; }
 .no-signature strong { color: #6d5928; font-size: 11px; }
 .no-signature p { margin: 5px 0 0; color: #756f5d; font-size: 10px; line-height: 1.5; }
+.catalogue-results { display: grid; gap: 8px; }
+.catalogue-result { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1.2fr) minmax(190px, .8fr); gap: 12px; align-items: start; padding: 14px; border: 1px solid #d8e0de; border-radius: 5px; background: #fff; cursor: pointer; }
+.catalogue-result > input { position: absolute; opacity: 0; }
+.catalogue-result-selected { border-color: #6eaa94; background: #f2f8f5; box-shadow: 0 0 0 1px #6eaa94; }
+.catalogue-result-selected .signature-radio { border: 4px solid #26725d; }
+.catalogue-result-main, .catalogue-result-meta { min-width: 0; }
+.catalogue-result-main strong, .catalogue-result-main small, .catalogue-result-meta strong, .catalogue-result-meta small { display: block; }
+.catalogue-result-main strong, .catalogue-result-meta strong { color: #243d42; font-size: 11px; line-height: 1.35; }
+.catalogue-result-main small, .catalogue-result-meta small { margin-top: 4px; color: #6f8083; font-size: 9px; line-height: 1.4; }
+.catalogue-smiles { display: block; margin-top: 7px; color: #536d70; font-size: 8px; overflow-wrap: anywhere; }
+.catalogue-honesty { margin: 14px 0 0; padding: 11px 12px; color: #526b70; border-left: 3px solid #5a819c; background: #f7fafb; font-size: 10px; line-height: 1.5; }
 .source-aside { padding: 30px; border-left: 1px solid #d8e0de; background: #eef3f0; }
 .source-aside .aside-label, .overview-aside .aside-label, .endpoint-selector .aside-label, .neighbor-panel .aside-label, .report-toc .aside-label, .reference-search .aside-label { margin: 0 0 18px; color: #6a7b7b; }
 .source-aside ol { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
@@ -676,7 +687,7 @@ h1 .planned-badge, h1 .mock-badge, h2 .planned-badge, h2 .mock-badge, h3 .planne
 .demo-card .full-button { margin-top: auto; }
 .demo-panel-foot { margin-top: 16px; color: #7a888b; font-size: 10px; line-height: 1.5; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-@media (max-width: 780px) { .demo-grid { grid-template-columns: 1fr; } .segmented-3 { grid-template-columns: 1fr; } }
+@media (max-width: 780px) { .demo-grid { grid-template-columns: 1fr; } .segmented-3 { grid-template-columns: 1fr; } .catalogue-result { grid-template-columns: 18px minmax(0, 1fr); } .catalogue-result-meta { grid-column: 2; } }
 
 /* --- Sidebar nav: the ported CSS styled <button>; we render <NavLink> (<a>), so mirror it here
    with clearer active contrast, comfortable hit area, and a Preview tag for planned sections. --- */

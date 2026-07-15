@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from endoscan_core.inference import ModelArtifactUnavailableError, SignatureValidationError
 from endoscan_core.registry import EndpointNotFoundError
 
+from .catalogue_store import CatalogueCorruptError, CatalogueNotFoundError
 from .explore_store import (
     ExploreArtifactCorruptError,
     ExploreArtifactUnavailableError,
@@ -79,6 +80,34 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=503,
             content=error_payload(
                 request, "model_unavailable", "The registered model is temporarily unavailable."
+            ),
+        )
+
+    @app.exception_handler(CatalogueNotFoundError)
+    async def _catalogue_not_found(
+        request: Request, exc: CatalogueNotFoundError
+    ) -> JSONResponse:
+        logger.info("catalogue item not found request_id=%s error=%s", request_id(request), exc)
+        return JSONResponse(
+            status_code=404,
+            content=error_payload(
+                request,
+                "catalogue_item_not_found",
+                "The requested measured catalogue item was not found.",
+            ),
+        )
+
+    @app.exception_handler(CatalogueCorruptError)
+    async def _catalogue_unavailable(
+        request: Request, exc: CatalogueCorruptError
+    ) -> JSONResponse:
+        logger.error("catalogue unavailable request_id=%s error=%s", request_id(request), exc)
+        return JSONResponse(
+            status_code=503,
+            content=error_payload(
+                request,
+                "catalogue_unavailable",
+                "The measured-signature catalogue is temporarily unavailable.",
             ),
         )
 

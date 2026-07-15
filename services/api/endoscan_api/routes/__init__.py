@@ -3,6 +3,6 @@
 
 from __future__ import annotations
 
-from . import analyze, endpoints, health, inference, signatures
+from . import analyze, catalogue, endpoints, health, inference, signatures
 
-__all__ = ["analyze", "endpoints", "health", "inference", "signatures"]
+__all__ = ["analyze", "catalogue", "endpoints", "health", "inference", "signatures"]

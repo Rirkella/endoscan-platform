@@ -175,6 +175,55 @@ export interface ApiError {
   request_id: string;
 }
 
+// --- verified public measured-signature catalogue (GET /catalogue/v1/*) ---
+export interface CatalogueSourceBlock {
+  name: string;
+  accession: string | null;
+  retrieved_at: string | null;
+  url: string;
+}
+
+export interface CatalogueSignatureSummary {
+  signature_id: string;
+  compound_id: string;
+  compound_name: string;
+  dataset: string;
+  accession: string;
+  processing_level: string;
+  cell_lines: string[];
+  dose: string | null;
+  timepoint: string | null;
+  aggregation: string;
+  n_genes: number;
+}
+
+export interface CatalogueCompound {
+  compound_id: string;
+  preferred_name: string;
+  aliases: string[];
+  pubchem_cid: number;
+  iupac_name: string | null;
+  canonical_smiles: string | null;
+  isomeric_smiles: string | null;
+  signatures: CatalogueSignatureSummary[];
+}
+
+export interface CatalogueSearchResponse {
+  schema_version: string;
+  catalogue_version: string;
+  query: string;
+  sources: Record<string, CatalogueSourceBlock>;
+  results: CatalogueCompound[];
+}
+
+export interface CatalogueSignatureDetail extends CatalogueSignatureSummary {
+  schema_version: string;
+  catalogue_version: string;
+  provenance: string;
+  source_url: string;
+  signature: Signature;
+}
+
 /** Read the current score while tolerating one release of the legacy response key. */
 export function predictionScore(result: PredictionResult): number {
   if (Number.isFinite(result.score)) return result.score;

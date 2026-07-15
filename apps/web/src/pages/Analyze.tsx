@@ -1,8 +1,7 @@
 // Analyze — the primary flow, ported from prototype-v2's stepped workspace (source → validate →
 // running → result) and wired to the REAL API underneath:
-//   source     : upload a signature (POST /signatures/parse) OR paste JSON / pick a bundled demo.
-//                A "Known molecule" tab is present for parity but is a PLANNED/mock lookup that
-//                never fabricates an analysis (EndoScan will not infer a result from identity alone).
+//   source     : upload a signature, pick a bundled demo, or select a verified measured public
+//                signature. Every path uses POST /signatures/parse; identity alone is never scored.
 //   validate   : real gene coverage (from the parse preview) + real endpoint compatibility (/endpoints).
 //   running    : shown while POST /analyze is in flight.
 //   result     : overview (real scores/calls/thresholds/status), evidence (real /explain + pathways +
@@ -30,7 +29,7 @@ export type ResultTab = "overview" | "evidence" | "reference" | "report";
 export interface PreparedInput {
   title: string;
   subtitle: string;
-  kind: "file" | "paste" | "demo";
+  kind: "file" | "paste" | "demo" | "catalogue";
   signature: Signature;
   parse: ParseResult;
   allowExtra: boolean;
@@ -308,7 +307,7 @@ function OverviewTab({
           <dl className="metadata-list">
             <div>
               <dt>Source</dt>
-              <dd>{input.kind === "file" ? "Uploaded file" : input.kind === "demo" ? "Bundled demo" : "Pasted signature"}</dd>
+              <dd>{input.kind === "file" ? "Uploaded file" : input.kind === "demo" ? "Bundled demo" : input.kind === "catalogue" ? "Public measured signature" : "Pasted signature"}</dd>
             </div>
             <div>
               <dt>Genes provided</dt>

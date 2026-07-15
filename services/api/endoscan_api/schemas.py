@@ -26,6 +26,11 @@ __all__ = [
     "AnalyzeRequest",
     "AnalyzeResponse",
     "AnalyzeSummary",
+    "CatalogueCompound",
+    "CatalogueSearchResponse",
+    "CatalogueSignatureDetail",
+    "CatalogueSignatureSummary",
+    "CatalogueSourceBlock",
     "ContextBlock",
     "ContextVariant",
     "EndpointDetail",
@@ -275,6 +280,67 @@ class AnalyzeResponse(BaseModel):
 
     results: list[AnalyzeEndpointResult]
     summary: AnalyzeSummary
+
+
+# --- versioned real measured-signature catalogue -------------------------------------
+
+
+class CatalogueSourceBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    accession: str | None = None
+    retrieved_at: str | None = None
+    url: str
+
+
+class CatalogueSignatureSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signature_id: str
+    compound_id: str
+    compound_name: str
+    dataset: str
+    accession: str
+    processing_level: str
+    cell_lines: list[str]
+    dose: str | None = None
+    timepoint: str | None = None
+    aggregation: str
+    n_genes: int
+
+
+class CatalogueCompound(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    compound_id: str
+    preferred_name: str
+    aliases: list[str]
+    pubchem_cid: int
+    iupac_name: str | None = None
+    canonical_smiles: str | None = None
+    isomeric_smiles: str | None = None
+    signatures: list[CatalogueSignatureSummary]
+
+
+class CatalogueSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str
+    catalogue_version: str
+    query: str
+    sources: dict[str, CatalogueSourceBlock]
+    results: list[CatalogueCompound]
+
+
+class CatalogueSignatureDetail(CatalogueSignatureSummary):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str
+    catalogue_version: str
+    provenance: str
+    source_url: str
+    signature: dict[str, float]
 
 
 # --- Explore: the data-space (UMAP) view ---------------------------------------------

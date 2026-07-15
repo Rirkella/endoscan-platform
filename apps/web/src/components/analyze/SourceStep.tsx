@@ -3,18 +3,17 @@
 //              gene validator). Raw JSON paste is demoted to a collapsed "Advanced" disclosure.
 //   Demo     — REAL: the bundled curated demo signatures. One click loads a real measured signature
 //              into the same validate → run pipeline as an upload (no JSON copying required).
-//   Catalogue— PREVIEW: a public-signature search is not connected to real data yet, so the search
-//              is disabled and clearly marked; it points users at the real demos instead. (A molecule
-//              name is never scored directly — EndoScan stays transcriptomics-first.)
+//   Catalogue— REAL: search verified identities with committed public measured signatures, select
+//              one, and pass it through the common validator. A molecule name is never scored
+//              directly — EndoScan stays transcriptomics-first.
 
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import { api } from "../../api/client";
-import type { ParseResult } from "../../api/types";
+import type { CatalogueCompound, ParseResult } from "../../api/types";
 import { demoSignatures } from "../../demo-signatures";
 import { demoDisplay } from "../../demo-signatures/display";
 import { exampleSignatureFiles, type ExampleSignatureFile } from "../../example-files";
-import { MockBadge, PlannedBadge } from "../PlannedBadge";
 import { ErrorNotice } from "../ErrorNotice";
 import type { PreparedInput } from "../../pages/Analyze";
 
@@ -72,7 +71,7 @@ export function SourceStep({
           <UploadPanel onPrepared={onPrepared} onTryDemo={() => setMode("demo")} />
         )}
         {mode === "demo" && <DemoPanel onPrepared={onPrepared} />}
-        {mode === "catalogue" && <CataloguePanel onTryDemo={() => setMode("demo")} />}
+        {mode === "catalogue" && <CataloguePanel onPrepared={onPrepared} />}
       </div>
 
       <aside className="source-aside">
@@ -425,45 +424,158 @@ function DemoPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void 
   );
 }
 
-function CataloguePanel({ onTryDemo }: { onTryDemo: () => void }) {
+function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<CatalogueCompound[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  async function search(event?: FormEvent) {
+    event?.preventDefault();
+    if (query.trim().length < 2) return;
+    setSearching(true);
+    setError(null);
+    setResults(null);
+    setSelected(null);
+    try {
+      const response = await api.searchCatalogue(query.trim());
+      setResults(response.results);
+      if (response.results.length === 1 && response.results[0].signatures.length === 1) {
+        setSelected(response.results[0].signatures[0].signature_id);
+      }
+    } catch (e) {
+      setError(e);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function useSignature() {
+    if (!selected) return;
+    setPreparing(true);
+    setError(null);
+    try {
+      const detail = await api.getCatalogueSignature(selected);
+      const parsed = await api.parseSignature({
+        content: JSON.stringify(detail.signature),
+        format: "json",
+      });
+      if (!parsed.signature) throw new Error("The measured signature could not be prepared.");
+      onPrepared({
+        title: detail.compound_name,
+        subtitle: `${detail.dataset} ${detail.processing_level} · ${detail.cell_lines.join(" + ")}`,
+        kind: "catalogue",
+        signature: parsed.signature,
+        parse: parsed,
+        allowExtra: false,
+      });
+    } catch (e) {
+      setError(e);
+    } finally {
+      setPreparing(false);
+    }
+  }
+
   return (
     <div className="lookup-panel">
       <div className="lookup-heading">
         <div>
-          <h2>
-            Public signature catalogue <PlannedBadge label="Preview" />
-          </h2>
+          <h2>Public measured-signature catalogue</h2>
           <p>Search public measured signatures by molecule, PubChem CID or InChIKey.</p>
         </div>
-        <span>Preview</span>
+        <span>Verified identities</span>
       </div>
 
-      <form className="search-box" onSubmit={(e) => e.preventDefault()}>
+      <form className="search-box" onSubmit={(event) => void search(event)}>
         <input
-          placeholder="Search is not connected yet"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="e.g. caffeic acid, 689043 or InChIKey"
           aria-label="Search molecule"
-          disabled
         />
-        <button className="button primary" type="submit" disabled>
-          Search
+        <button
+          className="button primary"
+          type="submit"
+          disabled={searching || query.trim().length < 2}
+        >
+          {searching ? "Searching…" : "Search"}
         </button>
       </form>
-
-      <div className="no-signature">
-        <strong>Molecule search is not available yet <MockBadge label="Preview" /></strong>
-        <p>
-          A searchable catalogue that maps a molecule to its measured public signatures is planned,
-          but the underlying signature store and search API are not part of this build. Nothing here
-          returns real results, so the search is disabled rather than showing placeholder data.
-        </p>
-        <p>
-          To run a real analysis today, use one of the bundled demo signatures, or upload your own
-          measured signature.
-        </p>
-        <button className="button primary" onClick={onTryDemo}>
-          Try a real demo instead
-        </button>
+      <div className="quick-examples" aria-label="Example searches">
+        <span>Try:</span>
+        {["Caffeic Acid", "Closantel", "2335"].map((example) => (
+          <button key={example} type="button" onClick={() => setQuery(example)}>
+            {example}
+          </button>
+        ))}
       </div>
+
+      {error != null && <ErrorNotice error={error} />}
+      {results != null && (
+        <section className="signature-results" aria-live="polite">
+          <div className="result-count">
+            <strong>{results.length} verified compound{results.length === 1 ? "" : "s"}</strong>
+            <span>Only records with measured signatures are shown</span>
+          </div>
+          {results.length === 0 ? (
+            <div className="no-signature">
+              <strong>No measured public signature found</strong>
+              <p>
+                Try a different name, PubChem CID or full InChIKey. No inferred molecule-only
+                result is substituted.
+              </p>
+            </div>
+          ) : (
+            <div className="catalogue-results">
+              {results.flatMap((compound) =>
+                compound.signatures.map((signature) => (
+                  <label
+                    className={`catalogue-result ${selected === signature.signature_id ? "catalogue-result-selected" : ""}`}
+                    key={signature.signature_id}
+                  >
+                    <input
+                      type="radio"
+                      name="catalogue-signature"
+                      checked={selected === signature.signature_id}
+                      onChange={() => setSelected(signature.signature_id)}
+                    />
+                    <span className="signature-radio" aria-hidden="true" />
+                    <span className="catalogue-result-main">
+                      <strong>{compound.preferred_name}</strong>
+                      <small>
+                        PubChem CID {compound.pubchem_cid} · {compound.compound_id}
+                      </small>
+                      <span className="mono catalogue-smiles">{compound.isomeric_smiles}</span>
+                    </span>
+                    <span className="catalogue-result-meta">
+                      <strong>{signature.dataset} · {signature.accession}</strong>
+                      <small>{signature.processing_level} · {signature.n_genes} genes</small>
+                      <small>{signature.cell_lines.join(" + ")} · dose/time not available</small>
+                      <small>{signature.aggregation}</small>
+                    </span>
+                  </label>
+                )),
+              )}
+              <button
+                type="button"
+                className="button primary use-signature"
+                disabled={!selected || preparing}
+                onClick={() => void useSignature()}
+              >
+                {preparing ? "Checking measured signature…" : "Use selected measured signature"}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      <p className="catalogue-honesty">
+        Identity selects a linked measured transcriptomic record; EndoScan analyzes that signature,
+        never the name or structure alone. Missing dose and time metadata remain explicitly
+        unavailable.
+      </p>
     </div>
   );
 }
