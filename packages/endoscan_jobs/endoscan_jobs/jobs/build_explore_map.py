@@ -208,6 +208,14 @@ def build_explore_map_job(ctx: JobContext) -> JobOutcome:
             "training_kth_nn_distances": [float(v) for v in kth_distances],
         },
         "labels": {"status": label_status, **counts},
+        "point_definition": (
+            "one measured compound-level landmark-gene signature per canonical InChIKey"
+        ),
+        "aggregation": {
+            "condition_rule": "nearest_to_10uM_24h_tiebreak_sig_id",
+            "cell_line_fusion": "arithmetic_mean_across_selected_cell_line_profiles",
+            "granularity": "one_vector_per_compound",
+        },
         "source": {"key": sig_key, "sha256": source_sha},
         "support_sha256": support_sha,
         "built_at": datetime.now(UTC).isoformat(),

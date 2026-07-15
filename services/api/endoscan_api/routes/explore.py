@@ -46,6 +46,12 @@ def _manifest_summary(context: str, manifest: dict) -> ExploreManifestSummary:
         domain_metric_k=int(manifest.get("domain_metric", {}).get("k", 0)),
         label_status=manifest.get("labels", {}).get("status", "none"),
         source_sha256=manifest.get("source", {}).get("sha256", ""),
+        source_key=manifest.get("source", {}).get("key", ""),
+        point_definition=manifest.get(
+            "point_definition",
+            "one measured compound-level signature per canonical InChIKey",
+        ),
+        aggregation=manifest.get("aggregation", {}),
         built_at=manifest.get("built_at"),
     )
 

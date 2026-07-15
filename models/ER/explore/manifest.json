@@ -2940,6 +2940,12 @@
     "n_inactive": 887,
     "n_unlabeled": 0
   },
+  "point_definition": "one measured compound-level landmark-gene signature per canonical InChIKey",
+  "aggregation": {
+    "condition_rule": "nearest_to_10uM_24h_tiebreak_sig_id",
+    "cell_line_fusion": "arithmetic_mean_across_selected_cell_line_profiles",
+    "granularity": "one_vector_per_compound"
+  },
   "source": {
     "key": "curated/ER/signatures.parquet",
     "sha256": "bfdcbdfb1f36a91d8570ed08f241978ad66d97817de364980a74d8390f786edb"

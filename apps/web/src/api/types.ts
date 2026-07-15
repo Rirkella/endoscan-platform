@@ -257,6 +257,9 @@ export interface ExploreManifestSummary {
   domain_metric_k: number;
   label_status: string;
   source_sha256: string;
+  source_key: string;
+  point_definition: string;
+  aggregation: Record<string, string>;
   built_at: string | null;
 }
 

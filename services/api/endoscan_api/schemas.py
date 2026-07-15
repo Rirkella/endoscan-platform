@@ -384,6 +384,9 @@ class ExploreManifestSummary(BaseModel):
     domain_metric_k: int
     label_status: str
     source_sha256: str
+    source_key: str = ""
+    point_definition: str = "one measured compound-level signature per canonical InChIKey"
+    aggregation: dict[str, str] = Field(default_factory=dict)
     built_at: str | None = None
 
 

@@ -30,6 +30,9 @@ const umapResponse = {
     domain_metric_k: realManifest.domain_metric.k,
     label_status: realManifest.labels.status,
     source_sha256: realManifest.source.sha256,
+    source_key: realManifest.source.key,
+    point_definition: realManifest.point_definition,
+    aggregation: realManifest.aggregation,
     built_at: realManifest.built_at,
   },
 };

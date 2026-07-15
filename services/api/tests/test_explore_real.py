@@ -58,6 +58,9 @@ def test_real_umap_served_with_real_points_counts_and_provenance(
     assert body["manifest"]["umap"]["random_state"] == 42
     assert body["manifest"]["umap"]["metric"] == "euclidean"
     assert len(body["manifest"]["source_sha256"]) == 64
+    assert body["manifest"]["source_key"] == f"curated/{context}/signatures.parquet"
+    assert body["manifest"]["aggregation"]["granularity"] == "one_vector_per_compound"
+    assert "canonical InChIKey" in body["manifest"]["point_definition"]
     # Every point is a real compound with a colour (never fabricated).
     assert {p["label"] for p in body["points"]} <= {"active", "inactive", None}
 

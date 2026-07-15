@@ -24,6 +24,13 @@
     "domain_metric_k": 5,
     "label_status": "joined",
     "source_sha256": "fixturehash0000000000000000000000000000000000000000000000000000",
+    "source_key": "curated/ER/signatures.parquet",
+    "point_definition": "one measured compound-level landmark-gene signature per canonical InChIKey",
+    "aggregation": {
+      "condition_rule": "nearest_to_10uM_24h_tiebreak_sig_id",
+      "cell_line_fusion": "arithmetic_mean_across_selected_cell_line_profiles",
+      "granularity": "one_vector_per_compound"
+    },
     "built_at": "2026-07-02T00:00:00+00:00"
   }
 }

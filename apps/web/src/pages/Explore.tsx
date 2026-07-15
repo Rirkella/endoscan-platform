@@ -9,10 +9,16 @@
 //     "Technical details" disclosure so the main view stays plain and biological.
 // Input is demo / upload first; raw JSON is demoted into "Advanced technical input".
 
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { EndoscanApiError, api } from "../api/client";
-import type { ParseResult, Signature } from "../api/types";
+import type {
+  CatalogueCompound,
+  ExplorePoint,
+  ParseResult,
+  Signature,
+} from "../api/types";
 import { demoSignatures } from "../demo-signatures";
 import { demoDisplay } from "../demo-signatures/display";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -21,6 +27,12 @@ import { useAsync } from "../hooks/useAsync";
 import { useExplore } from "../hooks/useExplore";
 
 type SimilarityBand = "close" | "moderately close" | "far";
+type LabelFilter = "all" | "active" | "inactive" | "unlabeled";
+
+interface SearchMatch {
+  compoundId: string;
+  name: string | null;
+}
 function similarityBand(percentile: number): SimilarityBand {
   if (percentile <= 0.5) return "close";
   if (percentile <= 0.9) return "moderately close";
@@ -37,8 +49,17 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 }
 
 export function Explore() {
+  const navigate = useNavigate();
   const endpoints = useAsync(() => api.listEndpoints(), []);
   const [context, setContext] = useState<string | null>(null);
+  const [labelFilter, setLabelFilter] = useState<LabelFilter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedCompound, setSelectedCompound] = useState<CatalogueCompound | null>(null);
+  const [selectedLoading, setSelectedLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchMatches, setSearchMatches] = useState<SearchMatch[] | null>(null);
+  const [searchError, setSearchError] = useState<unknown>(null);
 
   useEffect(() => {
     if (context == null && (endpoints.data?.length ?? 0) > 0) {
@@ -51,6 +72,57 @@ export function Explore() {
     [context],
   );
   const explore = useExplore(context);
+
+  useEffect(() => {
+    let current = true;
+    setSelectedCompound(null);
+    if (!selectedId) return () => { current = false; };
+    setSelectedLoading(true);
+    void api
+      .searchCatalogue(selectedId, 20)
+      .then((response) => {
+        if (!current) return;
+        setSelectedCompound(
+          response.results.find((item) => item.compound_id === selectedId) ?? null,
+        );
+      })
+      .catch(() => {
+        if (current) setSelectedCompound(null);
+      })
+      .finally(() => {
+        if (current) setSelectedLoading(false);
+      });
+    return () => { current = false; };
+  }, [selectedId]);
+
+  async function searchReference(event: FormEvent) {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (query.length < 2 || !map.data) return;
+    setSearching(true);
+    setSearchError(null);
+    const mapIds = new Set(map.data.points.map((point) => point.compound_id));
+    const byId = map.data.points
+      .filter((point) => point.compound_id.toLowerCase().includes(query.toLowerCase()))
+      .slice(0, 10)
+      .map((point) => ({ compoundId: point.compound_id, name: null }));
+    try {
+      const response = await api.searchCatalogue(query, 20);
+      const named = response.results
+        .filter((compound) => mapIds.has(compound.compound_id))
+        .map((compound) => ({
+          compoundId: compound.compound_id,
+          name: compound.preferred_name,
+        }));
+      const seen = new Set(named.map((match) => match.compoundId));
+      setSearchMatches([...named, ...byId.filter((match) => !seen.has(match.compoundId))]);
+    } catch (error) {
+      setSearchMatches(byId);
+      setSearchError(error);
+    } finally {
+      setSearching(false);
+    }
+  }
 
   const notComputed = map.error instanceof EndoscanApiError && map.error.status === 404;
   const labelled =
@@ -79,6 +151,9 @@ export function Explore() {
             onChange={(e) => {
               setContext(e.target.value);
               explore.reset();
+              setSelectedId(null);
+              setLabelFilter("all");
+              setSearchMatches(null);
             }}
           >
             {(endpoints.data ?? []).map((e) => (
@@ -114,6 +189,58 @@ export function Explore() {
         )}
       </div>
 
+      <div className="reference-explorer-controls">
+        <form className="reference-search-form" onSubmit={(event) => void searchReference(event)}>
+          <label>
+            Find a reference signature
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Available name or InChIKey"
+              aria-label="Search reference signatures"
+            />
+          </label>
+          <button
+            className="button outline"
+            type="submit"
+            disabled={!map.data || searching || searchQuery.trim().length < 2}
+          >
+            {searching ? "Searching…" : "Find"}
+          </button>
+        </form>
+        <label className="reference-filter">
+          Dataset class
+          <select
+            value={labelFilter}
+            onChange={(event) => setLabelFilter(event.target.value as LabelFilter)}
+          >
+            <option value="all">All available labels</option>
+            <option value="active">Labelled active</option>
+            <option value="inactive">Labelled inactive</option>
+            {map.data?.counts.n_unlabeled ? <option value="unlabeled">Unlabelled</option> : null}
+          </select>
+        </label>
+      </div>
+      {searchError != null && <ErrorNotice error={searchError} />}
+      {searchMatches != null && (
+        <div className="reference-search-results" aria-live="polite">
+          {searchMatches.length === 0 ? (
+            <p>No matching measured signature exists in this endpoint map.</p>
+          ) : (
+            searchMatches.map((match) => (
+              <button
+                key={match.compoundId}
+                type="button"
+                onClick={() => setSelectedId(match.compoundId)}
+              >
+                <strong>{match.name ?? "Reference signature"}</strong>
+                <span className="mono">{match.compoundId}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
       {endpoints.error != null && <ErrorNotice error={endpoints.error} />}
 
       <div className="reference-context-layout">
@@ -137,7 +264,18 @@ export function Explore() {
 
           {map.data && (
             <>
-              <ExploreScatter points={map.data.points} locate={explore.result} />
+              <ExploreScatter
+                points={map.data.points}
+                locate={explore.result}
+                selectedId={selectedId}
+                labelFilter={labelFilter}
+                pointNames={
+                  selectedCompound
+                    ? { [selectedCompound.compound_id]: selectedCompound.preferred_name }
+                    : undefined
+                }
+                onSelect={(point) => setSelectedId(point.compound_id)}
+              />
               <div className="reference-legend">
                 {labelled ? (
                   <>
@@ -253,8 +391,17 @@ export function Explore() {
                         <dd>
                           {map.data.manifest.n_compounds} signatures ({context}); labels:{" "}
                           {map.data.manifest.label_status}; source{" "}
-                          {map.data.manifest.source_sha256.slice(0, 12)}; built{" "}
+                          {map.data.manifest.source_key || "curated endpoint signatures"} ({map.data.manifest.source_sha256.slice(0, 12)}); built{" "}
                           {map.data.manifest.built_at ?? "unknown"}.
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>What each point represents</dt>
+                        <dd>
+                          {map.data.manifest.point_definition}. Condition selection:{" "}
+                          {map.data.manifest.aggregation.condition_rule ?? "recorded in the build pipeline"};
+                          cell-line fusion:{" "}
+                          {map.data.manifest.aggregation.cell_line_fusion ?? "recorded in the build pipeline"}.
                         </dd>
                       </div>
                     </>
@@ -265,7 +412,109 @@ export function Explore() {
           )}
         </aside>
       </div>
+
+      {selectedId && map.data && (
+        <ReferenceDetailsDrawer
+          point={map.data.points.find((item) => item.compound_id === selectedId) ?? null}
+          compound={selectedCompound}
+          loading={selectedLoading}
+          context={context ?? map.data.context}
+          sourceKey={map.data.manifest.source_key}
+          sourceHash={map.data.manifest.source_sha256}
+          pointDefinition={map.data.manifest.point_definition}
+          onClose={() => setSelectedId(null)}
+          onAnalyze={(signatureId) =>
+            navigate(`/analyze?catalogue_signature=${encodeURIComponent(signatureId)}`)
+          }
+        />
+      )}
     </div>
+  );
+}
+
+function ReferenceDetailsDrawer({
+  point,
+  compound,
+  loading,
+  context,
+  sourceKey,
+  sourceHash,
+  pointDefinition,
+  onClose,
+  onAnalyze,
+}: {
+  point: ExplorePoint | null;
+  compound: CatalogueCompound | null;
+  loading: boolean;
+  context: string;
+  sourceKey: string;
+  sourceHash: string;
+  pointDefinition: string;
+  onClose: () => void;
+  onAnalyze: (signatureId: string) => void;
+}) {
+  if (!point) return null;
+  const signature = compound?.signatures[0];
+  return (
+    <aside
+      className="reference-details-drawer"
+      role="dialog"
+      aria-label="Reference signature details"
+    >
+      <div className="reference-drawer-head">
+        <div>
+          <p className="eyebrow">Selected measured signature</p>
+          <h2>{compound?.preferred_name ?? "Reference signature"}</h2>
+        </div>
+        <button
+          type="button"
+          className="button quiet"
+          onClick={onClose}
+          aria-label="Close details"
+        >
+          Close
+        </button>
+      </div>
+      <p className="mono reference-drawer-id">{point.compound_id}</p>
+      <dl className="reference-drawer-list">
+        <div>
+          <dt>Endpoint dataset label</dt>
+          <dd>{point.label ? `${point.label} for ${context}` : "No label in this endpoint dataset"}</dd>
+        </div>
+        <div><dt>Point</dt><dd>{pointDefinition}</dd></div>
+        <div>
+          <dt>UMAP coordinates</dt>
+          <dd>{point.x.toFixed(3)}, {point.y.toFixed(3)} (visualization only)</dd>
+        </div>
+        <div>
+          <dt>Source</dt>
+          <dd>{sourceKey || "Curated endpoint signatures"}; SHA-256 {sourceHash}</dd>
+        </div>
+      </dl>
+      <p className="reference-label-note">
+        Proximity does not prove a shared mechanism, toxicity, or safety profile. A submitted query
+        is placed approximately; this selected reference point is part of the precomputed map.
+      </p>
+      {loading ? (
+        <p className="check-plain">Checking for an analyzable public record…</p>
+      ) : signature ? (
+        <div className="reference-drawer-action">
+          <p>{signature.dataset} {signature.processing_level} · {signature.cell_lines.join(" + ")}</p>
+          <button
+            className="button primary"
+            type="button"
+            onClick={() => onAnalyze(signature.signature_id)}
+          >
+            Analyze this measured signature
+          </button>
+        </div>
+      ) : (
+        <p className="check-plain">
+          This real map point has no full measured vector in the small public demonstrator catalogue,
+          so analysis is unavailable rather than reconstructed from its coordinates.
+        </p>
+      )}
+    </aside>
   );
 }
 
@@ -355,14 +604,14 @@ function PlacementInput({
         />
       </label>
       <p className="placement-note">
-        All demo signatures use the shared 978-gene schema, so they work with every endpoint.
+        Endpoint compatibility is checked by the server when the signature is placed.
       </p>
       {uploadError != null && <ErrorNotice error={uploadError} />}
 
       <details className="reference-advanced">
         <summary>Advanced technical input</summary>
         <label className="advanced-field">
-          <span>Signature (JSON: gene symbol → value, the 978 landmark genes)</span>
+          <span>Signature (JSON: gene symbol → finite numeric value)</span>
           <textarea
             value={pasteText}
             placeholder='{ "A1BG": 0.12, "…": 0.0 }'

@@ -10,11 +10,13 @@
 // honest: endpoint signal score / model call (Active/Inactive), below-threshold is neutral, and the
 // report/known-molecule areas are explicitly badged as not-yet-available.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
 import { predictionScore, type EndpointSummary, type ParseResult, type Signature } from "../api/types";
 import { PlannedBadge } from "../components/PlannedBadge";
+import { ErrorNotice } from "../components/ErrorNotice";
 import { EvidencePanel } from "../components/analyze/EvidencePanel";
 import { ReferencePanel } from "../components/analyze/ReferencePanel";
 import { SourceStep } from "../components/analyze/SourceStep";
@@ -41,6 +43,9 @@ function endpointCodeClass(id: string): string {
 }
 
 export function Analyze() {
+  const [searchParams] = useSearchParams();
+  const catalogueSignatureId = searchParams.get("catalogue_signature");
+  const catalogueHandled = useRef(false);
   const endpoints = useAsync(() => api.listEndpoints(), []);
   const endpointList = endpoints.data ?? [];
   const analyze = useAnalyze(endpointList);
@@ -49,6 +54,34 @@ export function Analyze() {
   const [prepared, setPrepared] = useState<PreparedInput | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("overview");
   const [runError, setRunError] = useState<unknown>(null);
+  const [catalogueLoading, setCatalogueLoading] = useState(false);
+  const [catalogueError, setCatalogueError] = useState<unknown>(null);
+
+  useEffect(() => {
+    if (!catalogueSignatureId || catalogueHandled.current) return;
+    catalogueHandled.current = true;
+    setCatalogueLoading(true);
+    setCatalogueError(null);
+    void api
+      .getCatalogueSignature(catalogueSignatureId)
+      .then(async (detail) => {
+        const parsed = await api.parseSignature({
+          content: JSON.stringify(detail.signature),
+          format: "json",
+        });
+        if (!parsed.signature) throw new Error("The selected measured signature could not be prepared.");
+        onPrepared({
+          title: detail.compound_name,
+          subtitle: `${detail.dataset} ${detail.processing_level} · ${detail.cell_lines.join(" + ")}`,
+          kind: "catalogue",
+          signature: parsed.signature,
+          parse: parsed,
+          allowExtra: false,
+        });
+      })
+      .catch(setCatalogueError)
+      .finally(() => setCatalogueLoading(false));
+  }, [catalogueSignatureId]);
 
   function onPrepared(input: PreparedInput) {
     setPrepared(input);
@@ -100,7 +133,13 @@ export function Analyze() {
       )}
 
       {step === "source" && (
-        <SourceStep onPrepared={onPrepared} endpointCount={endpointList.length} />
+        <>
+          {catalogueLoading && <p className="check-plain">Loading the selected measured signature…</p>}
+          {catalogueError != null && <ErrorNotice error={catalogueError} />}
+          {!catalogueLoading && (
+            <SourceStep onPrepared={onPrepared} endpointCount={endpointList.length} />
+          )}
+        </>
       )}
 
       {step === "validate" && prepared && (
