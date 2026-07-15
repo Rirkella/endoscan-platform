@@ -20,6 +20,7 @@ from endoscan_core.registry import find_repo_root, list_endpoints
 
 from .deps import get_cached_model
 from .errors import register_exception_handlers
+from .middleware import RequestContextMiddleware
 from .routes import analyze, endpoints, explore, health, inference, interpret, signatures
 
 API_TITLE = "EndoScan Serving API"
@@ -88,9 +89,11 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=app.state.cors_origins,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "X-Request-ID"],
+        expose_headers=["X-Request-ID"],
         allow_credentials=False,
     )
+    app.add_middleware(RequestContextMiddleware)
 
     register_exception_handlers(app)
     app.include_router(health.router)

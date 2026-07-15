@@ -6,7 +6,7 @@
 import { useState } from "react";
 
 import { api } from "../api/client";
-import type { ExplanationResult, Signature } from "../api/types";
+import { predictionScore, type ExplanationResult, type Signature } from "../api/types";
 import type { EndpointSignal } from "../hooks/useAnalyze";
 import { ErrorNotice } from "./ErrorNotice";
 import { GeneContributionCards } from "./GeneContributionCards";
@@ -89,7 +89,7 @@ export function EndpointSignalCard({
               Endpoint signal score
             </dt>
             <dd className="tabular mt-1 text-2xl font-bold text-ink">
-              {r.probability.toFixed(2)}
+              {predictionScore(r).toFixed(2)}
             </dd>
           </div>
           <div className="rounded-lg border border-line bg-surface px-2 py-2.5">

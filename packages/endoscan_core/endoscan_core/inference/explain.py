@@ -1,7 +1,7 @@
 """Feature attributions for a registered endpoint's prediction.
 
 TreeSHAP (exact for trees) attributes each landmark gene's signed contribution to the
-predicted probability of ER functional modulation. The registered model is an sklearn
+uncalibrated endpoint model output score. The registered model is an sklearn
 ``Pipeline([StandardScaler, RandomForestClassifier])``; SHAP runs on the RF step over
 the SCALED features (the RF's actual inputs), and because the per-feature scaler is
 monotonic the per-gene sign/ranking is meaningful. Values map 1:1 back to gene SYMBOLS

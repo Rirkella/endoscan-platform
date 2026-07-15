@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from endoscan_core.inference import (
@@ -22,7 +22,8 @@ from endoscan_core.inference import (
 )
 
 from ..deps import get_repo_root
-from ..schemas import ErrorResponse, ExplainRequest, PredictRequest
+from ..errors import error_payload
+from ..schemas import ExplainRequest, PredictRequest
 
 router = APIRouter(tags=["inference"])
 
@@ -47,7 +48,9 @@ def post_predict(
 
 
 @router.post("/explain", response_model=ExplanationResult)
-def post_explain(body: ExplainRequest, repo_root: Path = Depends(get_repo_root)):
+def post_explain(
+    body: ExplainRequest, request: Request, repo_root: Path = Depends(get_repo_root)
+):
     """Top-N signed gene contributors + limitations; attributor auto-selected by model type.
 
     Core ``explain`` picks the method: tree models -> TreeSHAP (``method="tree_shap"``),
@@ -66,22 +69,24 @@ def post_explain(body: ExplainRequest, repo_root: Path = Depends(get_repo_root))
             repo_root=repo_root,
             allow_extra=body.allow_extra,
         )
-    except UnsupportedModelForExplanationError as exc:
+    except UnsupportedModelForExplanationError:
         return JSONResponse(
             status_code=501,
-            content=ErrorResponse(
+            content=error_payload(
+                request,
                 error="explain_unsupported_for_model",
-                detail=f"{exc}. Predictions via /predict are unaffected.",
+                detail="Explanations are not available for this model type.",
                 endpoint_id=body.endpoint_id,
-            ).model_dump(),
+            ),
         )
-    except ImportError as exc:  # shap (the `explain` extra) not installed, tree endpoint
+    except ImportError:  # shap (the `explain` extra) not installed, tree endpoint
         return JSONResponse(
             status_code=503,
-            content=ErrorResponse(
+            content=error_payload(
+                request,
                 error="explain_unavailable",
-                detail=f"TreeSHAP explainability requires the 'explain' extra (shap): {exc}",
+                detail="Explanation service is temporarily unavailable.",
                 endpoint_id=body.endpoint_id,
-            ).model_dump(),
+            ),
         )
     return result if isinstance(result, ExplanationResult) else result[0]

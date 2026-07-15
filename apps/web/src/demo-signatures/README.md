@@ -33,6 +33,6 @@ ER and AR) and pick **3–4** with distinct profiles:
 }
 ```
 
-`expected_profile` records the probabilities returned by the API at selection time; the
+`expected_profile` records the uncalibrated endpoint scores returned by the API at selection time; the
 verify-on-commit test confirms each file has exactly the 978 schema genes (finite values) and
 that its recorded profile matches what the API returns (small tolerance).

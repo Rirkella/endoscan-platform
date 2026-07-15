@@ -30,6 +30,7 @@ export class EndoscanApiError extends Error implements ApiError {
   error: string;
   detail: string;
   endpoint_id: string | null;
+  request_id: string;
 
   constructor(e: ApiError) {
     super(e.detail || e.error);
@@ -38,6 +39,7 @@ export class EndoscanApiError extends Error implements ApiError {
     this.error = e.error;
     this.detail = e.detail;
     this.endpoint_id = e.endpoint_id;
+    this.request_id = e.request_id;
   }
 }
 
@@ -61,6 +63,7 @@ async function toError(res: Response): Promise<EndoscanApiError> {
     error: typeof b.error === "string" ? b.error : `http_${res.status}`,
     detail,
     endpoint_id: typeof b.endpoint_id === "string" ? b.endpoint_id : null,
+    request_id: typeof b.request_id === "string" ? b.request_id : "unavailable",
   });
 }
 
@@ -89,9 +92,9 @@ export const api = {
   explain: (endpoint_id: string, signature: Signature, top_n = 10, allow_extra = false) =>
     postJson<ExplanationResult>("/explain", { endpoint_id, signature, top_n, allow_extra }),
 
-  // Run a signature across ALL endpoints in one call (per-endpoint isolation server-side).
-  analyze: (signature: Signature, allow_extra = false) =>
-    postJson<AnalyzeResponse>("/analyze", { signature, allow_extra }),
+  // Run only explicitly selected compatible endpoints (or all when omitted).
+  analyze: (signature: Signature, endpoint_ids?: string[], allow_extra = false) =>
+    postJson<AnalyzeResponse>("/analyze", { signature, endpoint_ids, allow_extra }),
 
   // Biological pathways for an explain result (Reactome over-representation; honest empty states).
   interpretPathways: (endpoint_id: string, signature: Signature, allow_extra = false) =>
@@ -109,7 +112,7 @@ export const api = {
   parseSignature: async (opts: {
     file?: File;
     content?: string;
-    format: "json" | "csv";
+    format: "json" | "csv" | "tsv";
     allow_extra?: boolean;
     sample?: string | null;
   }): Promise<ParseResult> => {

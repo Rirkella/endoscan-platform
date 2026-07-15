@@ -10,7 +10,7 @@ NOT changed.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Re-exported so routes can reference a single response contract (no duplication).
 from endoscan_core.inference import (
@@ -19,13 +19,17 @@ from endoscan_core.inference import (
     PredictionResult,
 )
 
+from .limits import MAX_ENDPOINT_SELECTION, MAX_GENES
+
 __all__ = [
     "AnalyzeEndpointResult",
     "AnalyzeRequest",
     "AnalyzeResponse",
+    "AnalyzeSummary",
     "ContextBlock",
     "ContextVariant",
     "EndpointDetail",
+    "EndpointCompatibility",
     "EndpointSummary",
     "ErrorResponse",
     "ExplainRequest",
@@ -63,7 +67,9 @@ class PredictRequest(BaseModel):
     endpoint_id: str = Field(..., description="Registered endpoint id, e.g. 'ER' or 'AR'.")
     signature: dict[str, float] = Field(
         ...,
-        description="Landmark-gene SYMBOL -> value (the 978-gene signature for this endpoint).",
+        min_length=1,
+        max_length=MAX_GENES,
+        description="Gene SYMBOL -> value; requirements come from the selected endpoint schema.",
     )
     allow_extra: bool = Field(
         False, description="Drop genes not in the schema instead of rejecting them."
@@ -73,7 +79,7 @@ class PredictRequest(BaseModel):
 class ExplainRequest(PredictRequest):
     """Same input as predict, plus how many top contributors to return."""
 
-    top_n: int = Field(10, ge=1, le=978, description="Number of top signed gene contributors.")
+    top_n: int = Field(10, ge=1, le=MAX_GENES, description="Number of top contributors.")
 
 
 # --- responses -----------------------------------------------------------------------
@@ -165,39 +171,52 @@ class ErrorResponse(BaseModel):
     error: str
     detail: str
     endpoint_id: str | None = None
+    request_id: str
 
 
 # --- signature upload / parse --------------------------------------------------------
 
 
 class ParsePreview(BaseModel):
-    """Real (never fabricated) summary of how the uploaded signature aligns to the schema."""
+    """Format-level facts from parsing once, before endpoint-specific compatibility."""
 
     model_config = ConfigDict(extra="forbid")
 
     n_detected: int  # genes found in the upload
-    n_matched: int  # of the schema's genes, how many the upload supplied
-    n_missing: int
-    n_extra: int
-    missing_genes: list[str]  # truncated
-    extra_genes: list[str]  # truncated
     samples: list[str] | None = None  # multi-column CSV: the sample column names
     selected_sample: str | None = None
     needs_sample: bool = False  # multi-column + no sample chosen -> the UI must pick one
 
 
-class ParseResult(BaseModel):
-    """Result of parsing + validating an uploaded signature against an endpoint's schema."""
+class EndpointCompatibility(BaseModel):
+    """Compatibility of one parsed signature with one registered endpoint schema."""
 
     model_config = ConfigDict(extra="forbid")
 
-    aligned: bool
-    format: str
-    schema_endpoint_id: str  # which endpoint's schema it was validated against
+    endpoint_id: str
+    biological_target: str
+    compatible: bool
     n_schema_genes: int
+    n_detected: int
+    n_matched: int
+    n_missing: int
+    n_extra: int
+    missing_genes: list[str]
+    extra_genes: list[str]
+    reason: str | None = None
+
+
+class ParseResult(BaseModel):
+    """Parse once, then report compatibility against every registered endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool
+    format: str
     preview: ParsePreview
-    # The aligned {gene: value} in schema order, ready to POST to /analyze. None when the upload
-    # needs a sample choice first (multi-column CSV) — never a fabricated signature.
+    compatibility: list[EndpointCompatibility]
+    compatible_endpoint_ids: list[str]
+    # Parsed mapping, unchanged, so each endpoint can align it to its own feature order.
     signature: dict[str, float] | None = None
 
 
@@ -208,9 +227,25 @@ class AnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     signature: dict[str, float] = Field(
-        ..., description="A transcriptomic signature (gene->value)."
+        ...,
+        min_length=1,
+        max_length=MAX_GENES,
+        description="A transcriptomic signature (gene->value).",
     )
     allow_extra: bool = Field(False, description="Drop genes not in an endpoint's schema.")
+    endpoint_ids: list[str] | None = Field(
+        None,
+        min_length=1,
+        max_length=MAX_ENDPOINT_SELECTION,
+        description="Registered endpoints to run. Omit to run all registered endpoints.",
+    )
+
+    @field_validator("endpoint_ids")
+    @classmethod
+    def _unique_endpoint_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("endpoint_ids must not contain duplicates")
+        return value
 
 
 class AnalyzeEndpointResult(BaseModel):
@@ -226,10 +261,20 @@ class AnalyzeEndpointResult(BaseModel):
     error: ErrorResponse | None = None
 
 
+class AnalyzeSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requested: int
+    succeeded: int
+    failed: int
+    status: str  # ok | partial | all_failed
+
+
 class AnalyzeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     results: list[AnalyzeEndpointResult]
+    summary: AnalyzeSummary
 
 
 # --- Explore: the data-space (UMAP) view ---------------------------------------------
@@ -290,7 +335,10 @@ class ExploreLocateRequest(BaseModel):
 
     context: str = Field(..., description="Endpoint id whose map to place against, e.g. 'ER'.")
     signature: dict[str, float] = Field(
-        ..., description="A transcriptomic signature (gene->value)."
+        ...,
+        min_length=1,
+        max_length=MAX_GENES,
+        description="A transcriptomic signature (gene->value).",
     )
     allow_extra: bool = Field(False, description="Drop genes not in the map's feature set.")
 
@@ -348,7 +396,10 @@ class PathwaysRequest(BaseModel):
 
     endpoint_id: str = Field(..., description="Registered endpoint id, e.g. 'ER' or 'AR'.")
     signature: dict[str, float] = Field(
-        ..., description="A transcriptomic signature (gene->value)."
+        ...,
+        min_length=1,
+        max_length=MAX_GENES,
+        description="A transcriptomic signature (gene->value).",
     )
     allow_extra: bool = Field(False, description="Drop genes not in the endpoint's schema.")
 

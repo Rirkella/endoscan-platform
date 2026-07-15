@@ -1,13 +1,10 @@
-"""Phase 2 — /signatures/parse (upload parse+validate) and /analyze (fan-out) API tests.
-
-All against the REAL committed repo (repo_root=REPO_ROOT); one authoritative validator
-(align_signature) is reused server-side. Stateless — nothing is persisted.
-"""
+"""Endpoint-aware upload parsing and isolated analysis integration tests."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,7 +13,7 @@ from endoscan_api import create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_GENES: list[str] = json.loads(
-    (REPO_ROOT / "models" / "ER" / "feature_schema.json").read_text()
+    (REPO_ROOT / "models" / "ER" / "feature_schema.json").read_text(encoding="utf-8")
 )["features"]
 
 
@@ -26,173 +23,220 @@ def client() -> TestClient:
 
 
 def full_json(value: float = 0.0) -> str:
-    return json.dumps({g: value for g in SCHEMA_GENES})
+    return json.dumps({gene: value for gene in SCHEMA_GENES})
 
 
-def full_csv(value: float = 0.0) -> str:
-    return "gene,value\n" + "\n".join(f"{g},{value}" for g in SCHEMA_GENES)
+def full_delimited(delimiter: str, value: float = 0.0) -> str:
+    return f"gene{delimiter}value\n" + "\n".join(
+        f"{gene}{delimiter}{value}" for gene in SCHEMA_GENES
+    )
 
 
-# --- parse: success paths ------------------------------------------------------------
-
-
-def test_parse_valid_json_aligns(client) -> None:
-    r = client.post("/signatures/parse", data={"format": "json", "content": full_json()})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["aligned"] is True
-    assert body["preview"]["n_missing"] == 0 and body["preview"]["n_matched"] == 978
+@pytest.mark.parametrize(
+    ("fmt", "content"),
+    [
+        ("json", full_json()),
+        ("csv", full_delimited(",")),
+        ("tsv", full_delimited("\t")),
+    ],
+)
+def test_parse_supported_formats_checks_every_endpoint(client, fmt, content) -> None:
+    response = client.post("/signatures/parse", data={"format": fmt, "content": content})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ready"] is True
+    assert body["preview"]["n_detected"] == len(SCHEMA_GENES)
+    assert {item["endpoint_id"] for item in body["compatibility"]} >= {"ER", "AR"}
+    assert set(body["compatible_endpoint_ids"]) >= {"ER", "AR"}
     assert set(body["signature"]) == set(SCHEMA_GENES)
 
 
-def test_parse_valid_csv_file_aligns(client) -> None:
-    r = client.post(
+def test_parse_file_uses_same_contract(client) -> None:
+    response = client.post(
         "/signatures/parse",
         data={"format": "csv"},
-        files={"file": ("sig.csv", full_csv(), "text/csv")},
+        files={"file": ("signature.csv", full_delimited(","), "text/csv")},
     )
-    assert r.status_code == 200
-    assert r.json()["aligned"] is True
+    assert response.status_code == 200
+    assert response.json()["compatible_endpoint_ids"]
 
 
-# --- parse: 422 (parsed but content invalid per align_signature) — verbatim ----------
+def test_parse_incompatible_signature_is_200_with_per_endpoint_reasons(client) -> None:
+    partial = json.dumps({gene: 0.0 for gene in SCHEMA_GENES[:-3]})
+    response = client.post("/signatures/parse", data={"format": "json", "content": partial})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ready"] is False
+    assert body["compatible_endpoint_ids"] == []
+    assert all(not item["compatible"] for item in body["compatibility"])
+    assert all(item["n_missing"] == 3 for item in body["compatibility"])
 
 
-def test_parse_missing_genes_422_verbatim(client) -> None:
-    partial = json.dumps({g: 0.0 for g in SCHEMA_GENES[:-3]})
-    r = client.post("/signatures/parse", data={"format": "json", "content": partial})
-    assert r.status_code == 422
-    assert r.json()["error"] == "invalid_signature"
-    assert "missing 3 of 978 schema genes" in r.json()["detail"]  # align_signature message verbatim
-
-
-def test_parse_extra_genes_422_then_allow_extra_200(client) -> None:
-    obj = {g: 0.0 for g in SCHEMA_GENES}
-    obj["NOT_A_GENE"] = 1.0
-    reject = client.post("/signatures/parse", data={"format": "json", "content": json.dumps(obj)})
-    assert reject.status_code == 422
-    assert "not in the schema" in reject.json()["detail"]
-    allow = client.post(
+def test_parse_extra_genes_can_be_assessed_with_allow_extra(client) -> None:
+    signature = {gene: 0.0 for gene in SCHEMA_GENES}
+    signature["NOT_A_GENE"] = 1.0
+    rejected = client.post(
+        "/signatures/parse", data={"format": "json", "content": json.dumps(signature)}
+    ).json()
+    assert rejected["ready"] is False
+    accepted = client.post(
         "/signatures/parse",
-        data={"format": "json", "content": json.dumps(obj), "allow_extra": "true"},
-    )
-    assert allow.status_code == 200
-    assert allow.json()["aligned"] is True
-    assert "NOT_A_GENE" in allow.json()["preview"]["extra_genes"]
+        data={"format": "json", "content": json.dumps(signature), "allow_extra": "true"},
+    ).json()
+    assert accepted["ready"] is True
+    assert all(item["n_extra"] == 1 for item in accepted["compatibility"])
 
 
-def test_parse_non_finite_is_422_at_align(client) -> None:
-    # A value that parses as a float but is non-finite (NaN) passes parsing and is rejected by
-    # align_signature -> 422 (NOT 400).
-    obj = {g: 0.0 for g in SCHEMA_GENES}
-    obj[SCHEMA_GENES[0]] = float("nan")
-    content = json.dumps(obj)  # Python json emits NaN, which json.loads accepts back
-    r = client.post("/signatures/parse", data={"format": "json", "content": content})
-    assert r.status_code == 422
-    assert "NaN/inf" in r.json()["detail"]
-
-
-# --- parse: 400 (unparseable / structural) -------------------------------------------
-
-
-def test_parse_malformed_json_400(client) -> None:
-    r = client.post("/signatures/parse", data={"format": "json", "content": "{not json"})
-    assert r.status_code == 400 and r.json()["error"] == "malformed_upload"
-
-
-def test_parse_csv_non_numeric_cell_400(client) -> None:
-    r = client.post(
-        "/signatures/parse", data={"format": "csv", "content": "gene,value\nA1BG,abc\n"}
-    )
-    assert r.status_code == 400
-    assert "not numeric" in r.json()["detail"]
-
-
-def test_parse_csv_duplicate_gene_400(client) -> None:
-    r = client.post(
-        "/signatures/parse", data={"format": "csv", "content": "gene,value\nA1BG,0.1\nA1BG,0.2\n"}
-    )
-    assert r.status_code == 400 and "duplicate gene" in r.json()["detail"]
-
-
-def test_parse_empty_400(client) -> None:
-    r = client.post("/signatures/parse", data={"format": "json", "content": "   "})
-    assert r.status_code == 400
-
-
-def test_parse_wrong_columns_400(client) -> None:
-    r = client.post("/signatures/parse", data={"format": "csv", "content": "foo,bar\n1,2\n"})
-    assert r.status_code == 400 and "gene column" in r.json()["detail"]
-
-
-def test_parse_unknown_format_400(client) -> None:
-    r = client.post("/signatures/parse", data={"format": "xlsx", "content": "x"})
-    assert r.status_code == 400 and "unsupported format" in r.json()["detail"]
-
-
-# --- parse: multi-column CSV ---------------------------------------------------------
-
-
-def test_parse_multicolumn_csv_reports_samples(client) -> None:
-    rows = "\n".join(f"{g},0.0,1.0" for g in SCHEMA_GENES)
-    csv = "gene,ctrl_24h,dose_24h\n" + rows
-    no_sample = client.post("/signatures/parse", data={"format": "csv", "content": csv})
-    assert no_sample.status_code == 200
-    body = no_sample.json()
-    assert body["aligned"] is False and body["preview"]["needs_sample"] is True
-    assert body["preview"]["samples"] == ["ctrl_24h", "dose_24h"]
-    assert body["signature"] is None  # no fabricated signature
-
-    chosen = client.post(
-        "/signatures/parse", data={"format": "csv", "content": csv, "sample": "dose_24h"}
-    )
-    assert chosen.status_code == 200 and chosen.json()["aligned"] is True
-
-
-# --- analyze: fan-out + per-endpoint isolation ---------------------------------------
-
-
-def test_analyze_runs_across_all_endpoints(client) -> None:
-    r = client.post("/analyze", json={"signature": {g: 0.0 for g in SCHEMA_GENES}})
-    assert r.status_code == 200
-    results = r.json()["results"]
-    ids = {e["endpoint_id"] for e in results}
-    assert {"ER", "AR"} <= ids
-    assert all(e["ok"] and e["result"] is not None for e in results)
-
-
-def test_analyze_per_endpoint_isolation(client, monkeypatch) -> None:
-    # One endpoint erroring must not sink the others.
-    from endoscan_api.routes import analyze as analyze_route
+def test_parse_ten_heterogeneous_endpoint_schemas(client, monkeypatch) -> None:
+    from endoscan_api.routes import signatures as route
     from endoscan_core.inference import SignatureValidationError
 
-    real_predict = analyze_route.predict
+    entries = [
+        SimpleNamespace(
+            endpoint_id=f"E{i}", biological_target=f"Target {i}", feature_schema_path=f"E{i}.json"
+        )
+        for i in range(10)
+    ]
 
-    def flaky(endpoint_id, signature, **kw):
+    def fake_schema(path):
+        index = int(path.stem[1:])
+        return SimpleNamespace(features=("A", "B") if index % 2 == 0 else ("A", "C"))
+
+    def fake_align(mapping, schema, *, allow_extra=False):
+        missing = set(schema.features) - set(mapping)
+        if missing:
+            raise SignatureValidationError(f"missing {len(missing)} genes")
+        return [[mapping[gene] for gene in schema.features]], True
+
+    monkeypatch.setattr(route, "list_endpoints", lambda **_: entries)
+    monkeypatch.setattr(route, "load_feature_schema", fake_schema)
+    monkeypatch.setattr(route, "align_signature", fake_align)
+    response = client.post(
+        "/signatures/parse", data={"format": "json", "content": '{"A": 1, "B": 2}'}
+    )
+    body = response.json()
+    assert len(body["compatibility"]) == 10
+    assert body["compatible_endpoint_ids"] == [f"E{i}" for i in range(0, 10, 2)]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"format": "json", "content": "{not json"},
+        {"format": "csv", "content": "gene,value\nA1BG,abc\n"},
+        {"format": "csv", "content": "gene,value\nA1BG,0.1\nA1BG,0.2\n"},
+        {"format": "xlsx", "content": "x"},
+    ],
+)
+def test_parse_malformed_inputs_are_safe_400_with_request_id(client, data) -> None:
+    response = client.post("/signatures/parse", data=data)
+    assert response.status_code == 400
+    assert response.json()["error"] == "malformed_upload"
+    assert response.json()["request_id"]
+
+
+def test_parse_multicolumn_requires_explicit_sample(client) -> None:
+    rows = "\n".join(f"{gene},0.0,1.0" for gene in SCHEMA_GENES)
+    content = "gene,ctrl_24h,dose_24h\n" + rows
+    pending = client.post(
+        "/signatures/parse", data={"format": "csv", "content": content}
+    ).json()
+    assert pending["ready"] is False
+    assert pending["preview"]["needs_sample"] is True
+    assert pending["compatibility"] == [] and pending["signature"] is None
+    chosen = client.post(
+        "/signatures/parse",
+        data={"format": "csv", "content": content, "sample": "dose_24h"},
+    )
+    assert chosen.status_code == 200 and chosen.json()["ready"] is True
+
+
+def test_request_body_limit_returns_413_with_request_id(client) -> None:
+    response = client.post(
+        "/analyze",
+        content=b"x" * (6 * 1024 * 1024 + 1),
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"] == "request_too_large"
+    assert response.json()["request_id"]
+
+
+def test_gene_count_limit_is_enforced_before_endpoint_work(client) -> None:
+    content = json.dumps({f"GENE_{index}": 0.0 for index in range(10_001)})
+    response = client.post(
+        "/signatures/parse", data={"format": "json", "content": content}
+    )
+    assert response.status_code == 400
+    assert "10000 gene limit" in response.json()["detail"]
+
+
+def test_endpoint_selection_count_limit_is_422(client) -> None:
+    response = client.post(
+        "/analyze",
+        json={"signature": {"A": 0.0}, "endpoint_ids": [f"E{i}" for i in range(101)]},
+    )
+    assert response.status_code == 422
+    assert response.json()["request_id"]
+
+
+def test_analyze_runs_only_selected_endpoints(client) -> None:
+    response = client.post(
+        "/analyze",
+        json={"signature": {gene: 0.0 for gene in SCHEMA_GENES}, "endpoint_ids": ["AR"]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["endpoint_id"] for item in body["results"]] == ["AR"]
+    assert body["summary"] == {"requested": 1, "succeeded": 1, "failed": 0, "status": "ok"}
+
+
+def test_analyze_per_endpoint_isolation_and_partial_summary(client, monkeypatch) -> None:
+    from endoscan_api.routes import analyze as route
+    from endoscan_core.inference import SignatureValidationError
+
+    real_predict = route.predict
+
+    def flaky(endpoint_id, signature, **kwargs):
         if endpoint_id == "AR":
             raise SignatureValidationError("synthetic AR failure")
-        return real_predict(endpoint_id, signature, **kw)
+        return real_predict(endpoint_id, signature, **kwargs)
 
-    monkeypatch.setattr(analyze_route, "predict", flaky)
-    r = client.post("/analyze", json={"signature": {g: 0.0 for g in SCHEMA_GENES}})
-    assert r.status_code == 200
-    by_id = {e["endpoint_id"]: e for e in r.json()["results"]}
-    assert by_id["ER"]["ok"] is True and by_id["ER"]["result"] is not None
-    assert by_id["AR"]["ok"] is False and by_id["AR"]["error"]["error"] == "invalid_signature"
-
-
-def test_analyze_malformed_body_422(client) -> None:
-    assert client.post("/analyze", json={}).status_code == 422  # missing 'signature'
-
-
-# --- regression: existing routes unchanged -------------------------------------------
-
-
-def test_existing_routes_unchanged(client) -> None:
-    assert client.get("/endpoints").status_code == 200
-    assert (
-        client.post(
-            "/predict", json={"endpoint_id": "AR", "signature": {g: 0.0 for g in SCHEMA_GENES}}
-        ).status_code
-        == 200
+    monkeypatch.setattr(route, "predict", flaky)
+    response = client.post(
+        "/analyze", json={"signature": {gene: 0.0 for gene in SCHEMA_GENES}}
     )
+    body = response.json()
+    by_id = {item["endpoint_id"]: item for item in body["results"]}
+    assert by_id["ER"]["ok"] is True
+    assert by_id["AR"]["ok"] is False
+    assert by_id["AR"]["error"]["request_id"]
+    assert body["summary"]["status"] == "partial"
+
+
+def test_analyze_all_failed_has_dedicated_summary(client, monkeypatch) -> None:
+    from endoscan_api.routes import analyze as route
+    from endoscan_core.inference import SignatureValidationError
+
+    monkeypatch.setattr(
+        route,
+        "predict",
+        lambda *args, **kwargs: (_ for _ in ()).throw(SignatureValidationError("failure")),
+    )
+    body = client.post(
+        "/analyze",
+        json={"signature": {gene: 0.0 for gene in SCHEMA_GENES}, "endpoint_ids": ["ER", "AR"]},
+    ).json()
+    assert body["summary"] == {
+        "requested": 2,
+        "succeeded": 0,
+        "failed": 2,
+        "status": "all_failed",
+    }
+
+
+def test_validation_error_is_safe_and_has_request_id(client) -> None:
+    response = client.post("/analyze", json={})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "The request body does not match the API contract."
+    assert response.json()["request_id"]

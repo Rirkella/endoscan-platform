@@ -9,8 +9,8 @@
 
 import { useState } from "react";
 
-import { EndoscanApiError, api } from "../../api/client";
-import type { ParseResult, Signature } from "../../api/types";
+import { api } from "../../api/client";
+import type { ParseResult } from "../../api/types";
 import { demoSignatures } from "../../demo-signatures";
 import { demoDisplay } from "../../demo-signatures/display";
 import { MockBadge, PlannedBadge } from "../PlannedBadge";
@@ -19,28 +19,14 @@ import type { PreparedInput } from "../../pages/Analyze";
 
 type Mode = "upload" | "demo" | "catalogue";
 
-function formatOf(name: string): "json" | "csv" | null {
+type InputFormat = "json" | "csv" | "tsv";
+
+function formatOf(name: string): InputFormat | null {
   const n = name.toLowerCase();
   if (n.endsWith(".json")) return "json";
-  if (n.endsWith(".csv") || n.endsWith(".tsv")) return "csv";
+  if (n.endsWith(".csv")) return "csv";
+  if (n.endsWith(".tsv")) return "tsv";
   return null;
-}
-
-function parsePastedSignature(text: string): Signature {
-  const parsed = JSON.parse(text) as unknown;
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Signature must be a JSON object of gene symbol → number.");
-  }
-  const entries = Object.entries(parsed as Record<string, unknown>);
-  if (entries.length === 0) throw new Error("Signature is empty.");
-  const out: Signature = {};
-  for (const [gene, value] of entries) {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw new Error(`Gene "${gene}" must map to a finite number.`);
-    }
-    out[gene] = value;
-  }
-  return out;
 }
 
 export function SourceStep({
@@ -113,7 +99,7 @@ function UploadPanel({
   onTryDemo: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
-  const [format, setFormat] = useState<"json" | "csv" | null>(null);
+  const [format, setFormat] = useState<InputFormat | null>(null);
   const [parsing, setParsing] = useState(false);
   const [result, setResult] = useState<ParseResult | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -125,7 +111,7 @@ function UploadPanel({
 
   async function doParse(
     f: File,
-    fmt: "json" | "csv",
+    fmt: InputFormat,
     opts: { allow_extra?: boolean; sample?: string } = {},
   ) {
     setParsing(true);
@@ -150,7 +136,7 @@ function UploadPanel({
     const fmt = formatOf(f.name);
     setFormat(fmt);
     if (!fmt) {
-      setError(new Error("Please upload a .json or .csv file."));
+      setError(new Error("Please upload a .json, .csv or .tsv file."));
       return;
     }
     void doParse(f, fmt);
@@ -164,26 +150,27 @@ function UploadPanel({
       kind: "file",
       signature: r.signature,
       parse: r,
+      allowExtra,
     });
   }
 
-  function loadPaste() {
+  async function loadPaste() {
     try {
-      const sig = parsePastedSignature(pasteText);
+      const parsed = await api.parseSignature({ content: pasteText, format: "json" });
+      if (!parsed.signature) throw new Error("Select a sample before continuing.");
       setPasteError(null);
       onPrepared({
         title: "Pasted signature",
         subtitle: "Signature entered as JSON",
         kind: "paste",
-        signature: sig,
-        parse: null,
+        signature: parsed.signature,
+        parse: parsed,
+        allowExtra: false,
       });
     } catch (e) {
       setPasteError(e instanceof Error ? e.message : "Invalid JSON.");
     }
   }
-
-  const extrasError = error instanceof EndoscanApiError && /not in the schema/i.test(error.detail);
 
   return (
     <div className="upload-panel-wrap">
@@ -197,29 +184,30 @@ function UploadPanel({
         <div className="upload-symbol">CSV</div>
         <h2>Upload a signature file</h2>
         <p>
-          A CSV or JSON file of landmark-gene values. We check gene coverage against the model schema
+          A CSV, TSV or JSON file of gene values. We check it against every endpoint schema
           next.
         </p>
         <span className="button primary upload-cta">{file ? file.name : "Choose data file"}</span>
-        <button type="button" className="upload-demo-link" onClick={onTryDemo}>
-          or try a real demo instead
-        </button>
       </label>
+      <button type="button" className="upload-demo-link" onClick={onTryDemo}>
+        or try a real demo instead
+      </button>
 
       {parsing && <p className="upload-status">Checking the file…</p>}
       {error != null && <ErrorNotice error={error} />}
 
-      {extrasError && file && format && (
+      {result?.compatibility.some((item) => item.n_extra > 0) && file && format && (
         <label className="extras-toggle">
           <input
             type="checkbox"
             checked={allowExtra}
-            onChange={(e) => {
-              setAllowExtra(e.target.checked);
-              if (e.target.checked) void doParse(file, format, { allow_extra: true });
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setAllowExtra(checked);
+              void doParse(file, format, { allow_extra: checked });
             }}
           />
-          Ignore extra genes not in the schema and re-check
+          Ignore extra genes independently for each endpoint schema
         </label>
       )}
 
@@ -228,7 +216,10 @@ function UploadPanel({
           <p>{result.preview.samples?.length} samples found — pick one:</p>
           <div className="sample-buttons">
             {result.preview.samples?.map((s) => (
-              <button key={s} onClick={() => void doParse(file, format, { sample: s })}>
+              <button
+                key={s}
+                onClick={() => void doParse(file, format, { sample: s, allow_extra: allowExtra })}
+              >
                 {s}
               </button>
             ))}
@@ -236,23 +227,22 @@ function UploadPanel({
         </div>
       )}
 
-      {result?.aligned && result.signature && (
+      {result?.signature && (
         <div className="coverage-summary">
           <div className="coverage-summary-top">
             <div>
-              <strong className="tabular">
-                {result.preview.n_matched} / {result.n_schema_genes}
-              </strong>
-              <span>landmark genes recognized</span>
+              <strong className="tabular">{result.compatible_endpoint_ids.length}</strong>
+              <span>compatible endpoint model{result.compatible_endpoint_ids.length === 1 ? "" : "s"}</span>
             </div>
-            <span className="status-chip status-good">Ready</span>
+            <span className={`status-chip ${result.compatible_endpoint_ids.length ? "status-good" : "status-note"}`}>
+              {result.compatible_endpoint_ids.length ? "Ready" : "No compatible endpoints"}
+            </span>
           </div>
           <p className="coverage-summary-detail">
-            {result.preview.n_matched} matched, {result.preview.n_missing} missing,{" "}
-            {result.preview.n_extra} extra (schema <span className="mono">{result.schema_endpoint_id}</span>
-            ).
+            {result.preview.n_detected} genes parsed. Each registered endpoint was checked against
+            its own feature schema.
           </p>
-          <button className="button primary" onClick={() => useUploaded(result)}>
+          <button className="button primary" disabled={!result.compatible_endpoint_ids.length} onClick={() => useUploaded(result)}>
             Use this signature
           </button>
         </div>
@@ -262,13 +252,13 @@ function UploadPanel({
         <button onClick={() => setShowAdvanced((v) => !v)}>
           {showAdvanced ? "Hide advanced input" : "Advanced: paste JSON"}
         </button>
-        <span>978 landmark genes</span>
+        <span>Endpoint-specific feature schemas</span>
       </div>
 
       {showAdvanced && (
         <div className="advanced-panel">
           <label className="advanced-field">
-            <span>Signature (JSON: gene symbol → value, the 978 landmark genes)</span>
+            <span>Signature (JSON: gene symbol → finite numeric value)</span>
             <textarea
               value={pasteText}
               placeholder='{ "A1BG": 0.12, "A1CF": -0.4, "…": 0.0 }'
@@ -283,7 +273,7 @@ function UploadPanel({
           <button
             className="button outline"
             disabled={pasteText.trim().length === 0}
-            onClick={loadPaste}
+            onClick={() => void loadPaste()}
           >
             Load signature
           </button>
@@ -294,6 +284,8 @@ function UploadPanel({
 }
 
 function DemoPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void }) {
+  const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   if (demoSignatures.length === 0) {
     return (
       <div className="demo-panel">
@@ -305,17 +297,31 @@ function DemoPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void 
     );
   }
 
-  function runDemo(id: string) {
+  async function runDemo(id: string) {
     const demo = demoSignatures.find((d) => d.id === id);
     if (!demo) return;
     const d = demoDisplay(demo);
-    onPrepared({
-      title: d.name,
-      subtitle: `Real demo signature · ${d.source}`,
-      kind: "demo",
-      signature: demo.signature,
-      parse: null,
-    });
+    setLoading(id);
+    setError(null);
+    try {
+      const parsed = await api.parseSignature({
+        content: JSON.stringify(demo.signature),
+        format: "json",
+      });
+      if (!parsed.signature) throw new Error("The demo signature could not be prepared.");
+      onPrepared({
+        title: d.name,
+        subtitle: `Real demo signature · ${d.source}`,
+        kind: "demo",
+        signature: parsed.signature,
+        parse: parsed,
+        allowExtra: false,
+      });
+    } catch (e) {
+      setError(e);
+    } finally {
+      setLoading(null);
+    }
   }
 
   return (
@@ -351,13 +357,14 @@ function DemoPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void 
                   <dd className="mono">{d.identifier}</dd>
                 </div>
               </dl>
-              <button className="button primary full-button" onClick={() => runDemo(demo.id)}>
-                Use this demo
+              <button className="button primary full-button" disabled={loading != null} onClick={() => void runDemo(demo.id)}>
+                {loading === demo.id ? "Checking…" : "Use this demo"}
               </button>
             </article>
           );
         })}
       </div>
+      {error != null && <ErrorNotice error={error} />}
       <p className="demo-panel-foot">
         Real measured signatures (LINCS Level 5). They are illustrative examples, not a claim about
         any specific product or exposure.

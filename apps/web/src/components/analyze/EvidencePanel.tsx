@@ -10,7 +10,7 @@
 import { useState } from "react";
 
 import { api } from "../../api/client";
-import type { Signature } from "../../api/types";
+import { predictionScore, type Signature } from "../../api/types";
 import type { EndpointSignal } from "../../hooks/useAnalyze";
 import { useAsync } from "../../hooks/useAsync";
 import { ErrorNotice } from "../ErrorNotice";
@@ -62,7 +62,7 @@ export function EvidencePanel({
               <span>
                 <strong>{s.biological_target}</strong>
                 <small>
-                  Score {r.probability.toFixed(2)} / {r.call ? "active" : "inactive"}
+                  Score {predictionScore(r).toFixed(2)} / {r.call ? "above threshold" : "below threshold"}
                 </small>
               </span>
             </button>

@@ -1,9 +1,4 @@
-"""POST /signatures/parse — parse + validate an uploaded signature, return an honest preview.
-
-Thin: parse bytes -> {gene: value} (parsing.py), then validate with the EXISTING authoritative
-validator ``align_signature`` against the resolved endpoint's schema. Stateless — the uploaded
-bytes are parsed in-request and discarded; nothing is persisted.
-"""
+"""POST /signatures/parse — parse once, then check every registered endpoint schema."""
 
 from __future__ import annotations
 
@@ -12,30 +7,66 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
-from endoscan_core.inference import align_signature, load_feature_schema
-from endoscan_core.registry import get_endpoint, list_endpoints
+from endoscan_core.inference import SignatureValidationError, align_signature, load_feature_schema
+from endoscan_core.registry import list_endpoints
 
 from ..deps import get_repo_root
+from ..limits import MAX_UPLOAD_BYTES
 from ..parsing import MalformedUploadError, parse_upload
-from ..schemas import ParsePreview, ParseResult
+from ..schemas import EndpointCompatibility, ParsePreview, ParseResult
 
 router = APIRouter(prefix="/signatures", tags=["signatures"])
 
 TRUNC = 10
 
 
-def _resolve_schema_endpoint(endpoint_id: str | None, repo_root: Path):
-    """The endpoint whose schema we validate against — the given one, else the first registered.
+def _read_text(file: UploadFile | None, content: str | None) -> str:
+    if file is not None:
+        raw = file.file.read(MAX_UPLOAD_BYTES + 1)
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise MalformedUploadError(
+                f"uploaded file exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit."
+            )
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise MalformedUploadError("uploaded file must be valid UTF-8 text.") from exc
+    if content is not None:
+        if len(content.encode("utf-8")) > MAX_UPLOAD_BYTES:
+            raise MalformedUploadError(
+                f"uploaded content exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit."
+            )
+        return content
+    raise MalformedUploadError("no file or content provided.")
 
-    ER and AR share the identical 978-gene landmark schema today; the endpoint_id param
-    future-proofs schema divergence (validate against exactly that endpoint).
-    """
-    if endpoint_id:
-        return get_endpoint(endpoint_id, repo_root=repo_root)  # 404 handler if unknown
-    endpoints = list_endpoints(repo_root=repo_root)
-    if not endpoints:
-        raise MalformedUploadError("no registered endpoints to validate against.")
-    return endpoints[0]
+
+def _compatibility(mapping: dict[str, float], entry, repo_root: Path, allow_extra: bool):
+    schema = load_feature_schema(repo_root / entry.feature_schema_path)
+    schema_genes = list(schema.features)
+    supplied = set(mapping)
+    required = set(schema_genes)
+    missing = sorted(required - supplied)
+    extra = sorted(supplied - required)
+    reason: str | None = None
+    compatible = True
+    try:
+        align_signature(mapping, schema, allow_extra=allow_extra)
+    except SignatureValidationError as exc:
+        compatible = False
+        reason = str(exc)
+    return EndpointCompatibility(
+        endpoint_id=entry.endpoint_id,
+        biological_target=entry.biological_target,
+        compatible=compatible,
+        n_schema_genes=len(schema_genes),
+        n_detected=len(mapping),
+        n_matched=len(required & supplied),
+        n_missing=len(missing),
+        n_extra=len(extra),
+        missing_genes=missing[:TRUNC],
+        extra_genes=extra[:TRUNC],
+        reason=reason,
+    )
 
 
 @router.post("/parse", response_model=ParseResult)
@@ -45,69 +76,48 @@ def parse_signature(
     content: Annotated[str | None, Form()] = None,
     format: Annotated[str, Form()] = "json",
     allow_extra: Annotated[bool, Form()] = False,
-    endpoint_id: Annotated[str | None, Form()] = None,
     sample: Annotated[str | None, Form()] = None,
 ) -> ParseResult:
-    """Parse an uploaded signature and preview its alignment.
+    """Parse one upload and report compatibility with every registered endpoint.
 
-    Errors: 400 malformed_upload (unparseable) / 422 invalid_signature (parsed but fails
-    align_signature) / 404 unknown endpoint.
+    The returned signature is the parsed mapping, not one endpoint's aligned vector. The normal
+    ``/analyze`` route aligns it independently for the explicitly selected compatible endpoints.
     """
-    if file is not None:
-        text = file.file.read().decode("utf-8", errors="replace")
-    elif content is not None:
-        text = content
-    else:
-        raise MalformedUploadError("no file or content provided.")
+    text = _read_text(file, content)
+    parsed = parse_upload(format, text, sample=sample)
 
-    entry = _resolve_schema_endpoint(endpoint_id, repo_root)
-    schema = load_feature_schema(repo_root / entry.feature_schema_path)
-    schema_genes = list(schema.features)
-
-    parsed = parse_upload(format, text, sample=sample)  # MalformedUploadError -> 400
-
-    # Multi-column CSV with no chosen sample: report the sample names; do not guess a column.
     if parsed.mapping is None:
         return ParseResult(
-            aligned=False,
+            ready=False,
             format=format,
-            schema_endpoint_id=entry.endpoint_id,
-            n_schema_genes=len(schema_genes),
             preview=ParsePreview(
                 n_detected=0,
-                n_matched=0,
-                n_missing=len(schema_genes),
-                n_extra=0,
-                missing_genes=[],
-                extra_genes=[],
                 samples=parsed.samples,
+                selected_sample=None,
                 needs_sample=True,
             ),
+            compatibility=[],
+            compatible_endpoint_ids=[],
             signature=None,
         )
 
-    mapping = parsed.mapping
-    # THE authoritative validation (same code /predict uses). SignatureValidationError -> 422.
-    align_signature(mapping, schema, allow_extra=allow_extra)
-
-    # Aligned OK: every schema gene is present. Build the signature in schema order.
-    aligned = {gene: mapping[gene] for gene in schema_genes}
-    extra = sorted(set(mapping) - set(schema_genes))
+    endpoints = list_endpoints(repo_root=repo_root)
+    if not endpoints:
+        raise MalformedUploadError("no registered endpoints to validate against.")
+    compatibility = [
+        _compatibility(parsed.mapping, entry, repo_root, allow_extra) for entry in endpoints
+    ]
+    compatible_ids = [item.endpoint_id for item in compatibility if item.compatible]
     return ParseResult(
-        aligned=True,
+        ready=bool(compatible_ids),
         format=format,
-        schema_endpoint_id=entry.endpoint_id,
-        n_schema_genes=len(schema_genes),
         preview=ParsePreview(
-            n_detected=len(mapping),
-            n_matched=len(schema_genes),
-            n_missing=0,
-            n_extra=len(extra),
-            missing_genes=[],
-            extra_genes=extra[:TRUNC],
+            n_detected=len(parsed.mapping),
             samples=parsed.samples,
             selected_sample=sample,
             needs_sample=False,
         ),
-        signature=aligned,
+        compatibility=compatibility,
+        compatible_endpoint_ids=compatible_ids,
+        signature=parsed.mapping,
     )

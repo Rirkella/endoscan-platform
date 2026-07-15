@@ -7,7 +7,6 @@
 // Experimental context fields are shown for the record but are NOT sent to the model (the models
 // consume the transcriptomic signature only); this is stated plainly so nothing is implied.
 
-import type { EndpointSummary } from "../../api/types";
 import type { PreparedInput } from "../../pages/Analyze";
 
 function endpointCodeClass(id: string): string {
@@ -17,20 +16,17 @@ function endpointCodeClass(id: string): string {
 
 export function ValidationStep({
   input,
-  endpoints,
   onBack,
   onRun,
 }: {
   input: PreparedInput;
-  endpoints: EndpointSummary[];
   onBack: () => void;
   onRun: () => void;
 }) {
-  const preview = input.parse?.preview;
-  const schemaN = input.parse?.n_schema_genes ?? null;
+  const preview = input.parse.preview;
+  const compatibility = input.parse.compatibility;
+  const compatible = compatibility.filter((item) => item.compatible);
   const provided = Object.keys(input.signature).length;
-  const coveragePct =
-    preview && schemaN ? Math.round((preview.n_matched / schemaN) * 100) : null;
 
   return (
     <section className="validation-layout">
@@ -42,7 +38,7 @@ export function ValidationStep({
           </div>
           <span className="validation-state">
             <span className="status-dot" aria-hidden />
-            Ready to run
+            {compatible.length ? "Ready to run" : "No compatible endpoints"}
           </span>
         </div>
 
@@ -68,34 +64,12 @@ export function ValidationStep({
                 <p>Coverage is checked against the required landmark schema.</p>
               </div>
             </div>
-            {preview && schemaN ? (
-              <span className="status-chip status-good">
-                {preview.n_matched} / {schemaN} found
-              </span>
-            ) : (
-              <span className="status-chip status-note">Checked on run</span>
-            )}
+            <span className="status-chip status-good">{preview.n_detected} genes parsed</span>
           </div>
-          {preview && schemaN ? (
-            <>
-              <div className="coverage-bar">
-                <span style={{ width: `${coveragePct}%` }} />
-              </div>
-              <div className="coverage-legend">
-                <span>
-                  <span className="status-dot" aria-hidden />
-                  Required genes {schemaN}
-                </span>
-                <span>Missing {preview.n_missing}</span>
-                <span>Extra {preview.n_extra} excluded</span>
-              </div>
-            </>
-          ) : (
-            <p className="check-plain">
-              {provided} gene values provided. The server validates the gene set against each
-              endpoint&rsquo;s schema when models are run.
-            </p>
-          )}
+          <p className="check-plain">
+            {provided} gene values provided. Compatibility below is calculated independently for
+            every endpoint&rsquo;s registered feature schema.
+          </p>
         </div>
 
         <div className="check-section">
@@ -137,23 +111,29 @@ export function ValidationStep({
       <aside className="compatibility-panel">
         <p className="eyebrow">Model compatibility</p>
         <h2>
-          {endpoints.length} available endpoint model{endpoints.length === 1 ? "" : "s"}
+          {compatible.length} of {compatibility.length} endpoint model{compatibility.length === 1 ? "" : "s"} compatible
         </h2>
-        <p>Each model checks the gene set against its own schema when it runs.</p>
+        <p>Only compatible endpoints will be submitted for analysis.</p>
         <div className="compatibility-list">
-          {endpoints.map((e) => (
+          {compatibility.map((e) => (
             <div key={e.endpoint_id}>
               <span className={`endpoint-code ${endpointCodeClass(e.endpoint_id)}`}>
                 {e.endpoint_id}
               </span>
               <span>
                 <strong>{e.biological_target}</strong>
-                <small>{e.status}</small>
+                <small>{e.n_matched}/{e.n_schema_genes} matched · {e.n_missing} missing · {e.n_extra} extra</small>
               </span>
-              <b>Available</b>
+              <b>{e.compatible ? "Compatible" : "Incompatible"}</b>
             </div>
           ))}
         </div>
+        {compatible.length === 0 && (
+          <div className="no-signature" role="status">
+            <strong>No registered endpoint can use this signature.</strong>
+            <p>Review the per-endpoint missing and extra gene counts, then choose another input.</p>
+          </div>
+        )}
         <div className="model-note">
           <span className="status-dot status-dot-amber" aria-hidden />
           <p>
@@ -163,10 +143,10 @@ export function ValidationStep({
         </div>
         <button
           className="button primary full-button"
-          disabled={endpoints.length === 0}
+          disabled={compatible.length === 0}
           onClick={onRun}
         >
-          Run {endpoints.length} endpoint model{endpoints.length === 1 ? "" : "s"}
+          Run {compatible.length} compatible endpoint model{compatible.length === 1 ? "" : "s"}
         </button>
         <button className="button quiet full-button" onClick={onBack}>
           Back

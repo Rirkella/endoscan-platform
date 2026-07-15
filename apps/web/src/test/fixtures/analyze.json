@@ -6,7 +6,7 @@
       "ok": true,
       "result": {
         "endpoint_id": "ER",
-        "probability": 0.095,
+        "score": 0.095,
         "call": false,
         "threshold": 0.5,
         "standardized_input": true,
@@ -36,7 +36,7 @@
       "ok": true,
       "result": {
         "endpoint_id": "AR",
-        "probability": 0.24041191158691053,
+        "score": 0.24041191158691053,
         "call": false,
         "threshold": 0.5,
         "standardized_input": true,
@@ -61,5 +61,11 @@
       },
       "error": null
     }
-  ]
+  ],
+  "summary": {
+    "requested": 2,
+    "succeeded": 2,
+    "failed": 0,
+    "status": "ok"
+  }
 }

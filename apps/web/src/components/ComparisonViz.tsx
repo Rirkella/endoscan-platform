@@ -6,12 +6,13 @@
 //   - < 2          -> nothing (a single result needs no comparison)
 // Only successful predictions participate.
 
+import { predictionScore } from "../api/types";
 import type { EndpointSignal } from "../hooks/useAnalyze";
 
 interface Scored {
   endpoint_id: string;
   biological_target: string;
-  probability: number;
+  score: number;
   call: boolean;
   threshold: number;
 }
@@ -22,7 +23,7 @@ function scored(signals: EndpointSignal[]): Scored[] {
     .map((s) => ({
       endpoint_id: s.endpoint_id,
       biological_target: s.biological_target,
-      probability: s.result!.probability,
+      score: predictionScore(s.result!),
       call: s.result!.call,
       threshold: s.result!.threshold,
     }));
@@ -41,13 +42,13 @@ function ComparisonBars({ items }: { items: Scored[] }) {
                 <span className="font-mono text-xs text-muted">({it.endpoint_id})</span>
               </span>
               <span className="tabular-nums text-muted">
-                {it.probability.toFixed(2)} · {it.call ? "Active" : "Inactive"}
+                {it.score.toFixed(2)} · {it.call ? "Above threshold" : "Below threshold"}
               </span>
             </div>
             <div className="relative h-3 w-full overflow-hidden rounded bg-surface">
               <div
                 className={`h-full ${it.call ? "bg-brand" : "bg-slate-300"}`}
-                style={{ width: `${Math.round(it.probability * 100)}%` }}
+                style={{ width: `${Math.round(it.score * 100)}%` }}
               />
               {/* threshold marker */}
               <div

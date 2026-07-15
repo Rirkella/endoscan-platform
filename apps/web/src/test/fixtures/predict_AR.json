@@ -1,6 +1,6 @@
 {
   "endpoint_id": "AR",
-  "probability": 0.24041191158691053,
+  "score": 0.24041191158691053,
   "call": false,
   "threshold": 0.5,
   "standardized_input": true,

@@ -133,3 +133,12 @@ def test_locate_missing_map_is_404(fixture_client: TestClient) -> None:
     )
     assert r.status_code == 404
     assert r.json()["error"] == "explore_map_unavailable"
+
+
+def test_locate_rejects_traversal_context(fixture_client: TestClient) -> None:
+    r = fixture_client.post(
+        "/explore/locate", json={"context": "../FIX", "signature": _fixture_signature()}
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "invalid_reference_context"
+    assert r.json()["request_id"]

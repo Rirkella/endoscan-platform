@@ -11,7 +11,7 @@ const schemaPath = resolve(process.cwd(), "../../models/ER/feature_schema.json")
 const SCHEMA_GENES: string[] = JSON.parse(readFileSync(schemaPath, "utf-8")).features;
 
 // Qualitative ER/AR profile each demo's recorded expected_profile must satisfy (its label).
-// (Live probability reproduction against the model is verified in Python at bundle time; here
+// (Live score reproduction against the model is verified in Python at bundle time; here
 // we lock the recorded profile to its label so the two can't silently drift.)
 const PROFILE: Record<string, { ER: "high" | "low"; AR: "high" | "low" }> = {
   demo_low_low: { ER: "low", AR: "low" },
@@ -45,7 +45,7 @@ describe("bundled demo signatures are REAL and schema-complete", () => {
         expect(Number.isFinite(v)).toBe(true);
       }
 
-      // Recorded profile is a probability and matches the qualitative label.
+      // Recorded profile contains endpoint scores and matches the qualitative label.
       const { ER, AR } = demo.expected_profile;
       for (const p of [ER, AR]) expect(p).toBeGreaterThanOrEqual(0);
       for (const p of [ER, AR]) expect(p).toBeLessThanOrEqual(1);

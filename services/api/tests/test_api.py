@@ -93,7 +93,7 @@ def test_predict_returns_real_prediction_from_committed_model(
     r = client.post("/predict", json={"endpoint_id": "AR", "signature": full_signature("AR")})
     assert r.status_code == 200
     body = r.json()
-    assert 0.0 <= body["probability"] <= 1.0
+    assert 0.0 <= body["score"] <= 1.0
     assert isinstance(body["call"], bool)
     assert body["threshold"] is not None
     assert body["limitations"]["is_experimental"] is True  # honesty rides on every prediction

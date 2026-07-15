@@ -15,12 +15,14 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 
 import numpy as np
 
 #: Where committed explore artifacts live, per endpoint (beside ``feature_schema.json``).
 EXPLORE_SUBDIR = "explore"
+_CONTEXT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
 class ExploreArtifactUnavailableError(FileNotFoundError):
@@ -31,8 +33,19 @@ class ExploreArtifactCorruptError(RuntimeError):
     """A committed explore artifact failed its integrity gate (hash mismatch) -> 500."""
 
 
+class ExploreContextError(ValueError):
+    """A reference context identifier is invalid and cannot be resolved safely."""
+
+
 def _explore_dir(repo_root: Path, context: str) -> Path:
-    return repo_root / "models" / context / EXPLORE_SUBDIR
+    """Resolve a bounded context identifier beneath the repository's models directory."""
+    if not _CONTEXT_ID.fullmatch(context):
+        raise ExploreContextError("reference context must be a simple endpoint identifier")
+    models_root = (repo_root / "models").resolve()
+    base = (models_root / context / EXPLORE_SUBDIR).resolve()
+    if not base.is_relative_to(models_root):
+        raise ExploreArtifactCorruptError("explore artifact path escaped the models directory")
+    return base
 
 
 def load_map(repo_root: Path, context: str) -> tuple[dict, dict]:

@@ -76,7 +76,9 @@ export interface EndpointDetail {
 
 export interface PredictionResult {
   endpoint_id: string;
-  probability: number;
+  score: number;
+  /** Accepted only while older deployments migrate to `score`. */
+  probability?: number;
   call: boolean;
   threshold: number;
   standardized_input: boolean;
@@ -108,22 +110,31 @@ export type Signature = Record<string, number>;
 // --- signature upload / parse (POST /signatures/parse) ---
 export interface ParsePreview {
   n_detected: number;
-  n_matched: number;
-  n_missing: number;
-  n_extra: number;
-  missing_genes: string[];
-  extra_genes: string[];
   samples: string[] | null;
   selected_sample: string | null;
   needs_sample: boolean;
 }
 
-export interface ParseResult {
-  aligned: boolean;
-  format: string;
-  schema_endpoint_id: string;
+export interface EndpointCompatibility {
+  endpoint_id: string;
+  biological_target: string;
+  compatible: boolean;
   n_schema_genes: number;
+  n_detected: number;
+  n_matched: number;
+  n_missing: number;
+  n_extra: number;
+  missing_genes: string[];
+  extra_genes: string[];
+  reason: string | null;
+}
+
+export interface ParseResult {
+  ready: boolean;
+  format: string;
   preview: ParsePreview;
+  compatibility: EndpointCompatibility[];
+  compatible_endpoint_ids: string[];
   signature: Signature | null;
 }
 
@@ -133,6 +144,7 @@ export interface ErrorBody {
   error: string;
   detail: string;
   endpoint_id: string | null;
+  request_id: string;
 }
 
 export interface AnalyzeEndpointResult {
@@ -145,6 +157,12 @@ export interface AnalyzeEndpointResult {
 
 export interface AnalyzeResponse {
   results: AnalyzeEndpointResult[];
+  summary: {
+    requested: number;
+    succeeded: number;
+    failed: number;
+    status: "ok" | "partial" | "all_failed";
+  };
 }
 
 // A structured API error (the ErrorResponse shape) surfaced to the UI. `status` is the HTTP
@@ -154,6 +172,14 @@ export interface ApiError {
   error: string;
   detail: string;
   endpoint_id: string | null;
+  request_id: string;
+}
+
+/** Read the current score while tolerating one release of the legacy response key. */
+export function predictionScore(result: PredictionResult): number {
+  if (Number.isFinite(result.score)) return result.score;
+  if (Number.isFinite(result.probability)) return result.probability as number;
+  throw new Error("Prediction response did not contain a numeric score.");
 }
 
 // --- Explore: the data-space (UMAP) view (GET /explore/{ctx}/umap, POST /explore/locate) ---

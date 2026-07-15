@@ -14,7 +14,7 @@
 import { useState } from "react";
 
 import { api } from "../api/client";
-import type { EndpointSummary, ParseResult, Signature } from "../api/types";
+import { predictionScore, type EndpointSummary, type ParseResult, type Signature } from "../api/types";
 import { PlannedBadge } from "../components/PlannedBadge";
 import { EvidencePanel } from "../components/analyze/EvidencePanel";
 import { ReferencePanel } from "../components/analyze/ReferencePanel";
@@ -32,7 +32,8 @@ export interface PreparedInput {
   subtitle: string;
   kind: "file" | "paste" | "demo";
   signature: Signature;
-  parse: ParseResult | null; // present for uploads (carries real coverage), null for paste/demo
+  parse: ParseResult;
+  allowExtra: boolean;
 }
 
 function endpointCodeClass(id: string): string {
@@ -60,7 +61,11 @@ export function Analyze() {
     setStep("running");
     setRunError(null);
     try {
-      await analyze.run(prepared.signature);
+      await analyze.run(
+        prepared.signature,
+        prepared.parse.compatible_endpoint_ids,
+        prepared.allowExtra,
+      );
     } catch (e) {
       setRunError(e);
     } finally {
@@ -102,7 +107,6 @@ export function Analyze() {
       {step === "validate" && prepared && (
         <ValidationStep
           input={prepared}
-          endpoints={endpointList}
           onBack={() => setStep("source")}
           onRun={onRun}
         />
@@ -115,6 +119,7 @@ export function Analyze() {
           input={prepared}
           endpoints={endpointList}
           signals={analyze.signals}
+          allFailed={analyze.summary?.status === "all_failed"}
           runError={runError}
           tab={resultTab}
           setTab={setResultTab}
@@ -160,6 +165,7 @@ function ResultWorkspace({
   input,
   endpoints,
   signals,
+  allFailed,
   runError,
   tab,
   setTab,
@@ -168,6 +174,7 @@ function ResultWorkspace({
   input: PreparedInput;
   endpoints: EndpointSummary[];
   signals: EndpointSignal[];
+  allFailed: boolean;
   runError: unknown;
   tab: ResultTab;
   setTab: (t: ResultTab) => void;
@@ -213,6 +220,7 @@ function ResultWorkspace({
           nAbove={nAbove}
           nScored={scored.length}
           runError={runError}
+          allFailed={allFailed}
           onEvidence={() => setTab("evidence")}
           onReference={() => setTab("reference")}
         />
@@ -230,6 +238,7 @@ function OverviewTab({
   nAbove,
   nScored,
   runError,
+  allFailed,
   onEvidence,
   onReference,
 }: {
@@ -238,10 +247,10 @@ function OverviewTab({
   nAbove: number;
   nScored: number;
   runError: unknown;
+  allFailed: boolean;
   onEvidence: () => void;
   onReference: () => void;
 }) {
-  const preview = input.parse?.preview;
   return (
     <div className="overview-layout">
       <div className="overview-main">
@@ -275,6 +284,13 @@ function OverviewTab({
           </div>
         )}
 
+        {runError == null && allFailed && (
+          <div className="no-signature" role="alert">
+            <strong>No compatible endpoint completed successfully.</strong>
+            <p>Each endpoint failure is isolated below. Use its request ID when asking an administrator for help.</p>
+          </div>
+        )}
+
         <div className="endpoint-results">
           {signals.map((s) => (
             <EndpointResultCard
@@ -298,14 +314,10 @@ function OverviewTab({
               <dt>Genes provided</dt>
               <dd>{Object.keys(input.signature).length}</dd>
             </div>
-            {preview && (
-              <div>
-                <dt>Schema coverage</dt>
-                <dd>
-                  {preview.n_matched} / {input.parse!.n_schema_genes}
-                </dd>
-              </div>
-            )}
+            <div>
+              <dt>Compatible endpoints</dt>
+              <dd>{input.parse.compatible_endpoint_ids.length} / {input.parse.compatibility.length}</dd>
+            </div>
           </dl>
         </section>
         <section>
@@ -359,7 +371,8 @@ function EndpointResultCard({
 
   const r = signal.result;
   const above = r.call;
-  const pct = Math.max(0, Math.min(100, Math.round(r.probability * 100)));
+  const score = predictionScore(r);
+  const pct = Math.max(0, Math.min(100, Math.round(score * 100)));
   const thresholdPct = Math.max(0, Math.min(100, Math.round(r.threshold * 100)));
 
   return (
@@ -374,7 +387,7 @@ function EndpointResultCard({
       <h3>{signal.biological_target}</h3>
       <p>Endpoint signal score</p>
       <div className="score-row">
-        <strong className="tabular">{r.probability.toFixed(2)}</strong>
+        <strong className="tabular">{score.toFixed(2)}</strong>
         <span>Threshold {r.threshold.toFixed(2)}</span>
       </div>
       <div className={`score-track ${above ? "" : "score-track-low"}`}>
@@ -384,7 +397,7 @@ function EndpointResultCard({
       <dl>
         <div>
           <dt>Model call</dt>
-          <dd className={above ? "call-signal" : ""}>{above ? "Active" : "Inactive"}</dd>
+          <dd className={above ? "call-signal" : ""}>{above ? "Above threshold" : "Below threshold"}</dd>
         </div>
         <div>
           <dt>Model status</dt>
@@ -455,8 +468,8 @@ function ReportTab({
           {scored.map((s) => (
             <div key={s.endpoint_id}>
               <span>{s.endpoint_id} endpoint</span>
-              <strong className="tabular">{s.result!.probability.toFixed(2)}</strong>
-              <small>{s.result!.call ? "Active" : "Inactive"}</small>
+              <strong className="tabular">{predictionScore(s.result!).toFixed(2)}</strong>
+              <small>{s.result!.call ? "Above threshold" : "Below threshold"}</small>
             </div>
           ))}
         </div>
@@ -471,12 +484,10 @@ function ReportTab({
               <span>Genes provided</span>
               <strong>{Object.keys(input.signature).length}</strong>
             </div>
-            {input.parse?.preview && (
+            {input.parse.preview && (
               <div>
-                <span>Schema coverage</span>
-                <strong>
-                  {input.parse.preview.n_matched} / {input.parse.n_schema_genes}
-                </strong>
+                <span>Compatible endpoints</span>
+                <strong>{input.parse.compatible_endpoint_ids.length} / {input.parse.compatibility.length}</strong>
               </div>
             )}
             <div>

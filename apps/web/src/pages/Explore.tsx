@@ -293,15 +293,15 @@ function PlacementInput({
     setUploadError(null);
     if (!f) return;
     const n = f.name.toLowerCase();
-    const fmt = n.endsWith(".json") ? "json" : n.endsWith(".csv") || n.endsWith(".tsv") ? "csv" : null;
+    const fmt = n.endsWith(".json") ? "json" : n.endsWith(".csv") ? "csv" : n.endsWith(".tsv") ? "tsv" : null;
     if (!fmt) {
-      setUploadError(new Error("Please upload a .json or .csv file."));
+      setUploadError(new Error("Please upload a .json, .csv or .tsv file."));
       return;
     }
     try {
       const r: ParseResult = await api.parseSignature({ file: f, format: fmt });
-      if (r.aligned && r.signature) onSignature(r.signature);
-      else setUploadError(new Error("The file could not be aligned to the model schema."));
+      if (r.ready && r.signature) onSignature(r.signature);
+      else setUploadError(new Error("The file could not be prepared for reference placement."));
     } catch (e) {
       setUploadError(e);
     }

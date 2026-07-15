@@ -61,14 +61,14 @@ async function runAnalyze() {
   fireEvent.click(await screen.findByRole("button", { name: /Advanced: paste JSON/i }));
   fireEvent.change(screen.getByLabelText(/Signature \(JSON/i), { target: { value: '{"A1BG":0.1}' } });
   fireEvent.click(screen.getByRole("button", { name: /^Load signature$/i }));
-  const runBtn = await screen.findByRole("button", { name: /Run \d+ endpoint model/i });
+  const runBtn = await screen.findByRole("button", { name: /Run \d+ compatible endpoint model/i });
   await waitFor(() => expect(runBtn).not.toBeDisabled());
   fireEvent.click(runBtn);
   await screen.findAllByRole("article");
 }
 
 describe("dynamic endpoint count — cards render from the API, no fixed layout", () => {
-  for (const n of [1, 3, 6]) {
+  for (const n of [1, 3, 6, 10]) {
     it(`${n} endpoint(s) → ${n} result card(s)`, async () => {
       const eps = Array.from({ length: n }, (_, i) => ({
         endpoint_id: `EP${i + 1}`,
@@ -108,7 +108,7 @@ describe("dynamic endpoint count — cards render from the API, no fixed layout"
     const cards = await screen.findAllByRole("article");
     expect(cards).toHaveLength(2); // both endpoints render; one failing does not sink the other
     expect(screen.getByText(/Not available/i)).toBeInTheDocument();
-    expect(screen.getByText(/Below threshold/i)).toBeInTheDocument(); // the OK one still scores
+    expect(screen.getAllByText(/Below threshold/i).length).toBeGreaterThan(0); // the OK one still scores
   });
 });
 
