@@ -19,11 +19,6 @@ import { LimitationsPanel } from "../LimitationsPanel";
 import { LiteraturePanel } from "../LiteraturePanel";
 import { PathwaysPanel } from "../PathwaysPanel";
 
-function endpointCodeClass(id: string): string {
-  const k = id.toLowerCase();
-  return k === "er" ? "code-er" : k === "ar" ? "code-ar" : "code-generic";
-}
-
 export function EvidencePanel({
   signals,
   signature,
@@ -57,7 +52,7 @@ export function EvidencePanel({
               className={s.endpoint_id === active.endpoint_id ? "selected" : ""}
               onClick={() => setSelected(s.endpoint_id)}
             >
-              <span className={`endpoint-code ${endpointCodeClass(s.endpoint_id)}`}>
+              <span className="endpoint-code code-generic">
                 {s.endpoint_id}
               </span>
               <span>
@@ -112,18 +107,24 @@ function EndpointExplanation({
       <section className="evidence-embed">
         {state.loading && <p className="embed-copy">Preparing gene contributions…</p>}
         {state.error != null && <ErrorNotice error={state.error} />}
+        {state.error != null && (
+          <p className="embed-copy">
+            Supporting literature needs contributing genes, so it is unavailable until this
+            explanation can be loaded.
+          </p>
+        )}
         {state.data && <GeneContributionCards explanation={state.data} />}
       </section>
       {/* Pathways run off THIS endpoint's explain result (own honest empty/too-few/unavailable states). */}
       <section className="evidence-embed">
         <PathwaysPanel endpointId={endpointId} signature={signature} onResult={setPathways} />
       </section>
-      {state.data && pathways && (
+      {state.data && (
         <section className="evidence-embed">
           <LiteraturePanel
             endpointId={endpointId}
             genes={state.data.top_contributors.slice(0, 8).map((item) => item.gene)}
-            pathways={pathways.pathways.slice(0, 5).map((item) => ({
+            pathways={(pathways?.pathways ?? []).slice(0, 5).map((item) => ({
               pathway_id: item.pathway_id,
               name: item.name,
               genes: item.genes_influencing_result,

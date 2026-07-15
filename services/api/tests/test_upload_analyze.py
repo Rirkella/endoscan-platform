@@ -219,6 +219,8 @@ def test_analyze_runs_only_selected_endpoints(client) -> None:
     assert response.status_code == 200
     body = response.json()
     assert [item["endpoint_id"] for item in body["results"]] == ["AR"]
+    assert body["results"][0]["model_version"]
+    assert body["results"][0]["source_refs"]
     assert body["summary"] == {"requested": 1, "succeeded": 1, "failed": 0, "status": "ok"}
 
 

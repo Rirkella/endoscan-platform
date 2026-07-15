@@ -70,6 +70,8 @@ def analyze(
                 AnalyzeEndpointResult(
                     endpoint_id=entry.endpoint_id,
                     biological_target=entry.biological_target,
+                    model_version=entry.version,
+                    source_refs=entry.source_refs,
                     ok=True,
                     result=result,
                 )
@@ -79,6 +81,8 @@ def analyze(
                 AnalyzeEndpointResult(
                     endpoint_id=entry.endpoint_id,
                     biological_target=entry.biological_target,
+                    model_version=entry.version,
+                    source_refs=entry.source_refs,
                     ok=False,
                     error=ErrorResponse(
                         error=_ERROR_CODE[type(exc)],

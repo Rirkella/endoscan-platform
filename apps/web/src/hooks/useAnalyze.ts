@@ -8,6 +8,8 @@ import type { AnalyzeResponse, EndpointSummary, PredictionResult, Signature } fr
 export interface EndpointSignal {
   endpoint_id: string;
   biological_target: string;
+  model_version?: string;
+  source_refs?: string[];
   result: PredictionResult | null;
   error: unknown;
 }
@@ -35,7 +37,12 @@ export function useAnalyze(endpoints: EndpointSummary[]) {
       endpoints.filter((e) => endpointIds.includes(e.endpoint_id)).map(async (e): Promise<EndpointSignal> => {
         try {
           const result = await api.predict(e.endpoint_id, signature);
-          return { endpoint_id: e.endpoint_id, biological_target: e.biological_target, result, error: null };
+          return {
+            endpoint_id: e.endpoint_id,
+            biological_target: e.biological_target,
+            result,
+            error: null,
+          };
         } catch (error) {
           return { endpoint_id: e.endpoint_id, biological_target: e.biological_target, result: null, error };
         }
@@ -53,6 +60,8 @@ export function useAnalyze(endpoints: EndpointSummary[]) {
       signals = resp.results.map((r) => ({
         endpoint_id: r.endpoint_id,
         biological_target: r.biological_target,
+        model_version: r.model_version,
+        source_refs: r.source_refs,
         result: r.result,
         // Rehydrate the per-endpoint API error so ErrorNotice renders the verbatim message.
         error: r.error

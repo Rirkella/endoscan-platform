@@ -11,11 +11,6 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAsync } from "../hooks/useAsync";
 
-function endpointCodeClass(id: string): string {
-  const k = id.toLowerCase();
-  return k === "er" ? "code-er" : k === "ar" ? "code-ar" : "code-generic";
-}
-
 export function ModelLibrary() {
   const { data, error, loading } = useAsync(() => api.listEndpoints(), []);
   const endpoints: EndpointSummary[] = data ?? [];
@@ -62,7 +57,7 @@ export function ModelLibrary() {
             {endpoints.map((e) => (
               <article className="model-card" key={e.endpoint_id}>
                 <div className="model-card-top">
-                  <span className={`endpoint-code ${endpointCodeClass(e.endpoint_id)}`}>
+                  <span className="endpoint-code code-generic">
                     {e.endpoint_id}
                   </span>
                   <StatusBadge status={e.status} />

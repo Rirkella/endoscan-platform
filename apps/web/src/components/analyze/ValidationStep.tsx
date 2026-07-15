@@ -9,11 +9,6 @@
 
 import type { PreparedInput } from "../../pages/Analyze";
 
-function endpointCodeClass(id: string): string {
-  const k = id.toLowerCase();
-  return k === "er" ? "code-er" : k === "ar" ? "code-ar" : "code-generic";
-}
-
 export function ValidationStep({
   input,
   onBack,
@@ -117,7 +112,7 @@ export function ValidationStep({
         <div className="compatibility-list">
           {compatibility.map((e) => (
             <div key={e.endpoint_id}>
-              <span className={`endpoint-code ${endpointCodeClass(e.endpoint_id)}`}>
+              <span className="endpoint-code code-generic">
                 {e.endpoint_id}
               </span>
               <span>

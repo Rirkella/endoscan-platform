@@ -267,6 +267,8 @@ class AnalyzeEndpointResult(BaseModel):
 
     endpoint_id: str
     biological_target: str
+    model_version: str
+    source_refs: list[str]
     ok: bool
     result: PredictionResult | None = None
     error: ErrorResponse | None = None

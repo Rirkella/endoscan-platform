@@ -14,7 +14,13 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
-import { predictionScore, type EndpointSummary, type ParseResult, type Signature } from "../api/types";
+import {
+  predictionScore,
+  type EndpointCompatibility,
+  type EndpointSummary,
+  type ParseResult,
+  type Signature,
+} from "../api/types";
 import { PlannedBadge } from "../components/PlannedBadge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { EvidencePanel } from "../components/analyze/EvidencePanel";
@@ -35,11 +41,6 @@ export interface PreparedInput {
   signature: Signature;
   parse: ParseResult;
   allowExtra: boolean;
-}
-
-function endpointCodeClass(id: string): string {
-  const k = id.toLowerCase();
-  return k === "er" ? "code-er" : k === "ar" ? "code-ar" : "code-generic";
 }
 
 export function Analyze() {
@@ -334,6 +335,9 @@ function OverviewTab({
             <EndpointResultCard
               key={s.endpoint_id}
               signal={s}
+              compatibility={input.parse.compatibility.find(
+                (item) => item.endpoint_id === s.endpoint_id,
+              )}
               onEvidence={onEvidence}
             />
           ))}
@@ -382,24 +386,31 @@ function OverviewTab({
 
 function EndpointResultCard({
   signal,
+  compatibility,
   onEvidence,
 }: {
   signal: EndpointSignal;
+  compatibility?: EndpointCompatibility;
   onEvidence: () => void;
 }) {
-  const code = endpointCodeClass(signal.endpoint_id);
-
   if (signal.result == null) {
     return (
       <article className="endpoint-result">
         <div className="endpoint-result-top">
-          <span className={`endpoint-code ${code}`}>{signal.endpoint_id}</span>
+          <span className="endpoint-code code-generic">{signal.endpoint_id}</span>
           <span className="status-chip status-note">Not available</span>
         </div>
         <h3>{signal.biological_target}</h3>
         <p className="endpoint-result-note">
           This endpoint could not score the signature. The other endpoints are unaffected.
         </p>
+        {signal.error != null && <ErrorNotice error={signal.error} />}
+        {compatibility && (
+          <p className="endpoint-result-note">
+            Input compatibility: {compatibility.n_matched} of {compatibility.n_schema_genes} required
+            genes matched.
+          </p>
+        )}
         <button className="detail-link" onClick={onEvidence}>
           Inspect {signal.endpoint_id} evidence
         </button>
@@ -416,7 +427,7 @@ function EndpointResultCard({
   return (
     <article className={`endpoint-result ${above ? "endpoint-positive" : ""}`}>
       <div className="endpoint-result-top">
-        <span className={`endpoint-code ${code}`}>{signal.endpoint_id}</span>
+        <span className="endpoint-code code-generic">{signal.endpoint_id}</span>
         {/* Above-threshold = warm SIGNAL chip (attention, not hazard). Below = neutral, never green. */}
         <span className={`status-chip ${above ? "status-signal" : "status-neutral"}`}>
           {above ? "Above threshold" : "Below threshold"}
@@ -443,7 +454,27 @@ function EndpointResultCard({
         </div>
         <div>
           <dt>Input fit</dt>
-          <dd>Technical schema met</dd>
+          <dd>
+            {compatibility
+              ? `${compatibility.n_matched} / ${compatibility.n_schema_genes} required genes`
+              : "Technical schema met"}
+          </dd>
+        </div>
+        {signal.model_version && (
+          <div>
+            <dt>Model version</dt>
+            <dd>{signal.model_version}</dd>
+          </div>
+        )}
+        {signal.source_refs && signal.source_refs.length > 0 && (
+          <div>
+            <dt>Data provenance</dt>
+            <dd>{signal.source_refs.join(", ")}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Input handling</dt>
+          <dd>{r.standardized_input ? "Standardized by model pipeline" : "No standardization applied"}</dd>
         </div>
       </dl>
       <button className="detail-link" onClick={onEvidence}>

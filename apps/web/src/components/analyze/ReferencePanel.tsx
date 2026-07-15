@@ -91,6 +91,15 @@ export function ReferencePanel({
         {map.data && (
           <>
             <ExploreScatter points={map.data.points} locate={explore.result} />
+            <details className="mt-3 text-xs text-muted">
+              <summary className="cursor-pointer font-medium text-ink">
+                Reference data provenance
+              </summary>
+              <p className="mt-1">{map.data.manifest.point_definition}</p>
+              <p className="mt-1 break-words">
+                Source {map.data.manifest.source_key} · SHA-256 {map.data.manifest.source_sha256}
+              </p>
+            </details>
             <div className="result-reference-note">
               <span className="status-dot status-dot-blue" aria-hidden />
               This map shows how known reference signatures relate to each other. It is a visual
@@ -121,10 +130,14 @@ export function ReferencePanel({
               {explore.result.neighbors.map((n) => (
                 <li key={n.compound_id}>
                   <span className="mono">{n.compound_id}</span>
-                  {n.label && <span>{n.label}</span>}
+                  <span>Distance {n.distance.toFixed(3)}</span>
+                  {n.label && <span>Endpoint label: {n.label}</span>}
                 </li>
               ))}
             </ul>
+            {explore.result.neighbors.length === 0 && (
+              <p className="check-plain">No reference neighbours were returned for this signature.</p>
+            )}
             <p className="check-plain">Similar patterns do not prove the same effect.</p>
           </>
         ) : (

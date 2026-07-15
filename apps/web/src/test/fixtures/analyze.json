@@ -3,6 +3,8 @@
     {
       "endpoint_id": "ER",
       "biological_target": "Estrogen Receptor",
+      "model_version": "1.0.0",
+      "source_refs": ["lincs_gse92742", "toxcast_er"],
       "ok": true,
       "result": {
         "endpoint_id": "ER",
@@ -33,6 +35,8 @@
     {
       "endpoint_id": "AR",
       "biological_target": "Androgen Receptor",
+      "model_version": "1.0.0",
+      "source_refs": ["lincs_gse92742", "toxcast_ar"],
       "ok": true,
       "result": {
         "endpoint_id": "AR",

@@ -150,6 +150,8 @@ export interface ErrorBody {
 export interface AnalyzeEndpointResult {
   endpoint_id: string;
   biological_target: string;
+  model_version?: string;
+  source_refs?: string[];
   ok: boolean;
   result: PredictionResult | null;
   error: ErrorBody | null;

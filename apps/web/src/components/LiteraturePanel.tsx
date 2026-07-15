@@ -12,7 +12,7 @@ export function LiteraturePanel({
   genes: string[];
   pathways: LiteraturePathwayInput[];
 }) {
-  const pathwayKey = pathways.map((p) => p.pathway_id).join(",");
+  const pathwayKey = JSON.stringify(pathways);
   const geneKey = genes.join(",");
   const state = useAsync(
     () => api.interpretLiterature(endpointId, genes, pathways),

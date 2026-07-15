@@ -51,6 +51,17 @@ describe("Analyze stepped flow + result overview", () => {
     expect(screen.getAllByText(/Endpoint signal score/i).length).toBe(2);
     expect(screen.getAllByText(/Model call/i).length).toBe(2);
     expect(screen.getAllByText(/^(Above threshold|Below threshold)$/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/Model version/i)).toHaveLength(2);
+    expect(screen.getByText(/lincs_gse92742, toxcast_er/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/978 \/ 978 required genes/i).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows reference distances and map provenance for the submitted signature", async () => {
+    renderApp("/analyze");
+    await analyze();
+    fireEvent.click(screen.getByRole("button", { name: /^Reference context$/i }));
+    expect(await screen.findByText(/Distance 0\.420/i)).toBeInTheDocument();
+    expect(screen.getByText(/Reference data provenance/i)).toBeInTheDocument();
   });
 
   it("below-threshold is NEUTRAL, not green/safe (fixture: both endpoints below threshold)", async () => {
