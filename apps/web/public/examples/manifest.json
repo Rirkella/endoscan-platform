@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Downloadable real measured LINCS Level 5 examples. Values are copied unchanged from the committed curated demo signatures; only the tabular serialization differs.",
+  "examples": [
+    {
+      "file": "lincs-caffeic-acid-mcf7-a549.csv",
+      "format": "csv",
+      "demo_id": "demo_low_low",
+      "label": "Low signal (ER & AR)",
+      "n_genes": 978,
+      "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=QAIPRVGONGVQAS-DUXPYHPUSA-N; staged from GSE92742 gctx; CERAPP label=0.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
+      "source_file": "apps/web/src/demo-signatures/demo_low_low.json",
+      "source_sha256": "34dcd31778e23d6515ebf780d870d8a364ccdbc1dea6613bec04d9f9f8a5177b",
+      "file_sha256": "0967117a654aaacf78c64d2aa4b3f2af0d941ac4dc653d0302ffce4d31564e5b",
+      "transform": "gene/value rows sorted by gene symbol; numeric values unchanged"
+    },
+    {
+      "file": "lincs-cid-450-mcf7-a549.tsv",
+      "format": "tsv",
+      "demo_id": "demo_er_high",
+      "label": "ER-active example",
+      "n_genes": 978,
+      "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=VOXZDWNPVJITMN-UHFFFAOYSA-N; staged from GSE92742 gctx; CERAPP label=1.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
+      "source_file": "apps/web/src/demo-signatures/demo_er_high.json",
+      "source_sha256": "5088bb5e57160bda354097435107e3d08cec3ff677050cb67688971879b6cbbe",
+      "file_sha256": "0410c867820457b92e54cce16ed44f660a1ee74d72149379f323f80fc7d0170f",
+      "transform": "gene/value rows sorted by gene symbol; numeric values unchanged"
+    }
+  ]
+}

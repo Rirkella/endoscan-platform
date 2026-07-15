@@ -37,6 +37,12 @@ function defaultRoutes(): Record<string, Resolver> {
     }),
     "POST /api/analyze": { body: analyze },
     "POST /api/signatures/parse": { body: parseOk },
+    "GET /examples/lincs-caffeic-acid-mcf7-a549.csv": {
+      body: "gene,value\nA1BG,0.1\n",
+    },
+    "GET /examples/lincs-cid-450-mcf7-a549.tsv": {
+      body: "gene\tvalue\nA1BG\t0.1\n",
+    },
     // Default to the honest "unavailable" state so existing Explain tests are undisturbed;
     // the pathways test overrides this with the ok fixture.
     "POST /api/interpret/pathways": { body: pathwaysUnavailable },

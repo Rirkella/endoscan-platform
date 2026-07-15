@@ -62,6 +62,23 @@ describe("signature upload (source step)", () => {
     expect(calledParse).toBe(true); // validation is delegated to the server, always
   });
 
+  it("a real example CSV uses the same multipart parser path as a user upload", async () => {
+    renderApp("/analyze");
+    await screen.findByRole("heading", { name: /Analyze a gene-expression signature/i });
+    fireEvent.click(screen.getAllByRole("button", { name: /Use example file/i })[0]);
+    expect(await screen.findByText(/compatible endpoint models/i)).toBeInTheDocument();
+    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    const parseCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).includes("/signatures/parse"),
+    );
+    expect(parseCall).toBeDefined();
+    const form = parseCall?.[1]?.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    const uploaded = form.get("file") as File;
+    expect(uploaded.name).toBe("lincs-caffeic-acid-mcf7-a549.csv");
+    expect(form.get("format")).toBe("csv");
+  });
+
   it("JSON paste works as the secondary advanced path", async () => {
     renderApp("/analyze");
     await screen.findByRole("heading", { name: /Analyze a gene-expression signature/i });

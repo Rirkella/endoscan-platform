@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -59,6 +60,36 @@ def test_parse_file_uses_same_contract(client) -> None:
     )
     assert response.status_code == 200
     assert response.json()["compatible_endpoint_ids"]
+
+
+@pytest.mark.parametrize(
+    ("filename", "fmt", "demo_filename"),
+    [
+        ("lincs-caffeic-acid-mcf7-a549.csv", "csv", "demo_low_low.json"),
+        ("lincs-cid-450-mcf7-a549.tsv", "tsv", "demo_er_high.json"),
+    ],
+)
+def test_committed_real_example_file_round_trips_through_multipart(
+    client, filename, fmt, demo_filename
+) -> None:
+    examples = REPO_ROOT / "apps" / "web" / "public" / "examples"
+    path = examples / filename
+    manifest = json.loads((examples / "manifest.json").read_text(encoding="utf-8"))
+    metadata = next(item for item in manifest["examples"] if item["file"] == filename)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == metadata["file_sha256"]
+    response = client.post(
+        "/signatures/parse",
+        data={"format": fmt},
+        files={"file": (filename, path.read_bytes(), "text/plain")},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    source_path = REPO_ROOT / "apps" / "web" / "src" / "demo-signatures" / demo_filename
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == metadata["source_sha256"]
+    assert body["signature"] == source["signature"]
+    assert set(body["compatible_endpoint_ids"]) >= {"ER", "AR"}
+    assert metadata["provenance"].startswith("REAL measured demo example")
 
 
 def test_parse_incompatible_signature_is_200_with_per_endpoint_reasons(client) -> None:

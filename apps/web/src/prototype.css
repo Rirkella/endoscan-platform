@@ -646,6 +646,21 @@ h1 .planned-badge, h1 .mock-badge, h2 .planned-badge, h2 .mock-badge, h3 .planne
 .help-card p:last-child { margin-bottom: 0; }
 .help-card strong { color: #1b3038; }
 .upload-demo-link { margin-top: 12px; padding: 0; color: #285e50; border: 0; background: transparent; font-size: 11px; font-weight: 700; text-decoration: underline; }
+.example-files { display: grid; gap: 10px; margin-top: 20px; padding: 16px; border: 1px solid #d8e0de; border-radius: 6px; background: #f9fbfa; }
+.example-files > div h3 { margin: 0; color: #163d3c; font-size: 14px; }
+.example-files > div p { margin: 4px 0 0; color: #65767a; font-size: 11px; line-height: 1.45; }
+.example-file-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; padding: 12px; border: 1px solid #d8e0de; border-radius: 5px; background: #fff; }
+.example-file-card strong, .example-file-card small { display: block; }
+.example-file-card strong { color: #163d3c; font-size: 12px; }
+.example-file-card small { margin-top: 3px; color: #65767a; font-size: 10px; }
+.example-file-card > a { color: #285e50; font-size: 11px; font-weight: 700; }
+.example-file-card details { grid-column: 1 / -1; color: #65767a; font-size: 10px; line-height: 1.5; }
+.example-file-card details summary { cursor: pointer; color: #285e50; font-weight: 700; }
+.example-file-card details p { margin: 6px 0 0; }
+@media (max-width: 640px) {
+  .example-file-card { grid-template-columns: 1fr; align-items: start; }
+  .example-file-card details { grid-column: 1; }
+}
 .demo-panel { margin-top: 22px; }
 .demo-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .demo-panel-head h2 { margin: 0; font-size: 19px; }

@@ -13,6 +13,7 @@ import { api } from "../../api/client";
 import type { ParseResult } from "../../api/types";
 import { demoSignatures } from "../../demo-signatures";
 import { demoDisplay } from "../../demo-signatures/display";
+import { exampleSignatureFiles, type ExampleSignatureFile } from "../../example-files";
 import { MockBadge, PlannedBadge } from "../PlannedBadge";
 import { ErrorNotice } from "../ErrorNotice";
 import type { PreparedInput } from "../../pages/Analyze";
@@ -104,6 +105,7 @@ function UploadPanel({
   const [result, setResult] = useState<ParseResult | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [allowExtra, setAllowExtra] = useState(false);
+  const [exampleLoading, setExampleLoading] = useState<string | null>(null);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [pasteText, setPasteText] = useState("");
@@ -140,6 +142,28 @@ function UploadPanel({
       return;
     }
     void doParse(f, fmt);
+  }
+
+  async function loadExample(example: ExampleSignatureFile) {
+    setExampleLoading(example.id);
+    setError(null);
+    setResult(null);
+    setAllowExtra(false);
+    try {
+      const response = await fetch(example.url, { headers: { accept: "text/plain" } });
+      if (!response.ok) throw new Error("The example file could not be loaded.");
+      const blob = await response.blob();
+      const exampleFile = new File([blob], example.filename, {
+        type: example.format === "csv" ? "text/csv" : "text/tab-separated-values",
+      });
+      setFile(exampleFile);
+      setFormat(example.format);
+      await doParse(exampleFile, example.format);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setExampleLoading(null);
+    }
   }
 
   function useUploaded(r: ParseResult) {
@@ -192,6 +216,34 @@ function UploadPanel({
       <button type="button" className="upload-demo-link" onClick={onTryDemo}>
         or try a real demo instead
       </button>
+
+      <section className="example-files" aria-labelledby="example-files-title">
+        <div>
+          <h3 id="example-files-title">Use a real example file</h3>
+          <p>These measured examples are sent through the same multipart upload path as your file.</p>
+        </div>
+        {exampleSignatureFiles.map((example) => (
+          <article key={example.id} className="example-file-card">
+            <div>
+              <strong>{example.name}</strong>
+              <small>978 measured landmark-gene values</small>
+            </div>
+            <button
+              type="button"
+              className="button outline"
+              disabled={exampleLoading != null}
+              onClick={() => void loadExample(example)}
+            >
+              {exampleLoading === example.id ? "Loading…" : "Use example file"}
+            </button>
+            <a href={example.url} download={example.filename}>Download</a>
+            <details>
+              <summary>Provenance</summary>
+              <p>{example.provenance}</p>
+            </details>
+          </article>
+        ))}
+      </section>
 
       {parsing && <p className="upload-status">Checking the file…</p>}
       {error != null && <ErrorNotice error={error} />}
