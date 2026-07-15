@@ -299,9 +299,9 @@ export function Landing() {
           <p className="landing-kicker">Current scope</p>
           <h2>Clear about what works now.</h2>
           <p>
-            Today: measured transcriptomic signatures, compatibility checks, experimental ER and AR
-            models, contributing genes, pathway context, reference signatures and model limitations.
-            Molecule search, report export and additional endpoints are planned.
+            Today: measured transcriptomic signatures, verified compound search, compatibility checks,
+            experimental ER and AR models, contributing genes, pathway context, reference signatures
+            and model limitations. Report export and additional endpoints are planned.
           </p>
           <div className="final-cta-actions">
             <Link className="landing-primary-action" to="/analyze">
