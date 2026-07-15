@@ -95,6 +95,14 @@ endoscan/
 The FastAPI service contains no science; the Builder Agent reimplements no science — both call
 `endoscan_core`. See [`PROJECT_RULES.md`](PROJECT_RULES.md) for the binding architectural rules.
 
+### PubMed evidence configuration
+
+The optional supporting-literature layer uses the official NCBI PubMed E-utilities API. Set
+`NCBI_EMAIL` to a monitored contact address before starting the API; requests remain disabled with an
+honest `unavailable` state when it is absent. `NCBI_TOOL` defaults to `endoscan`. `NCBI_API_KEY` is
+optional and raises the enforced client limit from 3 to 10 requests per second. Results are cached and
+concurrent identical lookups are deduplicated in the API process.
+
 ## Model / data registry
 
 `registry/` holds **text metadata, versioned in git**: `registry/data/` (the `sources.yaml` allow-list,

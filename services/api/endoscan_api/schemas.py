@@ -49,6 +49,12 @@ __all__ = [
     "ExplorePoint",
     "HealthResponse",
     "LimitationsBlock",
+    "LiteratureArticle",
+    "LiteraturePathwayInput",
+    "LiteratureProvenance",
+    "LiteratureQueryRecord",
+    "LiteratureRequest",
+    "LiteratureResponse",
     "MetricsSummary",
     "ParsePreview",
     "ParseResult",
@@ -520,3 +526,92 @@ class PathwaysResponse(BaseModel):
     reason: str | None = None
     pathways: list[PathwayCard]
     method_block: PathwayMethodBlock | None = None
+
+
+# --- Supporting literature (official NCBI PubMed E-utilities) ------------------------
+
+
+class LiteraturePathwayInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pathway_id: str = Field(..., min_length=1, max_length=80)
+    name: str = Field(..., min_length=1, max_length=240)
+    genes: list[str] = Field(default_factory=list, max_length=20)
+
+
+class LiteratureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: str = Field(..., min_length=1, max_length=64)
+    genes: list[str] = Field(..., min_length=1, max_length=20)
+    pathways: list[LiteraturePathwayInput] = Field(default_factory=list, max_length=10)
+    compound: str | None = Field(default=None, max_length=240)
+    context: str | None = Field(default=None, max_length=240)
+    species: str = Field(default="Homo sapiens", min_length=2, max_length=120)
+    result_limit: int = Field(default=8, ge=1, le=20)
+
+    @field_validator("genes")
+    @classmethod
+    def _clean_genes(cls, genes: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for gene in genes:
+            value = gene.strip()
+            if not value or len(value) > 40:
+                raise ValueError("gene symbols must contain 1 to 40 characters")
+            if value not in cleaned:
+                cleaned.append(value)
+        if not cleaned:
+            raise ValueError("at least one contributing gene is required")
+        return cleaned
+
+
+class LiteratureQueryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: str
+    query: str
+    matched_genes: list[str]
+    matched_pathways: list[str]
+    pmids: list[str]
+
+
+class LiteratureArticle(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pmid: str
+    title: str
+    authors: list[str]
+    journal: str | None = None
+    year: str | None = None
+    abstract_excerpt: str | None = None
+    matched_genes: list[str]
+    matched_pathways: list[str]
+    evidence_category: str
+    relevance_reason: str
+    pubmed_url: str
+
+
+class LiteratureProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    database: str
+    eutils_base_url: str
+    retrieved_at: str
+    tool: str
+    email_configured: bool
+    api_key_used: bool
+    rate_limit_per_second: int
+    cache_hit: bool
+
+
+class LiteratureResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: str
+    endpoint_name: str
+    status: str  # ok | empty | unavailable | rate_limited | timeout
+    reason: str | None = None
+    articles: list[LiteratureArticle]
+    queries: list[LiteratureQueryRecord]
+    provenance: LiteratureProvenance

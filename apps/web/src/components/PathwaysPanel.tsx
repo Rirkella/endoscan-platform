@@ -5,8 +5,10 @@
 // "perturbed" genes, and a pathway is a clue for investigation, never proof the compound acts
 // through it. Empty / too-few / unavailable are all honest, plain-language states — never faked.
 
+import { useEffect } from "react";
+
 import { api } from "../api/client";
-import type { PathwayCard, Signature } from "../api/types";
+import type { PathwayCard, PathwaysResponse, Signature } from "../api/types";
 import { useAsync } from "../hooks/useAsync";
 import { ErrorNotice } from "./ErrorNotice";
 
@@ -66,11 +68,17 @@ function PathwayCardView({ card }: { card: PathwayCard }) {
 export function PathwaysPanel({
   endpointId,
   signature,
+  onResult,
 }: {
   endpointId: string;
   signature: Signature;
+  onResult?: (result: PathwaysResponse) => void;
 }) {
-  const state = useAsync(() => api.interpretPathways(endpointId, signature), [endpointId]);
+  const state = useAsync(() => api.interpretPathways(endpointId, signature), [endpointId, signature]);
+
+  useEffect(() => {
+    if (state.data) onResult?.(state.data);
+  }, [state.data, onResult]);
 
   return (
     <section className="mt-3 rounded-md border border-line bg-surface p-3" data-testid="pathways-panel">

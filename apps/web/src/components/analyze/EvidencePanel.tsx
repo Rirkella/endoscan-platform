@@ -10,12 +10,13 @@
 import { useState } from "react";
 
 import { api } from "../../api/client";
-import { predictionScore, type Signature } from "../../api/types";
+import { predictionScore, type PathwaysResponse, type Signature } from "../../api/types";
 import type { EndpointSignal } from "../../hooks/useAnalyze";
 import { useAsync } from "../../hooks/useAsync";
 import { ErrorNotice } from "../ErrorNotice";
 import { GeneContributionCards } from "../GeneContributionCards";
 import { LimitationsPanel } from "../LimitationsPanel";
+import { LiteraturePanel } from "../LiteraturePanel";
 import { PathwaysPanel } from "../PathwaysPanel";
 
 function endpointCodeClass(id: string): string {
@@ -104,6 +105,7 @@ function EndpointExplanation({
 }) {
   // Live explain call — availability is driven by the real API (a clean 501/503 renders honestly).
   const state = useAsync(() => api.explain(endpointId, signature), [endpointId]);
+  const [pathways, setPathways] = useState<PathwaysResponse | null>(null);
 
   return (
     <>
@@ -114,8 +116,21 @@ function EndpointExplanation({
       </section>
       {/* Pathways run off THIS endpoint's explain result (own honest empty/too-few/unavailable states). */}
       <section className="evidence-embed">
-        <PathwaysPanel endpointId={endpointId} signature={signature} />
+        <PathwaysPanel endpointId={endpointId} signature={signature} onResult={setPathways} />
       </section>
+      {state.data && pathways && (
+        <section className="evidence-embed">
+          <LiteraturePanel
+            endpointId={endpointId}
+            genes={state.data.top_contributors.slice(0, 8).map((item) => item.gene)}
+            pathways={pathways.pathways.slice(0, 5).map((item) => ({
+              pathway_id: item.pathway_id,
+              name: item.name,
+              genes: item.genes_influencing_result,
+            }))}
+          />
+        </section>
+      )}
     </>
   );
 }

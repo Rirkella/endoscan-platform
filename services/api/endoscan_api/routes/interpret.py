@@ -28,6 +28,13 @@ from endoscan_core.registry import get_endpoint
 
 from ..deps import get_repo_root
 from ..errors import error_payload
+from ..literature import (
+    LiteratureRateLimitError,
+    LiteratureService,
+    LiteratureTimeoutError,
+    LiteratureUnavailableError,
+    get_literature_service,
+)
 from ..pathways import (
     EVIDENCE_MAPPING,
     MIN_PATHWAY_OVERLAP,
@@ -38,6 +45,8 @@ from ..pathways import (
 )
 from ..reactome_store import ReactomeUnavailableError, load_reactome
 from ..schemas import (
+    LiteratureRequest,
+    LiteratureResponse,
     PathwayCard,
     PathwayMethodBlock,
     PathwaysRequest,
@@ -52,6 +61,42 @@ _INPUT_RULE = (
 )
 _TEST = "Fisher exact, one-sided (over-representation)"
 _CORRECTION = "Benjamini-Hochberg FDR (across the tested pathway family)"
+
+
+@router.post("/literature", response_model=LiteratureResponse)
+def interpret_literature(
+    body: LiteratureRequest,
+    repo_root: Path = Depends(get_repo_root),
+    service: LiteratureService = Depends(get_literature_service),
+) -> LiteratureResponse:
+    """Retrieve transparent supporting PubMed records; never make causal claims."""
+    entry = get_endpoint(body.endpoint_id, repo_root=repo_root)
+    endpoint_name = entry.biological_target
+    try:
+        return service.lookup(body, endpoint_name)
+    except LiteratureRateLimitError:
+        return service.failure_response(
+            body,
+            endpoint_name,
+            status="rate_limited",
+            reason="PubMed's request limit was reached. Please try again later.",
+        )
+    except LiteratureTimeoutError:
+        return service.failure_response(
+            body,
+            endpoint_name,
+            status="timeout",
+            reason="PubMed did not respond before the request deadline.",
+        )
+    except LiteratureUnavailableError as exc:
+        reason = (
+            "PubMed access is not configured for this deployment."
+            if "NCBI_EMAIL" in str(exc)
+            else "PubMed is temporarily unavailable."
+        )
+        return service.failure_response(
+            body, endpoint_name, status="unavailable", reason=reason
+        )
 
 
 @router.post("/pathways", response_model=PathwaysResponse)

@@ -14,6 +14,8 @@ import type {
   ExploreLocateResult,
   ExploreMap,
   Health,
+  LiteraturePathwayInput,
+  LiteratureResponse,
   ParseResult,
   PathwaysResponse,
   PredictionResult,
@@ -110,6 +112,21 @@ export const api = {
   // Biological pathways for an explain result (Reactome over-representation; honest empty states).
   interpretPathways: (endpoint_id: string, signature: Signature, allow_extra = false) =>
     postJson<PathwaysResponse>("/interpret/pathways", { endpoint_id, signature, allow_extra }),
+
+  interpretLiterature: (
+    endpoint_id: string,
+    genes: string[],
+    pathways: LiteraturePathwayInput[],
+    compound?: string,
+    context?: string,
+  ) =>
+    postJson<LiteratureResponse>("/interpret/literature", {
+      endpoint_id,
+      genes,
+      pathways,
+      compound,
+      context,
+    }),
 
   // Explore: the committed data-space (UMAP) map for a context (404 when not yet computed).
   exploreUmap: (context: string) =>

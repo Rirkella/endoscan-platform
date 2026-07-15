@@ -52,6 +52,27 @@ function defaultRoutes(): Record<string, Resolver> {
     // Default to the honest "unavailable" state so existing Explain tests are undisturbed;
     // the pathways test overrides this with the ok fixture.
     "POST /api/interpret/pathways": { body: pathwaysUnavailable },
+    "POST /api/interpret/literature": {
+      body: {
+        endpoint_id: "ER",
+        endpoint_name: "Estrogen receptor",
+        status: "unavailable",
+        reason: "PubMed access is not configured for this deployment.",
+        articles: [],
+        queries: [],
+        provenance: {
+          provider: "NCBI PubMed E-utilities",
+          database: "pubmed",
+          eutils_base_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils",
+          retrieved_at: "2026-07-15T00:00:00Z",
+          tool: "endoscan",
+          email_configured: false,
+          api_key_used: false,
+          rate_limit_per_second: 3,
+          cache_hit: false,
+        },
+      },
+    },
     "GET /api/explore/ER/umap": { body: exploreUmap },
     "GET /api/explore/AR/umap": { status: 404, body: explore404 },
     "POST /api/explore/locate": { body: exploreLocate },

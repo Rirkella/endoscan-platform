@@ -334,3 +334,55 @@ export interface PathwaysResponse {
   pathways: PathwayCard[];
   method_block: PathwayMethodBlock | null;
 }
+
+// --- Supporting literature (POST /interpret/literature) ---
+// PubMed records matched by explicit, recorded query templates. This is contextual evidence,
+// never proof that the submitted signature causes or uses a pathway.
+
+export interface LiteraturePathwayInput {
+  pathway_id: string;
+  name: string;
+  genes: string[];
+}
+
+export interface LiteratureQueryRecord {
+  category: string;
+  query: string;
+  matched_genes: string[];
+  matched_pathways: string[];
+  pmids: string[];
+}
+
+export interface LiteratureArticle {
+  pmid: string;
+  title: string;
+  authors: string[];
+  journal: string | null;
+  year: string | null;
+  abstract_excerpt: string | null;
+  matched_genes: string[];
+  matched_pathways: string[];
+  evidence_category: string;
+  relevance_reason: string;
+  pubmed_url: string;
+}
+
+export interface LiteratureResponse {
+  endpoint_id: string;
+  endpoint_name: string;
+  status: "ok" | "empty" | "unavailable" | "rate_limited" | "timeout";
+  reason: string | null;
+  articles: LiteratureArticle[];
+  queries: LiteratureQueryRecord[];
+  provenance: {
+    provider: string;
+    database: string;
+    eutils_base_url: string;
+    retrieved_at: string;
+    tool: string;
+    email_configured: boolean;
+    api_key_used: boolean;
+    rate_limit_per_second: number;
+    cache_hit: boolean;
+  };
+}
