@@ -1,22 +1,23 @@
-// Source step (ported from prototype-v2). Two entry modes:
-//   "My signature"  — REAL: upload a file (POST /signatures/parse, server is the one gene validator)
-//                     with an advanced "paste JSON" fallback and a bundled-demo picker.
-//   "Known molecule" — PLANNED/mock lookup. It lists illustrative example signatures but never
-//                     produces an analysis: EndoScan will not infer a result from molecule identity
-//                     alone, so this tab only nudges the user to upload a measured signature.
-// JSON paste is deliberately a secondary "advanced" action, never the primary visual entry point.
+// Source step. Three ways to start, in priority order:
+//   Upload   — REAL: upload a measured signature file (POST /signatures/parse; the server is the one
+//              gene validator). Raw JSON paste is demoted to a collapsed "Advanced" disclosure.
+//   Demo     — REAL: the bundled curated demo signatures. One click loads a real measured signature
+//              into the same validate → run pipeline as an upload (no JSON copying required).
+//   Catalogue— PREVIEW: a public-signature search is not connected to real data yet, so the search
+//              is disabled and clearly marked; it points users at the real demos instead. (A molecule
+//              name is never scored directly — EndoScan stays transcriptomics-first.)
 
 import { useState } from "react";
 
 import { EndoscanApiError, api } from "../../api/client";
 import type { ParseResult, Signature } from "../../api/types";
-import { type DemoSignature, demoSignatures } from "../../demo-signatures";
+import { demoSignatures } from "../../demo-signatures";
+import { demoDisplay } from "../../demo-signatures/display";
 import { MockBadge, PlannedBadge } from "../PlannedBadge";
 import { ErrorNotice } from "../ErrorNotice";
 import type { PreparedInput } from "../../pages/Analyze";
-import { MOCK_MEASURED_SIGNATURES } from "../../mock/prototypeMock";
 
-type Mode = "upload" | "molecule";
+type Mode = "upload" | "demo" | "catalogue";
 
 function formatOf(name: string): "json" | "csv" | null {
   const n = name.toLowerCase();
@@ -44,7 +45,6 @@ function parsePastedSignature(text: string): Signature {
 
 export function SourceStep({
   onPrepared,
-  endpointCount,
 }: {
   onPrepared: (input: PreparedInput) => void;
   endpointCount: number;
@@ -54,64 +54,50 @@ export function SourceStep({
   return (
     <section className="source-layout">
       <div className="source-main">
-        <div className="segmented" role="tablist" aria-label="Input source">
+        <div className="segmented segmented-3" role="tablist" aria-label="Input source">
           <button
             role="tab"
             aria-selected={mode === "upload"}
             className={mode === "upload" ? "selected" : ""}
             onClick={() => setMode("upload")}
           >
-            My signature
+            Upload
           </button>
           <button
             role="tab"
-            aria-selected={mode === "molecule"}
-            className={mode === "molecule" ? "selected" : ""}
-            onClick={() => setMode("molecule")}
+            aria-selected={mode === "demo"}
+            className={mode === "demo" ? "selected" : ""}
+            onClick={() => setMode("demo")}
           >
-            Known molecule
+            Try a demo
+          </button>
+          <button
+            role="tab"
+            aria-selected={mode === "catalogue"}
+            className={mode === "catalogue" ? "selected" : ""}
+            onClick={() => setMode("catalogue")}
+          >
+            Public catalogue
           </button>
         </div>
 
-        {mode === "upload" ? (
-          <UploadPanel onPrepared={onPrepared} onTryMolecule={() => setMode("molecule")} />
-        ) : (
-          <MoleculePanel onUpload={() => setMode("upload")} />
+        {mode === "upload" && (
+          <UploadPanel onPrepared={onPrepared} onTryDemo={() => setMode("demo")} />
         )}
+        {mode === "demo" && <DemoPanel onPrepared={onPrepared} />}
+        {mode === "catalogue" && <CataloguePanel onTryDemo={() => setMode("demo")} />}
       </div>
 
       <aside className="source-aside">
-        <p className="aside-label">How input works</p>
-        <ol>
-          <li>
-            <span>1</span>
-            <div>
-              <strong>Add biological response</strong>
-              <p>Upload measured values or paste a signature.</p>
-            </div>
-          </li>
-          <li>
-            <span>2</span>
-            <div>
-              <strong>Verify before analysis</strong>
-              <p>Review gene coverage and model compatibility.</p>
-            </div>
-          </li>
-          <li>
-            <span>3</span>
-            <div>
-              <strong>Inspect evidence</strong>
-              <p>See endpoint signals, genes, pathways and limitations.</p>
-            </div>
-          </li>
-        </ol>
-        <div className="honesty-note">
-          <span className="status-dot status-dot-blue" aria-hidden />
+        <p className="aside-label">Good to know</p>
+        <div className="help-card">
           <p>
-            <strong>Transcriptomics first</strong>
-            {endpointCount > 0
-              ? "Molecule identity is never scored directly — a measured signature is required."
-              : "Molecule identity is never scored directly."}
+            <strong>Start with a measured response.</strong> EndoScan analyzes gene-expression
+            signatures, so a molecule name or structure is never scored on its own.
+          </p>
+          <p>
+            <strong>No data of your own?</strong> Run one of the real demo signatures — it goes
+            through the same checks and models as an upload.
           </p>
         </div>
       </aside>
@@ -121,10 +107,10 @@ export function SourceStep({
 
 function UploadPanel({
   onPrepared,
-  onTryMolecule,
+  onTryDemo,
 }: {
   onPrepared: (input: PreparedInput) => void;
-  onTryMolecule: () => void;
+  onTryDemo: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [format, setFormat] = useState<"json" | "csv" | null>(null);
@@ -136,7 +122,6 @@ function UploadPanel({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
-  const [demoId, setDemoId] = useState("");
 
   async function doParse(
     f: File,
@@ -175,7 +160,7 @@ function UploadPanel({
     if (!r.signature) return;
     onPrepared({
       title: file?.name ?? "Uploaded signature",
-      subtitle: "Uploaded transcriptomic signature",
+      subtitle: "Uploaded gene-expression signature",
       kind: "file",
       signature: r.signature,
       parse: r,
@@ -198,19 +183,6 @@ function UploadPanel({
     }
   }
 
-  function pickDemo(id: string) {
-    setDemoId(id);
-    const demo = demoSignatures.find((d) => d.id === id);
-    if (!demo) return;
-    onPrepared({
-      title: demo.label,
-      subtitle: `Bundled demo signature — ${demo.provenance}`,
-      kind: "demo",
-      signature: demo.signature,
-      parse: null,
-    });
-  }
-
   const extrasError = error instanceof EndoscanApiError && /not in the schema/i.test(error.detail);
 
   return (
@@ -225,14 +197,16 @@ function UploadPanel({
         <div className="upload-symbol">CSV</div>
         <h2>Upload a signature file</h2>
         <p>
-          CSV or JSON containing landmark gene values. The server validates the gene set against the
-          model schema; coverage is reviewed next.
+          A CSV or JSON file of landmark-gene values. We check gene coverage against the model schema
+          next.
         </p>
         <span className="button primary upload-cta">{file ? file.name : "Choose data file"}</span>
-        <span className="upload-hint">Accepted schema: 978 landmark genes</span>
+        <button type="button" className="upload-demo-link" onClick={onTryDemo}>
+          or try a real demo instead
+        </button>
       </label>
 
-      {parsing && <p className="upload-status">Parsing…</p>}
+      {parsing && <p className="upload-status">Checking the file…</p>}
       {error != null && <ErrorNotice error={error} />}
 
       {extrasError && file && format && (
@@ -271,12 +245,12 @@ function UploadPanel({
               </strong>
               <span>landmark genes recognized</span>
             </div>
-            <span className="status-chip status-good">Aligned</span>
+            <span className="status-chip status-good">Ready</span>
           </div>
           <p className="coverage-summary-detail">
             {result.preview.n_matched} matched, {result.preview.n_missing} missing,{" "}
-            {result.preview.n_extra} extra (endpoint schema{" "}
-            <span className="mono">{result.schema_endpoint_id}</span>).
+            {result.preview.n_extra} extra (schema <span className="mono">{result.schema_endpoint_id}</span>
+            ).
           </p>
           <button className="button primary" onClick={() => useUploaded(result)}>
             Use this signature
@@ -286,26 +260,13 @@ function UploadPanel({
 
       <div className="advanced-row">
         <button onClick={() => setShowAdvanced((v) => !v)}>
-          {showAdvanced ? "Hide advanced input" : "Advanced: paste JSON or use a demo"}
+          {showAdvanced ? "Hide advanced input" : "Advanced: paste JSON"}
         </button>
-        <span>Accepted schema: 978 landmark genes</span>
+        <span>978 landmark genes</span>
       </div>
 
       {showAdvanced && (
         <div className="advanced-panel">
-          {demoSignatures.length > 0 && (
-            <label className="advanced-field">
-              <span>Bundled demo — real curated signature, illustrative only</span>
-              <select value={demoId} onChange={(e) => pickDemo(e.target.value)}>
-                <option value="">Select a bundled demo signature…</option>
-                {demoSignatures.map((d: DemoSignature) => (
-                  <option key={d.id} value={d.id}>
-                    {d.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
           <label className="advanced-field">
             <span>Signature (JSON: gene symbol → value, the 978 landmark genes)</span>
             <textarea
@@ -326,107 +287,124 @@ function UploadPanel({
           >
             Load signature
           </button>
-          <button className="button quiet" onClick={onTryMolecule}>
-            Try with a known molecule
-          </button>
         </div>
       )}
     </div>
   );
 }
 
-function MoleculePanel({ onUpload }: { onUpload: () => void }) {
-  const [query, setQuery] = useState("");
-  const [searched, setSearched] = useState(false);
+function DemoPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void }) {
+  if (demoSignatures.length === 0) {
+    return (
+      <div className="demo-panel">
+        <div className="no-signature">
+          <strong>No demo signatures are bundled in this build</strong>
+          <p>Upload a measured signature file, or paste one as JSON under the Upload tab.</p>
+        </div>
+      </div>
+    );
+  }
 
-  const normalized = query.trim().toLowerCase();
-  const visible = normalized
-    ? MOCK_MEASURED_SIGNATURES.filter(
-        (s) =>
-          s.molecule.toLowerCase().includes(normalized) ||
-          normalized.includes(s.molecule.toLowerCase()),
-      )
-    : MOCK_MEASURED_SIGNATURES;
+  function runDemo(id: string) {
+    const demo = demoSignatures.find((d) => d.id === id);
+    if (!demo) return;
+    const d = demoDisplay(demo);
+    onPrepared({
+      title: d.name,
+      subtitle: `Real demo signature · ${d.source}`,
+      kind: "demo",
+      signature: demo.signature,
+      parse: null,
+    });
+  }
 
+  return (
+    <div className="demo-panel">
+      <div className="demo-panel-head">
+        <div>
+          <h2>Try a demo analysis</h2>
+          <p>
+            These are real, curated measured signatures. Pick one and run it through the full
+            analysis — no data of your own required.
+          </p>
+        </div>
+        <span className="status-chip status-good">Real curated data</span>
+      </div>
+      <div className="demo-grid">
+        {demoSignatures.map((demo) => {
+          const d = demoDisplay(demo);
+          return (
+            <article className="demo-card" key={demo.id}>
+              <h3>{d.name}</h3>
+              <p className="demo-card-note">{d.demonstrates}</p>
+              <dl className="demo-card-meta">
+                <div>
+                  <dt>Context</dt>
+                  <dd>{d.context}</dd>
+                </div>
+                <div>
+                  <dt>Source</dt>
+                  <dd>{d.source}</dd>
+                </div>
+                <div>
+                  <dt>Identifier</dt>
+                  <dd className="mono">{d.identifier}</dd>
+                </div>
+              </dl>
+              <button className="button primary full-button" onClick={() => runDemo(demo.id)}>
+                Use this demo
+              </button>
+            </article>
+          );
+        })}
+      </div>
+      <p className="demo-panel-foot">
+        Real measured signatures (LINCS Level 5). They are illustrative examples, not a claim about
+        any specific product or exposure.
+      </p>
+    </div>
+  );
+}
+
+function CataloguePanel({ onTryDemo }: { onTryDemo: () => void }) {
   return (
     <div className="lookup-panel">
       <div className="lookup-heading">
         <div>
           <h2>
-            Find a measured signature <PlannedBadge />
+            Public signature catalogue <PlannedBadge label="Preview" />
           </h2>
-          <p>Search by name, PubChem CID or InChIKey.</p>
+          <p>Search public measured signatures by molecule, PubChem CID or InChIKey.</p>
         </div>
-        <span>Example data</span>
+        <span>Preview</span>
       </div>
 
-      <form
-        className="search-box"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSearched(true);
-        }}
-      >
+      <form className="search-box" onSubmit={(e) => e.preventDefault()}>
         <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Try Estradiol or Bisphenol A"
+          placeholder="Search is not connected yet"
           aria-label="Search molecule"
+          disabled
         />
-        <button className="button primary" type="submit">
+        <button className="button primary" type="submit" disabled>
           Search
         </button>
       </form>
 
-      {!searched ? (
-        <div className="quick-examples">
-          <span>Examples</span>
-          {["Estradiol", "Bisphenol A", "Tamoxifen"].map((name) => (
-            <button
-              key={name}
-              onClick={() => {
-                setQuery(name);
-                setSearched(true);
-              }}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="signature-results">
-          <div className="result-count">
-            <strong>
-              {visible.length} example {visible.length === 1 ? "signature" : "signatures"}{" "}
-              <MockBadge />
-            </strong>
-            <span>Illustrative catalogue — lookup is not connected to real data yet</span>
-          </div>
-          {visible.map((item) => (
-            <div key={item.id} className="signature-option signature-option-static">
-              <span className="signature-radio" aria-hidden />
-              <span>
-                <strong>{item.molecule}</strong>
-                <small>{item.context}</small>
-              </span>
-              <span>
-                <strong>{item.source}</strong>
-                <small>{item.coverage}</small>
-              </span>
-            </div>
-          ))}
-          <div className="no-signature">
-            <strong>Measured-signature lookup is a planned capability</strong>
-            <p>
-              These entries are examples only. EndoScan will not infer a result from a molecule name
-              or structure alone — upload a measured transcriptomic signature to run an analysis.
-            </p>
-            <button className="button primary" onClick={onUpload}>
-              Upload a signature instead
-            </button>
-          </div>
-        </div>
-      )}
+      <div className="no-signature">
+        <strong>Molecule search is not available yet <MockBadge label="Preview" /></strong>
+        <p>
+          A searchable catalogue that maps a molecule to its measured public signatures is planned,
+          but the underlying signature store and search API are not part of this build. Nothing here
+          returns real results, so the search is disabled rather than showing placeholder data.
+        </p>
+        <p>
+          To run a real analysis today, use one of the bundled demo signatures, or upload your own
+          measured signature.
+        </p>
+        <button className="button primary" onClick={onTryDemo}>
+          Try a real demo instead
+        </button>
+      </div>
     </div>
   );
 }

@@ -638,3 +638,100 @@ h1 .planned-badge, h1 .mock-badge, h2 .planned-badge, h2 .mock-badge, h3 .planne
 .reference-neighbors .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #1b3038; }
 .reference-context-select { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 12px; color: #52676d; }
 .reference-context-select select { height: 34px; padding: 0 9px; border: 1px solid #bdcac6; border-radius: 4px; background: #fff; font-size: 12px; }
+
+/* --- Analyze source: three-way segmented, prominent real-demo cards, compact help --- */
+.segmented-3 { grid-template-columns: repeat(3, 1fr); max-width: 560px; }
+.help-card { padding: 15px; border: 1px solid #d6dfdc; border-radius: 6px; background: #fff; }
+.help-card p { margin: 0 0 12px; color: #63757a; font-size: 11px; line-height: 1.55; }
+.help-card p:last-child { margin-bottom: 0; }
+.help-card strong { color: #1b3038; }
+.upload-demo-link { margin-top: 12px; padding: 0; color: #285e50; border: 0; background: transparent; font-size: 11px; font-weight: 700; text-decoration: underline; }
+.demo-panel { margin-top: 22px; }
+.demo-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.demo-panel-head h2 { margin: 0; font-size: 19px; }
+.demo-panel-head p { margin: 6px 0 0; max-width: 520px; color: #65767a; font-size: 12px; line-height: 1.5; }
+.demo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+.demo-card { display: flex; flex-direction: column; padding: 18px; border: 1px solid #d5dedb; border-top: 3px solid #7fb8a3; border-radius: 6px; background: #fff; }
+.demo-card h3 { margin: 0; font-size: 14px; }
+.demo-card-note { margin: 6px 0 14px; color: #647578; font-size: 11px; line-height: 1.5; }
+.demo-card-meta { display: grid; gap: 0; margin: 0 0 16px; }
+.demo-card-meta > div { display: grid; grid-template-columns: 74px 1fr; gap: 10px; padding: 6px 0; border-top: 1px solid #eef2f0; font-size: 10px; }
+.demo-card-meta dt { color: #798789; text-transform: uppercase; font-weight: 700; }
+.demo-card-meta dd { margin: 0; color: #33454a; word-break: break-word; }
+.demo-card .full-button { margin-top: auto; }
+.demo-panel-foot { margin-top: 16px; color: #7a888b; font-size: 10px; line-height: 1.5; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+@media (max-width: 780px) { .demo-grid { grid-template-columns: 1fr; } .segmented-3 { grid-template-columns: 1fr; } }
+
+/* --- Sidebar nav: the ported CSS styled <button>; we render <NavLink> (<a>), so mirror it here
+   with clearer active contrast, comfortable hit area, and a Preview tag for planned sections. --- */
+.primary-nav a { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; color: #b9ccc7; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 650; }
+.primary-nav a:hover { color: #fff; background: #204249; }
+.primary-nav a.nav-active { color: #fff; background: #2c6a5b; box-shadow: inset 3px 0 0 #87d0b1; }
+.primary-nav a .nav-preview { padding: 2px 6px; color: #d8b270; border: 1px solid #6c5a34; border-radius: 3px; background: rgb(216 178 112 / 12%); font-size: 8px; font-weight: 800; text-transform: uppercase; }
+
+/* --- Landing refinement: broader-toxicology restructure, tighter vertical rhythm (~30% less),
+   consistent section heads and CTA system. Overrides the ported prototype spacing where needed. --- */
+.landing-hero h1 { font-size: 54px; line-height: 1.04; max-width: 900px; }
+.landing-hero-disclaimer { margin: 26px 0 0; color: #a7c1b8; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.landing-section { padding: 74px 0; }
+.approach-inner { padding-top: 76px; padding-bottom: 76px; }
+.landing-value .landing-section { padding: 74px 0; }
+.landing-final-cta { min-height: 0; padding-top: 68px; padding-bottom: 68px; }
+.final-cta-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+.landing-section-head { max-width: 760px; margin-bottom: 42px; }
+.landing-section-head .landing-kicker { margin-bottom: 12px; color: #23705a; }
+.landing-section-head h2 { margin: 0; color: #183039; font-size: 34px; font-weight: 650; line-height: 1.12; }
+.landing-section-head-light .landing-kicker { color: #78c5a8; }
+.landing-section-head-light h2 { color: #f0f6f4; }
+.ways-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.ways-grid article { padding: 26px; border: 1px solid #d5dedb; border-top: 3px solid #2c705c; border-radius: 8px; background: #fff; }
+.ways-grid h3 { margin: 0 0 10px; font-size: 18px; }
+.ways-grid p { margin: 0 0 16px; color: #63757a; font-size: 13px; line-height: 1.6; }
+.why-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; }
+.why-grid article { display: grid; grid-template-columns: 30px 1fr; gap: 12px; }
+.why-grid span { display: grid; width: 28px; height: 28px; place-items: center; color: #17363a; border-radius: 50%; background: #83cdb0; font-size: 9px; font-weight: 850; }
+.why-grid p { margin: 0; color: #cdddd8; font-size: 12px; line-height: 1.6; }
+.how-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; margin: 0; padding: 0; list-style: none; }
+.how-steps li { display: grid; grid-template-columns: 30px 1fr; gap: 12px; }
+.how-steps span { display: grid; width: 28px; height: 28px; place-items: center; color: #fff; border-radius: 50%; background: #28735e; font-size: 11px; font-weight: 800; }
+.how-steps strong { display: block; font-size: 13px; color: #183039; }
+.how-steps p { margin: 5px 0 0; color: #67797b; font-size: 11px; line-height: 1.5; }
+.endpoints-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.endpoints-grid article { padding: 22px; border: 1px solid #c6d1cd; border-radius: 8px; background: #fff; }
+.endpoints-now { border-color: #a9cabc; box-shadow: 0 10px 26px rgb(30 57 51 / 6%); }
+.endpoints-tag { display: inline-block; margin: 0 0 12px; padding: 4px 8px; border-radius: 4px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+.endpoints-tag-now { color: #1f5e4e; background: #e6f4ee; }
+.endpoints-tag-planned { color: #776126; background: #fbf3d8; }
+.endpoints-grid h3 { margin: 0 0 8px; font-size: 15px; }
+.endpoints-grid p { margin: 0; color: #66787c; font-size: 11px; line-height: 1.55; }
+.landing-final-cta .landing-kicker { color: #6ec1a4; }
+@media (max-width: 900px) {
+  .landing-hero h1 { font-size: 42px; }
+  .ways-grid, .why-grid, .how-steps, .endpoints-grid { grid-template-columns: 1fr; gap: 18px; }
+  .landing-section-head h2 { font-size: 28px; }
+}
+
+/* --- Reference data redesign: summary row, endpoint-labelled legend, placement input, and a
+   collapsed technical/provenance disclosure so the main view stays plain and biological. --- */
+.reference-summary { display: flex; gap: 20px; margin-left: auto; flex-wrap: wrap; }
+.reference-summary > div { text-align: right; }
+.reference-summary strong { display: block; font-size: 18px; color: #163d3c; }
+.reference-summary span { display: block; color: #778588; font-size: 8px; text-transform: uppercase; letter-spacing: .03em; }
+.reference-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; color: #5f7377; font-size: 11px; }
+.legend-swatch { width: 10px; height: 10px; border-radius: 50%; }
+.reference-label-note { margin-top: 12px; padding: 12px; border-left: 3px solid #5a819c; background: #f7fafb; color: #5f7377; font-size: 10px; line-height: 1.55; }
+.reference-place { align-self: start; padding: 20px; border: 1px solid #d5dedb; border-radius: 6px; background: #fff; }
+.placement-input { margin-top: 6px; }
+.placement-field { display: block; margin-bottom: 12px; }
+.placement-field > span { display: block; margin-bottom: 6px; color: #657579; font-size: 10px; font-weight: 700; }
+.placement-field select, .placement-field input[type="file"] { width: 100%; padding: 8px; border: 1px solid #bdcac6; border-radius: 5px; background: #fff; font-size: 11px; }
+.placement-note { margin: 0 0 12px; color: #7a888b; font-size: 10px; line-height: 1.5; }
+.reference-result-block { margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e6e4; }
+.reference-advanced, .reference-technical { margin-top: 14px; padding: 12px; border: 1px solid #e0e6e4; border-radius: 6px; background: #f9fbfa; }
+.reference-advanced > summary, .reference-technical > summary { cursor: pointer; color: #285e50; font-size: 11px; font-weight: 750; }
+.reference-technical dl { margin: 10px 0 0; display: grid; gap: 8px; }
+.reference-technical dt { color: #33454a; font-size: 10px; font-weight: 750; }
+.reference-technical dd { margin: 2px 0 0; color: #647578; font-size: 10px; line-height: 1.5; }
+.reference-advanced .advanced-field { margin-top: 10px; }

@@ -10,16 +10,16 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 interface NavItem {
   to: string;
   label: string;
-  short: string;
+  preview?: boolean; // a planned/mock area — tagged in the nav so it never reads as fully working
 }
 
-// Sidebar workspace nav. Labels mirror the prototype; targets are the real routes. "Projects" is a
-// planned (mock) area — the screen itself is clearly marked, so the nav stays honest.
+// Sidebar workspace nav — meaningful product labels, real routes. Projects is a preview (no
+// persistence backend), tagged so it is never presented as an equal working section.
 const NAV: NavItem[] = [
-  { to: "/analyze", label: "Analyze", short: "01" },
-  { to: "/projects", label: "Projects", short: "02" },
-  { to: "/library", label: "Model library", short: "03" },
-  { to: "/explore", label: "Reference data", short: "04" },
+  { to: "/analyze", label: "Analyze" },
+  { to: "/library", label: "Model library" },
+  { to: "/explore", label: "Reference data" },
+  { to: "/projects", label: "Projects", preview: true },
 ];
 
 function currentLabel(pathname: string): string {
@@ -68,7 +68,7 @@ export default function App() {
               onClick={() => setMobileNav(false)}
             >
               <span>{item.label}</span>
-              <small>{item.short}</small>
+              {item.preview && <small className="nav-preview">Preview</small>}
             </NavLink>
           ))}
         </nav>

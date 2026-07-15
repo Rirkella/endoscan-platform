@@ -70,18 +70,18 @@ describe("Explore against REAL committed ER artifacts", () => {
     }),
   );
 
-  it("renders the real ER reference landscape (963 real compounds, real counts)", async () => {
+  it("renders the real ER reference landscape (963 real signatures, real counts)", async () => {
     renderApp("/explore");
     await screen.findByTestId("explore-scatter");
-    // Every real compound is a point — no fabrication, no truncation.
+    // Every real signature is a point — no fabrication, no truncation.
     expect(document.querySelectorAll("circle[data-compound]").length).toBe(realUmap.counts.n_total);
+    // Real summary count + correct entity naming.
+    expect(await screen.findByText(String(realUmap.counts.n_total))).toBeInTheDocument();
+    expect(screen.getAllByText(/reference signatures/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Labelled active for this endpoint/i)).toBeInTheDocument();
     expect(
-      await screen.findByText(new RegExp(`${realUmap.counts.n_total} training compounds`, "i")),
+      screen.getByRole("heading", { name: /Explore measured toxicology responses/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(new RegExp(`${realUmap.counts.n_active} active`, "i")),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Reference landscape/i })).toBeInTheDocument();
   });
 
   it("keeps biological language + hides technical jargon on REAL data", async () => {
@@ -95,7 +95,7 @@ describe("Explore against REAL committed ER artifacts", () => {
 
     // Visible layer: biological, and free of the banned technical strings.
     expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/close to/i);
-    expect(screen.getByText(/Compounds with similar expression patterns/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nearest reference signatures/i)).toBeInTheDocument();
     const visible = visibleText();
     for (const banned of ["978-d", "nearest neighbor", "k-th", "percentile", "in-domain", "out-of-domain"]) {
       expect(visible).not.toContain(banned);

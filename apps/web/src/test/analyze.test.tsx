@@ -30,7 +30,7 @@ describe("Analyze stepped flow + result overview", () => {
   it("source step renders with an enabled upload and JSON is only a secondary action", async () => {
     renderApp("/analyze");
     expect(
-      await screen.findByRole("heading", { name: /Analyze a transcriptomic response/i }),
+      await screen.findByRole("heading", { name: /Analyze a gene-expression signature/i }),
     ).toBeInTheDocument();
     // Upload is the primary entry and enabled (not a disabled placeholder).
     expect(screen.getByText(/Upload a signature file/i)).toBeInTheDocument();
@@ -65,6 +65,20 @@ describe("Analyze stepped flow + result overview", () => {
     expect(text).not.toMatch(/\bsafe\b/i);
     expect(text).not.toMatch(/low risk/i);
     expect(text).not.toMatch(/risk score/i);
+  });
+
+  it("a bundled REAL demo signature completes the whole Analyze flow (no JSON copying)", async () => {
+    renderApp("/analyze");
+    // Open the demo tab and run the first bundled real demo with one click.
+    fireEvent.click(await screen.findByRole("tab", { name: /Try a demo/i }));
+    const demoButtons = await screen.findAllByRole("button", { name: /Use this demo/i });
+    expect(demoButtons.length).toBeGreaterThan(0); // real demos are bundled
+    fireEvent.click(demoButtons[0]);
+    // Straight into validate → run → results, no raw JSON required.
+    const runBtn = await screen.findByRole("button", { name: /Run \d+ endpoint model/i });
+    await waitFor(() => expect(runBtn).not.toBeDisabled());
+    fireEvent.click(runBtn);
+    expect((await screen.findAllByRole("article")).length).toBe(2);
   });
 
   it("renders one card per API result — scales beyond ER/AR without a fixed layout", async () => {

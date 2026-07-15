@@ -78,10 +78,10 @@ export function ReferencePanel({
 
         {notComputed && (
           <div className="no-signature">
-            <strong>Reference landscape not yet available</strong>
+            <strong>No reference map for {context} yet</strong>
             <p>
-              No reference map has been built for {context} yet. This stays empty until a real map is
-              computed on the server — no placeholder points are shown.
+              This stays empty until a real map is computed on the server — no placeholder points
+              are shown.
             </p>
           </div>
         )}

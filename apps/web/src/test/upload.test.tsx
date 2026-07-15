@@ -22,14 +22,14 @@ describe("signature upload (source step)", () => {
 
   it("the upload zone is the primary, enabled entry point", async () => {
     renderApp("/analyze");
-    await screen.findByRole("heading", { name: /Analyze a transcriptomic response/i });
+    await screen.findByRole("heading", { name: /Analyze a gene-expression signature/i });
     expect(screen.getByText(/Upload a signature file/i)).toBeInTheDocument();
     expect(fileInput()).not.toBeDisabled();
   });
 
   it("upload CSV → real coverage preview → use → validate → run → overview cards", async () => {
     renderApp("/analyze");
-    await screen.findByRole("heading", { name: /Analyze a transcriptomic response/i });
+    await screen.findByRole("heading", { name: /Analyze a gene-expression signature/i });
     uploadCsv();
     // Preview reflects the real parse result (978/978 from the API, not fabricated).
     expect(await screen.findByText(/landmark genes recognized/i)).toBeInTheDocument();
@@ -44,7 +44,7 @@ describe("signature upload (source step)", () => {
   it("invalid upload shows the API's gene-level message VERBATIM", async () => {
     installFetchMock({ "POST /api/signatures/parse": { status: 422, body: parseInvalid } });
     renderApp("/analyze");
-    await screen.findByRole("heading", { name: /Analyze a transcriptomic response/i });
+    await screen.findByRole("heading", { name: /Analyze a gene-expression signature/i });
     uploadCsv();
     expect(await screen.findByText(parseInvalid.detail)).toBeInTheDocument();
   });
@@ -52,7 +52,7 @@ describe("signature upload (source step)", () => {
   it("the frontend does NO independent gene validation — it calls the API to validate", async () => {
     installFetchMock();
     renderApp("/analyze");
-    await screen.findByRole("heading", { name: /Analyze a transcriptomic response/i });
+    await screen.findByRole("heading", { name: /Analyze a gene-expression signature/i });
     uploadCsv();
     await screen.findByText(/landmark genes recognized/i);
     const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -64,7 +64,7 @@ describe("signature upload (source step)", () => {
 
   it("JSON paste works as the secondary advanced path", async () => {
     renderApp("/analyze");
-    await screen.findByRole("heading", { name: /Analyze a transcriptomic response/i });
+    await screen.findByRole("heading", { name: /Analyze a gene-expression signature/i });
     fireEvent.click(screen.getByRole("button", { name: /Advanced: paste JSON/i }));
     fireEvent.change(screen.getByLabelText(/Signature \(JSON/i), {
       target: { value: '{"A1BG":0.1}' },

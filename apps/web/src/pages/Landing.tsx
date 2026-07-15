@@ -1,8 +1,8 @@
-// Landing / product entry — ported from prototype-v2's LandingPage, rendered full-bleed OUTSIDE
-// the workspace shell. Copy follows the prototype; the only deviations from the prototype are
-// honesty-driven: every call-to-action navigates to a REAL route (/analyze, /library, /explore),
-// and prototype-only "mock results" phrasing is replaced with experimental/research-use framing.
-// No API data is used here.
+// Landing / product entry — rendered full-bleed OUTSIDE the workspace shell. Positions EndoScan as
+// a broad toxicology platform (ER/AR are the first available endpoints, not the whole identity),
+// in plain English, with a consistent CTA system (filled primary / outlined secondary / text links)
+// and every CTA pointing at a REAL route. No API data is used here; the endpoint result shown in
+// "More than a score" is an explicitly-labelled illustrative example.
 
 import { Link } from "react-router-dom";
 
@@ -24,156 +24,144 @@ export function Landing() {
             </span>
           </button>
           <nav aria-label="Landing navigation">
-            <a href="#approach">Approach</a>
+            <a href="#how">How it works</a>
             <a href="#evidence">Evidence</a>
-            <a href="#value">Value</a>
+            <a href="#endpoints">Endpoint library</a>
           </nav>
           <Link className="landing-nav-action" to="/analyze">
-            Open workspace
+            Start analysis
           </Link>
         </header>
 
         <div className="landing-hero-content">
-          <p className="landing-overline">Transcriptomics-first endocrine intelligence</p>
-          <h1>EndoScan</h1>
-          <h2>See biological signals earlier.</h2>
+          <p className="landing-overline">Mechanistic toxicology, powered by transcriptomics</p>
+          <h1>Understand toxicological effects — and the biology behind them.</h1>
           <p className="landing-hero-copy">
-            EndoScan turns measured gene-expression responses into explainable endocrine endpoint
-            signals, helping research teams prioritize what to investigate next.
+            Explore public toxicology data or analyze a measured gene-expression response across a
+            growing library of endpoint models. See the genes, pathways, reference compounds and
+            evidence behind every signal.
           </p>
           <div className="landing-actions">
             <Link className="landing-primary-action" to="/analyze">
-              Open the workspace
+              Start an analysis
             </Link>
-            <Link className="landing-secondary-action" to="/library">
-              Review model evidence
+            <Link className="landing-secondary-action" to="/explore">
+              Explore public data
             </Link>
           </div>
-          <div className="landing-hero-facts" aria-label="Platform principles">
-            <span>Measured biological response</span>
-            <span>Endpoint-level explanation</span>
-            <span>Auditable research context</span>
-          </div>
-        </div>
-
-        <div className="landing-visual-caption">
-          <span>01</span>
-          <p>
-            <strong>From cellular response to research evidence</strong>Transcriptomic signature,
-            model signal, genes, pathways and reference context.
-          </p>
+          <p className="landing-hero-disclaimer">Research use only · Experimental models</p>
         </div>
       </section>
 
-      <section className="landing-proof-strip" aria-label="Current platform scope">
-        <div>
-          <strong>978</strong>
-          <span>landmark genes checked before analysis</span>
+      {/* 2 — Two ways to use EndoScan */}
+      <section className="landing-section landing-ways">
+        <div className="landing-section-head">
+          <p className="landing-kicker">Two ways to use EndoScan</p>
+          <h2>Explore what&rsquo;s known, or analyze your own data.</h2>
         </div>
-        <div>
-          <strong>2</strong>
-          <span>registered endocrine endpoint models</span>
-        </div>
-        <div>
-          <strong>3</strong>
-          <span>evidence layers: genes, pathways, references</span>
-        </div>
-        <p>
-          <span className="proof-dot" />
-          Experimental research platform
-        </p>
-      </section>
-
-      <section className="landing-section landing-problem">
-        <div className="landing-section-intro">
-          <p className="landing-kicker">The opportunity</p>
-          <h2>Endocrine signals are expensive to discover late.</h2>
-          <p>
-            Research teams generate rich biological data, but turning that response into a traceable
-            screening hypothesis still requires fragmented tools and specialist interpretation.
-          </p>
-        </div>
-        <div className="landing-problem-grid">
+        <div className="ways-grid">
           <article>
-            <span>01</span>
-            <h3>Data arrives before clarity</h3>
+            <h3>Explore public toxicology data</h3>
             <p>
-              Gene-expression measurements contain signal, but raw matrices do not tell a team which
-              endocrine endpoints deserve attention.
+              Public toxicology evidence is fragmented across databases and studies. EndoScan brings
+              measured gene-expression responses together so you can see how experiments relate.
             </p>
+            <Link className="landing-text-action" to="/explore">
+              Explore reference data
+            </Link>
           </article>
           <article>
-            <span>02</span>
-            <h3>Black-box scores are not enough</h3>
+            <h3>Analyze your own transcriptomic response</h3>
             <p>
-              A number without genes, pathways, model status and applicability context is difficult
-              to trust or act on.
+              Upload a measured signature — or run a real demo — and see which endpoint signals it
+              shows, with the genes, pathways and limitations behind each result.
             </p>
-          </article>
-          <article>
-            <span>03</span>
-            <h3>Confirmation is resource-intensive</h3>
-            <p>
-              Teams need a defensible way to prioritize follow-up experiments, not a replacement for
-              those experiments.
-            </p>
+            <Link className="landing-text-action" to="/analyze">
+              Start an analysis
+            </Link>
           </article>
         </div>
       </section>
 
-      <section className="landing-approach" id="approach">
+      {/* 3 — Why transcriptomics */}
+      <section className="landing-approach" id="how">
         <div className="landing-section approach-inner">
-          <div className="landing-section-intro landing-section-intro-light">
-            <p className="landing-kicker">The EndoScan approach</p>
-            <h2>Start with what biology actually did.</h2>
-            <p>
-              EndoScan is built around measured transcriptomic response. Molecule identity can
-              retrieve a public signature, but it is never treated as the result itself.
-            </p>
+          <div className="landing-section-head landing-section-head-light">
+            <p className="landing-kicker">Why transcriptomics</p>
+            <h2>Start with the measured biological response.</h2>
           </div>
-          <div className="landing-flow" aria-label="EndoScan workflow">
+          <div className="why-grid">
             <article>
               <span>01</span>
-              <div>
-                <strong>Add response</strong>
-                <p>Upload a signature or select a measured public perturbation.</p>
-              </div>
+              <p>
+                A molecule&rsquo;s effect depends on dose, exposure time, cell type and biological
+                context — not on its name or structure alone.
+              </p>
             </article>
             <article>
               <span>02</span>
-              <div>
-                <strong>Verify fit</strong>
-                <p>Confirm columns, gene coverage and experimental context.</p>
-              </div>
+              <p>
+                Transcriptomics measures how thousands of genes respond at once, giving a broad
+                readout of what actually happened in the cells.
+              </p>
             </article>
             <article>
               <span>03</span>
-              <div>
-                <strong>Assess endpoints</strong>
-                <p>Run registered models with visible thresholds and status.</p>
-              </div>
-            </article>
-            <article>
-              <span>04</span>
-              <div>
-                <strong>Inspect evidence</strong>
-                <p>Review genes, pathways, neighbors and limitations.</p>
-              </div>
+              <p>
+                Those gene-expression changes can reveal several biological mechanisms and early
+                signals that a single number would hide.
+              </p>
             </article>
           </div>
-          <Link className="landing-inline-action button" to="/analyze">
-            Walk through the analysis flow
-          </Link>
         </div>
       </section>
 
+      {/* 4 — How it works */}
+      <section className="landing-section landing-how">
+        <div className="landing-section-head">
+          <p className="landing-kicker">How it works</p>
+          <h2>Four steps from signature to evidence.</h2>
+        </div>
+        <ol className="how-steps">
+          <li>
+            <span>1</span>
+            <div>
+              <strong>Add a signature</strong>
+              <p>Upload a measured response, or run a real demo.</p>
+            </div>
+          </li>
+          <li>
+            <span>2</span>
+            <div>
+              <strong>Check compatibility</strong>
+              <p>Confirm gene coverage against the model schema.</p>
+            </div>
+          </li>
+          <li>
+            <span>3</span>
+            <div>
+              <strong>Run endpoint models</strong>
+              <p>Score the signature across the available models.</p>
+            </div>
+          </li>
+          <li>
+            <span>4</span>
+            <div>
+              <strong>Review the evidence</strong>
+              <p>See genes, pathways, reference context and limitations.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      {/* 5 — More than a score (the strong result visual, moved up) */}
       <section className="landing-section landing-evidence" id="evidence">
         <div className="landing-evidence-copy">
-          <p className="landing-kicker">Explainability by design</p>
-          <h2>A result that can be questioned, traced and discussed.</h2>
+          <p className="landing-kicker">More than a score</p>
+          <h2>See the evidence behind every result.</h2>
           <p>
-            Every endpoint signal stays connected to the evidence behind it. The interface separates
-            the prediction for one signature from the quality and limitations of the model itself.
+            EndoScan is not a black-box score. Each endpoint result stays connected to the biology
+            behind it, so you can prioritize the right follow-up experiments.
           </p>
           <dl>
             <div>
@@ -181,26 +169,30 @@ export function Landing() {
               <dd>Score, decision threshold and model call</dd>
             </div>
             <div>
-              <dt>Explanation</dt>
-              <dd>Contributing genes and pathway context</dd>
+              <dt>Genes</dt>
+              <dd>The genes that contributed to the result</dd>
+            </div>
+            <div>
+              <dt>Pathways</dt>
+              <dd>Biological pathways among those genes</dd>
             </div>
             <div>
               <dt>Reference</dt>
-              <dd>Nearby measured signatures and provenance</dd>
+              <dd>Nearby measured signatures and context</dd>
             </div>
             <div>
-              <dt>Boundary</dt>
-              <dd>Model status and interpretation limitations</dd>
+              <dt>Limitations</dt>
+              <dd>Model status and what a result does not mean</dd>
             </div>
           </dl>
-          <Link className="landing-text-action" to="/library">
-            Open the model library
+          <Link className="button outline" to="/library">
+            View model library
           </Link>
         </div>
 
-        <div className="landing-product-preview" aria-label="Example EndoScan endpoint result">
+        <div className="landing-product-preview" aria-label="Illustrative EndoScan endpoint result">
           <div className="preview-topline">
-            <span>SCREENING RESULT / ER</span>
+            <span>EXAMPLE RESULT / ER</span>
             <b>Experimental model</b>
           </div>
           <div className="preview-summary">
@@ -220,7 +212,7 @@ export function Landing() {
               <strong>0.50</strong>
             </div>
             <div>
-              <span>Input coverage</span>
+              <span>Coverage</span>
               <strong>978 / 978</strong>
             </div>
             <div>
@@ -229,7 +221,7 @@ export function Landing() {
             </div>
           </div>
           <div className="preview-evidence">
-            <p>Top contributing evidence</p>
+            <p>Top contributing genes</p>
             <div>
               <strong>ESR1</strong>
               <span>
@@ -254,67 +246,77 @@ export function Landing() {
           </div>
           <div className="preview-footnote">
             <span />
-            Illustrative example. Pattern similarity is a research signal, not a safety conclusion.
+            Illustrative example. A signal is a research lead, not a safety conclusion.
           </div>
         </div>
       </section>
 
-      <section className="landing-value" id="value">
+      {/* 6 — Growing endpoint library */}
+      <section className="landing-value" id="endpoints">
         <div className="landing-section">
-          <div className="landing-value-heading">
-            <p className="landing-kicker">Why it matters</p>
-            <h2>More informed prioritization before costly confirmation.</h2>
+          <div className="landing-section-head">
+            <p className="landing-kicker">A growing endpoint library</p>
+            <h2>Endocrine endpoints today, more toxicology to come.</h2>
           </div>
-          <div className="landing-value-grid">
-            <article>
-              <span>For research teams</span>
-              <h3>One coherent path from signature to hypothesis</h3>
+          <div className="endpoints-grid">
+            <article className="endpoints-now">
+              <p className="endpoints-tag endpoints-tag-now">Available today</p>
+              <h3>Experimental ER and AR models</h3>
               <p>
-                Reduce manual switching between data validation, model output and biological context.
+                Estrogen-receptor and androgen-receptor activity — the first endpoint models. Both
+                are experimental.
               </p>
             </article>
             <article>
-              <span>For R&amp;D programs</span>
-              <h3>Prioritize candidates with visible reasoning</h3>
+              <p className="endpoints-tag endpoints-tag-planned">Planned</p>
+              <h3>Additional toxicology endpoints</h3>
               <p>
-                Use endpoint evidence to decide which compounds and experiments deserve deeper
-                investigation.
+                Areas such as liver stress, DNA damage, oxidative stress and more are planned. The
+                platform does not cover them yet.
               </p>
             </article>
             <article>
-              <span>For platform growth</span>
-              <h3>A reusable framework for additional endpoints</h3>
+              <p className="endpoints-tag endpoints-tag-planned">Future scaling</p>
+              <h3>Agent-assisted dataset &amp; model pipeline</h3>
               <p>
-                Registered models, evidence contracts and reproducible reports create a foundation
-                that can expand.
+                A future workflow to help discover datasets, build training sets and register new
+                endpoint models with recorded provenance.
               </p>
             </article>
           </div>
           <div className="landing-positioning">
             <p>
-              <strong>EndoScan does not replace experimental validation.</strong> It is designed to
-              make the path toward validation more focused, explainable and reproducible.
+              <strong>EndoScan does not replace experimental validation.</strong> It helps you decide
+              which compounds and experiments deserve a closer look.
             </p>
-            <Link to="/explore">Explore reference data</Link>
           </div>
         </div>
       </section>
 
+      {/* 7 — Current scope + final CTA */}
       <section className="landing-final-cta">
         <div>
-          <p className="landing-kicker">Experimental research platform</p>
-          <h2>Follow a biological response from input to evidence.</h2>
+          <p className="landing-kicker">Current scope</p>
+          <h2>Clear about what works now.</h2>
           <p>
-            Work through the analysis flow on your own transcriptomic signature. Endpoint models are
-            experimental and for research use only.
+            Today: measured transcriptomic signatures, compatibility checks, experimental ER and AR
+            models, contributing genes, pathway context, reference signatures and model limitations.
+            Molecule search, report export and additional endpoints are planned.
           </p>
+          <div className="final-cta-actions">
+            <Link className="landing-primary-action" to="/analyze">
+              Start an analysis
+            </Link>
+            <Link className="landing-secondary-action" to="/explore">
+              Explore public data
+            </Link>
+          </div>
         </div>
-        <Link to="/analyze">Enter the EndoScan workspace</Link>
       </section>
 
       <footer className="landing-footer">
-        <span>EndoScan / transcriptomics-first endocrine pre-screening</span>
-        <span>Experimental research use only</span>
+        <span>EndoScan / transcriptomics-first toxicology pre-screening</span>
+        <span>Research use only · experimental models</span>
       </footer>
     </div>
   );

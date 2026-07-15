@@ -137,12 +137,9 @@ export function ValidationStep({
       <aside className="compatibility-panel">
         <p className="eyebrow">Model compatibility</p>
         <h2>
-          {endpoints.length} endpoint{endpoints.length === 1 ? "" : "s"} registered
+          {endpoints.length} available endpoint model{endpoints.length === 1 ? "" : "s"}
         </h2>
-        <p>
-          These are the endpoint models currently registered in the API. The gene set is validated
-          per endpoint when the models run.
-        </p>
+        <p>Each model checks the gene set against its own schema when it runs.</p>
         <div className="compatibility-list">
           {endpoints.map((e) => (
             <div key={e.endpoint_id}>
@@ -153,7 +150,7 @@ export function ValidationStep({
                 <strong>{e.biological_target}</strong>
                 <small>{e.status}</small>
               </span>
-              <b>Registered</b>
+              <b>Available</b>
             </div>
           ))}
         </div>

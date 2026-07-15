@@ -83,11 +83,11 @@ export function Analyze() {
           <div className="page-header">
             <div>
               <p className="eyebrow">New screening</p>
-              <h1>Analyze a transcriptomic response</h1>
+              <h1>Analyze a gene-expression signature</h1>
               <p className="page-copy">
-                Start from your own signature or a measured public perturbation. Every input is
-                checked before a model is run. Results are experimental endpoint signals, not
-                clinical, regulatory or safety conclusions.
+                Start with a measured biological response — upload your own or try a real demo. Every
+                input is checked before the models run. Results are experimental endpoint signals,
+                not clinical, regulatory or safety conclusions.
               </p>
             </div>
           </div>
@@ -128,7 +128,7 @@ export function Analyze() {
 function WorkflowSteps({ current }: { current: AnalyzeStep }) {
   const order: AnalyzeStep[] = ["source", "validate", "running", "result"];
   const currentIndex = order.indexOf(current);
-  const labels = ["Add input", "Check fit", "Run models", "Review result"];
+  const labels = ["Add input", "Check compatibility", "Run models", "Review results"];
   return (
     <ol className="workflow-steps" aria-label="Analysis progress">
       {labels.map((label, index) => (
@@ -150,11 +150,8 @@ function RunningStep({ title }: { title: string }) {
         <span />
       </div>
       <p className="eyebrow">Analysis in progress</p>
-      <h2>Assessing {title}</h2>
-      <p>
-        Running the registered endpoint models on your signature and preparing per-endpoint
-        evidence.
-      </p>
+      <h2>Analyzing {title}</h2>
+      <p>Running the available endpoint models on your signature and preparing the evidence.</p>
     </section>
   );
 }
