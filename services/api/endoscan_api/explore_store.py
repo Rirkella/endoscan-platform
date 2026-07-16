@@ -37,6 +37,10 @@ class ExploreContextError(ValueError):
     """A reference context identifier is invalid and cannot be resolved safely."""
 
 
+class ExploreReferenceNotFoundError(LookupError):
+    """A compound id is not represented by a row in the selected support matrix."""
+
+
 def _explore_dir(repo_root: Path, context: str) -> Path:
     """Resolve a bounded context identifier beneath the repository's models directory."""
     if not _CONTEXT_ID.fullmatch(context):
@@ -77,3 +81,28 @@ def load_support(repo_root: Path, context: str, manifest: dict) -> np.ndarray:
             f"explore support artifact for {context!r} does not match its manifest hash"
         )
     return np.load(io.BytesIO(raw))
+
+
+def load_reference_row(
+    repo_root: Path, context: str, compound_id: str
+) -> tuple[dict, dict, np.ndarray, int]:
+    """Return the exact manifest-aligned support row for one reference compound.
+
+    Row order is authoritative from ``manifest.compound_ids`` and feature order is
+    authoritative from ``manifest.feature_names``. UMAP coordinates are never read here.
+    """
+    umap_doc, manifest = load_map(repo_root, context)
+    support = load_support(repo_root, context, manifest)
+    compound_ids = [str(value) for value in manifest.get("compound_ids", [])]
+    feature_names = [str(value) for value in manifest.get("feature_names", [])]
+    if support.shape != (len(compound_ids), len(feature_names)):
+        raise ExploreArtifactCorruptError(
+            f"explore support shape for {context!r} does not match manifest row/feature order"
+        )
+    try:
+        row_index = compound_ids.index(compound_id)
+    except ValueError as exc:
+        raise ExploreReferenceNotFoundError(
+            f"compound {compound_id!r} is not present in the {context!r} reference support matrix"
+        ) from exc
+    return umap_doc, manifest, support[row_index].copy(), row_index

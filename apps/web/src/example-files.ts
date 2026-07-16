@@ -18,7 +18,7 @@ export interface ExampleSignatureFile {
   provenance: string;
   file_sha256: string;
   source_signature_sha256: string;
-  note: string;
+  expected_result: string;
 }
 
 export const exampleSignatureFiles = manifest.examples as ExampleSignatureFile[];

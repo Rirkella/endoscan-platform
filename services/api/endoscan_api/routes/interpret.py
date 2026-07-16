@@ -174,7 +174,7 @@ def interpret_literature(
         )
     except LiteratureUnavailableError as exc:
         reason = (
-            "PubMed access is not configured for this deployment."
+            "PubMed integration is not configured."
             if "NCBI_EMAIL" in str(exc)
             else "PubMed is temporarily unavailable."
         )

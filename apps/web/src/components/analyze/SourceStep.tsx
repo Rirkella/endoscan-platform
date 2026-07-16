@@ -82,6 +82,9 @@ function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => voi
   const [allowExtra, setAllowExtra] = useState(false);
   const [valueType, setValueType] = useState<InputValueType>("raw_expression");
   const [exampleLoading, setExampleLoading] = useState<string | null>(null);
+  const [selectedExample, setSelectedExample] = useState<ExampleSignatureFile | null>(null);
+  const [referenceDescription, setReferenceDescription] = useState("");
+  const [conditionDescription, setConditionDescription] = useState("");
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [pasteText, setPasteText] = useState("");
@@ -119,6 +122,7 @@ function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => voi
     setError(null);
     setAllowExtra(false);
     setFile(f);
+    setSelectedExample(null);
     if (!f) return;
     const fmt = formatOf(f.name);
     setFormat(fmt);
@@ -142,6 +146,7 @@ function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => voi
         type: example.format === "csv" ? "text/csv" : "text/tab-separated-values",
       });
       setFile(exampleFile);
+      setSelectedExample(example);
       setFormat(example.format);
       setValueType("differential_zscore");
       await doParse(exampleFile, example.format, { input_value_type: "differential_zscore" });
@@ -162,6 +167,20 @@ function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => voi
       parse: r,
       allowExtra,
       inputValueType: r.input_value_type,
+      profileType: selectedExample ? "Cross-cell aggregated measured example" : "User-supplied signature",
+      valueTypeLabel: selectedExample ? "LINCS Level 5 differential z-score" : undefined,
+      referenceComparison: selectedExample
+        ? "Calculated during LINCS processing using the corresponding experimental controls. EndoScan receives the resulting differential signature and does not choose the control."
+        : referenceDescription.trim() || undefined,
+      experimentalContext: selectedExample
+        ? `${selectedExample.dataset} ${selectedExample.processing_level} · ${selectedExample.cell_lines.join(" + ")}`
+        : conditionDescription.trim() || undefined,
+      cellModels: selectedExample
+        ? ["MCF7 — human breast cancer cell line", "A549 — human lung adenocarcinoma cell line"]
+        : undefined,
+      aggregationWarning: selectedExample
+        ? "This reference profile combines responses from multiple cell models. Opposing cell-specific changes may be attenuated in the aggregate."
+        : undefined,
     });
   }
 
@@ -207,6 +226,25 @@ function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => voi
         </select>
         <small>This determines whether increased and decreased pathway response can be interpreted.</small>
       </label>
+      <div className="upload-context-fields">
+        <label>
+          <span>Reference/control description</span>
+          <input
+            value={referenceDescription}
+            onChange={(event) => setReferenceDescription(event.target.value)}
+            placeholder="How were differential values calculated?"
+          />
+          <small>Required for user-supplied differential values. EndoScan does not select a control.</small>
+        </label>
+        <label>
+          <span>Sample or condition</span>
+          <input
+            value={conditionDescription}
+            onChange={(event) => setConditionDescription(event.target.value)}
+            placeholder="Cell model, dose, exposure time, perturbation (when known)"
+          />
+        </label>
+      </div>
       <label className="upload-panel">
         <input
           type="file"
@@ -235,7 +273,7 @@ function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => voi
               <small>PubChem CID {example.pubchem_cid} · {example.format.toUpperCase()}</small>
               <small>{example.dataset} {example.processing_level} · {example.cell_lines.join(" + ")}</small>
               <small>{example.dose ?? "Dose unavailable"} · {example.timepoint ?? "Time unavailable"}</small>
-              <p>{example.note}</p>
+              <span className="example-result-badge">{example.expected_result}</span>
             </div>
             <button
               type="button"
@@ -303,7 +341,14 @@ function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => voi
             {result.preview.n_detected} genes parsed. Each registered endpoint was checked against
             its own feature schema.
           </p>
-          <button className="button primary" disabled={!result.compatible_endpoint_ids.length} onClick={() => useUploaded(result)}>
+          <button
+            className="button primary"
+            disabled={
+              !result.compatible_endpoint_ids.length ||
+              (!selectedExample && valueType !== "raw_expression" && !referenceDescription.trim())
+            }
+            onClick={() => useUploaded(result)}
+          >
             Use this signature
           </button>
         </div>
@@ -363,7 +408,9 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
       const response = await api.searchCatalogue(query.trim());
       setResults(response.results);
       if (response.results.length === 1 && response.results[0].signatures.length === 1) {
-        setSelected(response.results[0].signatures[0].signature_id);
+        setSelected(`catalogue:${response.results[0].signatures[0].signature_id}`);
+      } else if (response.results.length === 1 && response.results[0].reference_contexts.length) {
+        setSelected(`reference:${response.results[0].reference_contexts[0]}:${response.results[0].compound_id}`);
       }
     } catch (e) {
       setError(e);
@@ -377,7 +424,37 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
     setPreparing(true);
     setError(null);
     try {
-      const detail = await api.getCatalogueSignature(selected);
+      if (selected.startsWith("reference:")) {
+        const [, context, compoundId] = selected.split(":", 3);
+        const detail = await api.getReferenceSignature(context, compoundId);
+        const referenceFile = new File([JSON.stringify(detail.signature)], `${compoundId}.json`, {
+          type: "application/json",
+        });
+        const parsed = await api.parseSignature({
+          file: referenceFile,
+          format: "json",
+          input_value_type: detail.value_type,
+        });
+        if (!parsed.signature) throw new Error("The aggregated reference profile could not be prepared.");
+        onPrepared({
+          title: detail.preferred_name ?? detail.compound_id,
+          subtitle: `${detail.profile_type} · ${detail.context} reference set`,
+          kind: "reference",
+          signature: parsed.signature,
+          parse: parsed,
+          allowExtra: false,
+          inputValueType: parsed.input_value_type,
+          profileType: detail.profile_type,
+          valueTypeLabel: detail.value_type_label,
+          referenceComparison: detail.reference_comparison,
+          aggregationWarning: detail.aggregate_pathway_warning,
+          cellModels: detail.cell_models,
+          experimentalContext: detail.aggregation_description,
+        });
+        return;
+      }
+      const signatureId = selected.replace(/^catalogue:/, "");
+      const detail = await api.getCatalogueSignature(signatureId);
       const catalogueFile = new File(
         [JSON.stringify(detail.signature)],
         `${detail.signature_id}.json`,
@@ -397,6 +474,11 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
         parse: parsed,
         allowExtra: false,
         inputValueType: parsed.input_value_type,
+        valueTypeLabel: "LINCS Level 5 differential z-score",
+        referenceComparison: "Calculated during LINCS processing using the corresponding experimental controls. EndoScan receives the resulting differential signature and does not choose the control.",
+        profileType: "Cross-cell aggregated measured signature",
+        aggregationWarning: "This reference profile combines responses from multiple cell models. Opposing cell-specific changes may be attenuated in the aggregate.",
+        cellModels: ["MCF7 — human breast cancer cell line", "A549 — human lung adenocarcinoma cell line"],
       });
     } catch (e) {
       setError(e);
@@ -409,8 +491,8 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
     <div className="lookup-panel">
       <div className="lookup-heading">
         <div>
-          <h2>Public measured-signature catalogue</h2>
-          <p>Search public measured signatures by molecule, PubChem CID or InChIKey.</p>
+          <h2>Public compound and reference catalogue</h2>
+          <p>Search known identities and compatible reference profiles by name, synonym, PubChem CID, InChIKey, SMILES or source ID.</p>
         </div>
         <span>Verified identities</span>
       </div>
@@ -432,7 +514,7 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
       </form>
       <div className="quick-examples" aria-label="Example searches">
         <span>Try:</span>
-        {["Caffeic Acid", "Closantel", "2335"].map((example) => (
+        {["Caffeic Acid", "Bisphenol A", "Closantel", "2335"].map((example) => (
           <button key={example} type="button" onClick={() => setQuery(example)}>
             {example}
           </button>
@@ -443,55 +525,54 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
       {results != null && (
         <section className="signature-results" aria-live="polite">
           <div className="result-count">
-            <strong>{results.length} verified compound{results.length === 1 ? "" : "s"}</strong>
-            <span>Only records with measured signatures are shown</span>
+            <strong>{results.length} canonical compound result{results.length === 1 ? "" : "s"}</strong>
+            <span>Reference profiles, source identities and measured signatures share one index</span>
           </div>
           {results.length === 0 ? (
             <div className="no-signature">
-              <strong>No measured public signature found</strong>
+              <strong>No known compound identity or compatible reference record matched</strong>
               <p>
-                Try a different name, PubChem CID or full InChIKey. No inferred molecule-only
-                result is substituted.
+                Try a different name, synonym, PubChem CID, full InChIKey, SMILES or source ID.
+                No inferred molecule-only result is substituted.
               </p>
             </div>
           ) : (
             <div className="catalogue-results">
-              {results.flatMap((compound) =>
-                compound.signatures.map((signature) => (
+              {results.map((compound) => {
+                const signature = compound.signatures[0];
+                const choice = signature
+                  ? `catalogue:${signature.signature_id}`
+                  : compound.reference_contexts.length
+                    ? `reference:${compound.reference_contexts[0]}:${compound.compound_id}`
+                    : null;
+                return (
                   <label
-                    className={`catalogue-result ${selected === signature.signature_id ? "catalogue-result-selected" : ""}`}
-                    key={signature.signature_id}
+                    className={`catalogue-result ${choice && selected === choice ? "catalogue-result-selected" : ""} ${choice ? "" : "catalogue-result-unavailable"}`}
+                    key={compound.compound_id}
                   >
-                    <input
-                      type="radio"
-                      name="catalogue-signature"
-                      checked={selected === signature.signature_id}
-                      onChange={() => setSelected(signature.signature_id)}
-                    />
-                    <span className="signature-radio" aria-hidden="true" />
+                    {choice ? <input type="radio" name="catalogue-signature" checked={selected === choice} onChange={() => setSelected(choice)} /> : <span />}
+                    {choice && <span className="signature-radio" aria-hidden="true" />}
                     <span className="catalogue-result-main">
                       <strong>{compound.preferred_name}</strong>
-                      <small>
-                        PubChem CID {compound.pubchem_cid} · {compound.compound_id}
-                      </small>
-                      <span className="mono catalogue-smiles">{compound.isomeric_smiles}</span>
+                      <small>{compound.pubchem_cid ? `PubChem CID ${compound.pubchem_cid} · ` : ""}{compound.compound_id}</small>
+                      {compound.isomeric_smiles && <span className="mono catalogue-smiles">{compound.isomeric_smiles}</span>}
                     </span>
                     <span className="catalogue-result-meta">
-                      <strong>{signature.dataset} · {signature.accession}</strong>
-                      <small>{signature.processing_level} · {signature.n_genes} genes</small>
-                      <small>{signature.cell_lines.join(" + ")} · dose/time not available</small>
-                      <small>{signature.aggregation}</small>
+                      <strong>{compound.availability_status}</strong>
+                      {signature && <small>{signature.dataset} · {signature.processing_level} · {signature.n_genes} genes</small>}
+                      {!signature && compound.reference_contexts.length > 0 && <small>Available in {compound.reference_contexts.join(" and ")} reference map</small>}
+                      {compound.availability_reason && <small>{compound.availability_reason}</small>}
                     </span>
                   </label>
-                )),
-              )}
+                );
+              })}
               <button
                 type="button"
                 className="button primary use-signature"
                 disabled={!selected || preparing}
                 onClick={() => void useSignature()}
               >
-                {preparing ? "Checking measured signature…" : "Use selected measured signature"}
+                {preparing ? "Checking measured signature…" : selected?.startsWith("reference:") ? "Use selected aggregated reference profile" : "Use selected measured signature"}
               </button>
             </div>
           )}

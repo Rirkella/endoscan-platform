@@ -74,13 +74,13 @@ describe("Reference data view", () => {
 
     // Placement and neighbour similarity are described separately.
     expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/Approximate position/i);
-    expect(screen.getByText(/Nearest reference signatures/i)).toBeInTheDocument();
+    expect(screen.getByText(/Most similar full gene-expression profiles/i)).toBeInTheDocument();
     expect(screen.getByText(/does not prove the same effect/i)).toBeInTheDocument();
-    expect(screen.getByText(/very similar response/i)).toBeInTheDocument();
-    expect(screen.getByText(/rank 1 of 7/i)).toBeInTheDocument();
+    expect(screen.queryByText(/very similar response|rank 1 of 7/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/ER: Active/i).length).toBeGreaterThan(0);
     // The scatter highlights the similar signatures + shows an approximate marker.
     await waitFor(() =>
-      expect(document.querySelectorAll("circle[data-neighbor='true']").length).toBe(3),
+      expect(document.querySelectorAll("circle[data-neighbor='true']").length).toBe(5),
     );
     expect(screen.getByTestId("explore-approx-marker")).toBeInTheDocument();
   });
@@ -113,7 +113,8 @@ describe("Reference data view", () => {
     expect(tech).toMatch(/42\.0%/);
     expect(tech.toLowerCase()).toContain("separate from neighbour similarity ranks");
     expect(screen.getByTestId("similarity-readout")).not.toHaveTextContent(/close/i);
-    expect(screen.getByTestId("similar-compounds")).toHaveTextContent(/very similar response/i);
+    expect(screen.getByTestId("similar-compounds")).toHaveTextContent(/Caffeic Acid/i);
+    expect(screen.getByTestId("similar-compounds")).not.toHaveTextContent(/very similar response/i);
   });
 
   it("a not-computed context shows an honest empty state with ZERO fabricated points", async () => {

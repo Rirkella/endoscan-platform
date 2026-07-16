@@ -23,6 +23,37 @@ import predictER from "./fixtures/predict_ER.json";
 
 type Resolver = { status?: number; body: unknown } | ((body: unknown) => { status?: number; body: unknown });
 
+function referenceSignature(path: string) {
+  const [, , , context = "ER", , encodedCompound = "CID_00"] = path.split("/");
+  const compoundId = decodeURIComponent(encodedCompound);
+  return {
+    context,
+    compound_id: compoundId,
+    preferred_name: compoundId === "CID_00" ? "Caffeic Acid" : null,
+    pubchem_cid: compoundId === "CID_00" ? 689043 : null,
+    endpoint_label: "active",
+    profile_type: "Aggregated reference profile",
+    full_vector_available: true,
+    underlying_condition_available: false,
+    underlying_conditions: [],
+    value_type: "differential_zscore",
+    value_type_label: "LINCS Level 5 differential z-score",
+    reference_comparison: "Calculated during LINCS processing using the corresponding experimental controls. EndoScan receives the resulting differential signature and does not choose the control.",
+    source_dataset: "LINCS L1000, Level 5",
+    cell_models: ["MCF7 — human breast cancer cell line", "A549 — human lung adenocarcinoma cell line"],
+    aggregation_description: "This profile combines the measured experimental conditions selected for this compound when the reference map was built.",
+    aggregate_pathway_warning: "This reference profile combines responses from multiple cell models. Opposing cell-specific changes may be attenuated in the aggregate.",
+    feature_names: ["A1BG"],
+    signature: { A1BG: 0.1 },
+    n_genes: 1,
+    support_row_index: 0,
+    support_sha256: "fixture-support-sha256",
+    source_key: "curated/ER/signatures.parquet",
+    source_sha256: "fixture-source-sha256",
+    provenance: { vector_origin: "support.npy exact row; never reconstructed from UMAP coordinates" },
+  };
+}
+
 // Default routes wired to the captured real-API fixtures. Tests override any key.
 function defaultRoutes(): Record<string, Resolver> {
   return {
@@ -104,7 +135,7 @@ function defaultRoutes(): Record<string, Resolver> {
         endpoint_id: "ER",
         endpoint_name: "Estrogen receptor",
         status: "unavailable",
-        reason: "PubMed access is not configured for this deployment.",
+        reason: "PubMed integration is not configured.",
         articles: [],
         queries: [],
         provenance: {
@@ -134,7 +165,10 @@ export function installFetchMock(overrides: Record<string, Resolver> = {}): void
       const raw = typeof input === "string" ? input : input.toString();
       const path = new URL(raw, "http://localhost").pathname;
       const method = (init?.method ?? "GET").toUpperCase();
-      const entry = routes[`${method} ${path}`];
+      const entry = routes[`${method} ${path}`]
+        ?? (method === "GET" && /^\/api\/explore\/(ER|AR)\/signatures\//.test(path)
+          ? { body: referenceSignature(path) }
+          : undefined);
       if (!entry) return new Response(JSON.stringify({ detail: "unmocked" }), { status: 500 });
       // Only JSON string bodies are parsed for resolvers; multipart FormData (uploads) is ignored.
       const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;

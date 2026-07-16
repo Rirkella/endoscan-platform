@@ -16,6 +16,7 @@ from .explore_store import (
     ExploreArtifactCorruptError,
     ExploreArtifactUnavailableError,
     ExploreContextError,
+    ExploreReferenceNotFoundError,
 )
 from .parsing import MalformedUploadError
 from .schemas import ErrorResponse
@@ -145,6 +146,21 @@ def register_exception_handlers(app: FastAPI) -> None:
                 request,
                 "invalid_reference_context",
                 "The reference context identifier is invalid.",
+            ),
+        )
+
+    @app.exception_handler(ExploreReferenceNotFoundError)
+    async def _reference_profile_not_found(
+        request: Request, exc: ExploreReferenceNotFoundError
+    ) -> JSONResponse:
+        logger.info("reference profile not found request_id=%s error=%s", request_id(request), exc)
+        return JSONResponse(
+            status_code=404,
+            content=error_payload(
+                request,
+                "reference_profile_not_found",
+                "No compatible measured transcriptomic signature is available in this "
+                "reference set.",
             ),
         )
 

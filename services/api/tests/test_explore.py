@@ -9,6 +9,7 @@ Two clients:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -72,6 +73,56 @@ def test_umap_serves_points_counts_and_manifest(fixture_client: TestClient) -> N
         "full_signature_id",
     }
     assert pt["preferred_name"] is None  # fixture has no versioned identity catalogue
+    assert pt["full_vector_available"] is True
+    assert pt["profile_type"] == "Aggregated reference profile"
+
+
+def test_reference_signature_is_exact_manifest_aligned_support_row(
+    fixture_client: TestClient,
+) -> None:
+    manifest = json.loads((FIXTURES / "manifest.json").read_text())
+    support = np.load(FIXTURES / "support.npy")
+    compound_id = manifest["compound_ids"][1]
+    response = fixture_client.get(f"/explore/FIX/signatures/{compound_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["support_row_index"] == 1
+    assert body["feature_names"] == manifest["feature_names"]
+    assert list(body["signature"]) == manifest["feature_names"]
+    assert list(body["signature"].values()) == support[1].tolist()
+    expected_support_sha = hashlib.sha256((FIXTURES / "support.npy").read_bytes()).hexdigest()
+    assert body["support_sha256"] == expected_support_sha
+    assert body["full_vector_available"] is True
+    assert body["underlying_condition_available"] is False
+    assert "x" not in body and "y" not in body
+    assert "never reconstructed from UMAP" in body["provenance"]["vector_origin"]
+
+
+def test_real_reference_vector_survives_multipart_parse_and_analyze(
+    client: TestClient, repo_root: Path
+) -> None:
+    manifest = json.loads((repo_root / "models/ER/explore/manifest.json").read_text())
+    support = np.load(repo_root / "models/ER/explore/support.npy")
+    compound_id = manifest["compound_ids"][0]
+    retrieved = client.get(f"/explore/ER/signatures/{compound_id}").json()
+    assert list(retrieved["signature"].values()) == support[0].tolist()
+    parsed = client.post(
+        "/signatures/parse",
+        files={"file": ("reference.json", json.dumps(retrieved["signature"]), "application/json")},
+        data={"format": "json", "input_value_type": "differential_zscore"},
+    )
+    assert parsed.status_code == 200
+    assert parsed.json()["signature"] == retrieved["signature"]
+    analyzed = client.post(
+        "/analyze",
+        json={
+            "signature": parsed.json()["signature"],
+            "endpoint_ids": ["ER"],
+            "input_value_type": "differential_zscore",
+        },
+    )
+    assert analyzed.status_code == 200
+    assert analyzed.json()["summary"]["succeeded"] == 1
 
 
 def test_missing_map_is_honest_404(client: TestClient) -> None:

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { BiologicalResponsePanel } from "../components/analyze/BiologicalResponsePanel";
@@ -29,14 +29,20 @@ describe("Full-signature transcriptomic response", () => {
     expect(screen.queryByText(/Pathways enriched among genes with increased expression/i)).not.toBeInTheDocument();
   });
 
-  it("shows a concise low-response state and hides unsupported tendencies", async () => {
+  it("shows the exact pathway threshold state while retaining signed gene values", async () => {
     installFetchMock({
       "POST /api/interpret/biological-response": {
         body: { status: "ok", reason: null, input_value_type: "differential_zscore", increased_pathways: [{ pathway_id: "x", name: "Unsupported", direction: "increased", enrichment_statistic: 1, p_value: 0.5, q_value: 1, leading_edge_genes: [], pathway_size_in_universe: 10, statistically_supported: false }], decreased_pathways: [], tested_gene_universe: [], method_block: null },
       },
     });
     render(<BiologicalResponsePanel signature={{ ESR1: 0.1 }} inputValueType="differential_zscore" />);
-    expect(await screen.findByText(/No strong differential response was detected relative to the matched experimental control/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No Reactome pathway reached the current FDR threshold for this signature/i)).toBeInTheDocument();
+    expect(screen.getByText(/Individual genes may still show differential values/i)).toBeInTheDocument();
     expect(screen.queryByText("Unsupported")).not.toBeInTheDocument();
+    expect(screen.queryByText(/no gene response|normal range|biologically inactive/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Gene-level response/i }));
+    expect(screen.getByText(/Strongest positive differential values/i)).toBeInTheDocument();
+    expect(screen.getByText("+0.1000")).toBeInTheDocument();
+    expect(screen.getByText(/not gene-level statistical significance/i)).toBeInTheDocument();
   });
 });

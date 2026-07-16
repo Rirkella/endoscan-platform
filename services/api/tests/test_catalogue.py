@@ -42,6 +42,23 @@ def test_search_supports_pubchem_cid_and_full_inchikey(client: TestClient) -> No
     assert [item["pubchem_cid"] for item in by_key["results"]] == [2335]
 
 
+def test_bpa_audit_is_identity_known_without_a_compatible_support_profile(
+    client: TestClient,
+) -> None:
+    exact_key = "IISBACLAFKSPIT-UHFFFAOYSA-N"
+    for query in ("Bisphenol A", "BPA", exact_key, "6623"):
+        body = client.get("/catalogue/v1/compounds", params={"query": query}).json()
+        hit = next(item for item in body["results"] if item["compound_id"] == exact_key)
+        assert hit["preferred_name"] == "Bisphenol A"
+        assert hit["pubchem_cid"] == 6623
+        assert hit["availability_status"] == "Identity known — no compatible measured signature"
+        assert hit["signatures"] == []
+        assert hit["reference_contexts"] == []
+        assert "CERAPP" in hit["availability_reason"]
+        assert "LINCS" in hit["availability_reason"]
+    assert client.get(f"/explore/ER/signatures/{exact_key}").status_code == 404
+
+
 def test_search_never_substitutes_unmeasured_or_fabricated_results(client: TestClient) -> None:
     response = client.get("/catalogue/v1/compounds", params={"query": "not-a-real-record"})
     assert response.status_code == 200

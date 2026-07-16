@@ -28,7 +28,7 @@ describe("Supporting literature", () => {
     expect(document.body.textContent).not.toMatch(/Measured expression evidence|Direct gene|Why this article|Closed evidence|raw query|cache|retrieved/i);
   });
 
-  it.each([["empty", "No PubMed records matched"], ["rate_limited", "request limit was reached"], ["timeout", "did not respond"]])("renders the %s state without fabricated cards", async (status, reason) => {
+  it.each([["empty", "No eligible directly traceable articles were found."], ["rate_limited", "PubMed is temporarily unavailable."], ["unavailable", "PubMed integration is not configured."]])("renders the %s state without fabricated cards", async (status, reason) => {
     installFetchMock({ "POST /api/interpret/literature": { body: { ...BASE, status, reason, articles: [] } } });
     renderPanel();
     await screen.findByText(reason);

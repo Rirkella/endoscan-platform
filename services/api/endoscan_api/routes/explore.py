@@ -24,7 +24,7 @@ from endoscan_core.inference import align_signature
 
 from ..catalogue_store import identity_index
 from ..deps import get_repo_root
-from ..explore_store import load_map, load_support
+from ..explore_store import load_map, load_reference_row, load_support
 from ..schemas import (
     ExploreCounts,
     ExploreDomain,
@@ -34,6 +34,7 @@ from ..schemas import (
     ExploreMapResponse,
     ExploreNeighbor,
     ExplorePoint,
+    ExploreReferenceSignature,
 )
 
 router = APIRouter(tags=["explore"])
@@ -50,6 +51,9 @@ def _identity_fields(compound_id: str, identities: dict, _source_key: str) -> di
             "source_dataset": "LINCS L1000",
             "experimental_contexts": [],
             "full_signature_id": None,
+            "full_vector_available": True,
+            "underlying_condition_available": False,
+            "profile_type": "Aggregated reference profile",
         }
     signature = compound.signatures[0] if compound.signatures else None
     contexts = []
@@ -63,6 +67,9 @@ def _identity_fields(compound_id: str, identities: dict, _source_key: str) -> di
         "source_dataset": signature.dataset if signature else "LINCS L1000",
         "experimental_contexts": contexts,
         "full_signature_id": signature.signature_id if signature else None,
+        "full_vector_available": True,
+        "underlying_condition_available": False,
+        "profile_type": "Aggregated reference profile",
     }
 
 
@@ -180,7 +187,6 @@ def explore_locate(
             "y": float(np.mean([n.y for n in neighbors])),
         }
     )
-
     # DEFINED domain metric: the query's distance to its k-th nearest training neighbour,
     # read against the training reference distribution. No in-/out-of-domain boolean.
     query_kth = float(distances[distinct_order[k - 1]])
@@ -200,4 +206,70 @@ def explore_locate(
             training_reference_quantiles=domain.get("quantiles", {}),
             percentile=percentile,
         ),
+    )
+
+
+@router.get(
+    "/explore/{context}/signatures/{compound_id}",
+    response_model=ExploreReferenceSignature,
+)
+def explore_reference_signature(
+    context: str,
+    compound_id: str,
+    repo_root: Path = Depends(get_repo_root),
+) -> ExploreReferenceSignature:
+    """Retrieve one exact support row; never infer a vector from its 2-D map coordinates."""
+    umap_doc, manifest, row, row_index = load_reference_row(repo_root, context, compound_id)
+    feature_names = [str(value) for value in manifest["feature_names"]]
+    signature = {
+        gene: float(value)
+        for gene, value in zip(feature_names, row.tolist(), strict=True)
+    }
+    point = next(
+        (item for item in umap_doc.get("points", []) if item.get("compound_id") == compound_id),
+        {},
+    )
+    identity = identity_index(repo_root).get(compound_id)
+    aggregation = manifest.get("aggregation", {})
+    return ExploreReferenceSignature(
+        context=context,
+        compound_id=compound_id,
+        preferred_name=identity.preferred_name if identity else None,
+        pubchem_cid=identity.pubchem_cid if identity else None,
+        endpoint_label=point.get("label"),
+        underlying_condition_available=False,
+        underlying_conditions=[],
+        reference_comparison=(
+            "Calculated during LINCS processing using the corresponding experimental controls. "
+            "EndoScan receives the resulting differential signature and does not choose "
+            "the control."
+        ),
+        cell_models=[
+            "MCF7 — human breast cancer cell line",
+            "A549 — human lung adenocarcinoma cell line",
+        ],
+        aggregation_description=(
+            "This profile combines the measured experimental conditions selected for this "
+            "compound when the reference map was built."
+        ),
+        aggregate_pathway_warning=(
+            "This reference profile combines responses from multiple cell models. Opposing "
+            "cell-specific changes may be attenuated in the aggregate."
+        ),
+        feature_names=feature_names,
+        signature=signature,
+        n_genes=len(feature_names),
+        support_row_index=row_index,
+        support_sha256=str(manifest["support_sha256"]),
+        source_key=str(manifest.get("source", {}).get("key", "")),
+        source_sha256=str(manifest.get("source", {}).get("sha256", "")),
+        provenance={
+            "point_definition": manifest.get("point_definition"),
+            "aggregation": aggregation,
+            "support_row_contract": (
+                "manifest.compound_ids[row] aligned to support.npy[row] and "
+                "manifest.feature_names[column]"
+            ),
+            "vector_origin": "original support matrix; never reconstructed from UMAP coordinates",
+        },
     )

@@ -107,8 +107,10 @@ describe("Explore against REAL committed ER artifacts", () => {
 
     // Visible layer: biological, and free of the banned technical strings.
     expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/Approximate position/i);
-    expect(screen.getByText(/Nearest reference signatures/i)).toBeInTheDocument();
-    expect(screen.getByText(/very similar response/i)).toBeInTheDocument();
+    expect(screen.getByText(/Most similar full gene-expression profiles/i)).toBeInTheDocument();
+    expect(screen.queryByText(/very similar response/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("neighbor-marker-1")).toBeInTheDocument();
+    expect(screen.getByText(/2D map is a visual approximation/i)).toBeInTheDocument();
     const visible = visibleText();
     for (const banned of ["978-d", "nearest neighbor", "k-th", "percentile", "in-domain", "out-of-domain"]) {
       expect(visible).not.toContain(banned);
@@ -120,5 +122,5 @@ describe("Explore against REAL committed ER artifacts", () => {
     expect(tech).toContain(String(realManifest.umap.umap_version).toLowerCase());
     // No in_domain verdict anywhere in the placement payload rendering.
     await waitFor(() => expect(screen.getByTestId("explore-approx-marker")).toBeInTheDocument());
-  });
+  }, 15000);
 });

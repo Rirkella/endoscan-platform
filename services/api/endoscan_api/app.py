@@ -127,6 +127,16 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.state.explain_available = any(item["available"] for item in capabilities.values())
     app.state.endpoints_loaded = loaded
     app.state.cors_origins = _cors_origins()
+    ncbi_email = (os.environ.get("NCBI_EMAIL") or "").strip()
+    app.state.pubmed_capability = {
+        "configured": bool(ncbi_email),
+        "available": bool(ncbi_email),
+        "reason": (
+            None
+            if ncbi_email
+            else "NCBI_EMAIL is not configured; PubMed integration is disabled."
+        ),
+    }
 
     # CORS: explicit allow-list only (browser cross-origin fetch fix for the local demo /
     # deployment). Minimal surface — the GET/POST routes + OPTIONS preflight, Content-Type only,

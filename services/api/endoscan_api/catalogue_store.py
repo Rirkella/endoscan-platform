@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 from functools import lru_cache
@@ -18,6 +19,8 @@ from .schemas import (
 
 CATALOGUE_RELPATH = Path("data/catalogue/v1/catalogue.json")
 IDENTITIES_RELPATH = Path("data/identities/v1/reference_identities.json")
+SOURCE_OVERRIDES_RELPATH = Path("data/identities/v1/source_identity_overrides.json")
+CERAPP_RELPATH = Path("data/staged/er/cerapp.csv")
 SIGNATURE_ROOT = Path("apps/web/src/demo-signatures")
 
 
@@ -191,20 +194,154 @@ def _compound(compound: _CompoundRecord) -> CatalogueCompound:
     )
 
 
+def _reference_contexts(repo_root: Path) -> dict[str, list[str]]:
+    contexts: dict[str, list[str]] = {}
+    models_root = repo_root / "models"
+    if not models_root.is_dir():
+        return contexts
+    for manifest_path in models_root.glob("*/explore/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            context = manifest_path.parent.parent.name
+            for compound_id in manifest.get("compound_ids", []):
+                contexts.setdefault(str(compound_id), []).append(context)
+        except (OSError, ValueError, TypeError):
+            continue
+    return contexts
+
+
+def _availability(reference_contexts: list[str], measured: CatalogueCompound | None) -> str:
+    if measured and measured.signatures:
+        return "Reference profile available"
+    if reference_contexts:
+        return "Reference profile available"
+    return "Identity known — no compatible measured signature"
+
+
+@lru_cache(maxsize=4)
+def unified_identity_index(repo_root: Path) -> dict[str, CatalogueCompound]:
+    """Canonical search index shared by catalogue search and reference-map identity joins."""
+    root = repo_root.resolve()
+    measured = (
+        {compound.compound_id: _compound(compound) for compound in load_catalogue(root).compounds}
+        if (root / CATALOGUE_RELPATH).is_file()
+        else {}
+    )
+    contexts = _reference_contexts(root)
+    output: dict[str, CatalogueCompound] = {}
+
+    if (root / IDENTITIES_RELPATH).is_file():
+        for item in load_reference_identities(root).identities:
+            linked = measured.get(item.inchikey)
+            resolved = item.resolution_status == "resolved" and item.pubchem_cid is not None
+            reference_contexts = sorted(contexts.get(item.inchikey, []))
+            output[item.inchikey] = CatalogueCompound(
+                compound_id=item.inchikey,
+                preferred_name=(
+                    item.preferred_name
+                    or item.iupac_name
+                    or (f"PubChem CID {item.pubchem_cid}" if item.pubchem_cid else item.inchikey)
+                ),
+                aliases=item.synonyms,
+                pubchem_cid=item.pubchem_cid,
+                iupac_name=item.iupac_name,
+                canonical_smiles=item.canonical_smiles,
+                isomeric_smiles=item.isomeric_smiles,
+                signatures=linked.signatures if linked else [],
+                availability_status=(
+                    _availability(reference_contexts, linked)
+                    if resolved
+                    else "Identity unresolved"
+                ),
+                availability_reason=(
+                    None
+                    if resolved
+                    else (
+                        "The reference profile exists, but no reviewed public compound identity "
+                        "was resolved."
+                    )
+                ),
+                reference_contexts=reference_contexts,
+            )
+
+    # Source records make the search domain wider than the four curated examples. They never
+    # manufacture a transcriptomic vector: only support-manifest membership grants Analyze.
+    cerapp_path = root / CERAPP_RELPATH
+    if cerapp_path.is_file():
+        with cerapp_path.open(encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                inchikey = str(row.get("inchikey") or "").strip().upper()
+                source_id = str(row.get("casrn") or "").strip()
+                if not inchikey:
+                    continue
+                existing = output.get(inchikey)
+                if existing is not None:
+                    if source_id and source_id not in existing.source_compound_ids:
+                        existing.source_compound_ids.append(source_id)
+                    continue
+                output[inchikey] = CatalogueCompound(
+                    compound_id=inchikey,
+                    preferred_name=inchikey,
+                    aliases=[source_id] if source_id else [],
+                    pubchem_cid=None,
+                    signatures=[],
+                    availability_status="Identity unresolved",
+                    availability_reason=(
+                        "Present in the CERAPP endpoint source data, but no reviewed public "
+                        "identity "
+                        "or compatible committed LINCS support profile is available."
+                    ),
+                    source_compound_ids=[source_id] if source_id else [],
+                )
+
+    override_path = root / SOURCE_OVERRIDES_RELPATH
+    if override_path.is_file():
+        try:
+            records = json.loads(override_path.read_text(encoding="utf-8"))["records"]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise CatalogueCorruptError("the reviewed source identity override is invalid") from exc
+        for record in records:
+            inchikey = str(record["inchikey"]).upper()
+            reference_contexts = sorted(contexts.get(inchikey, []))
+            output[inchikey] = CatalogueCompound(
+                compound_id=inchikey,
+                preferred_name=str(record["preferred_name"]),
+                aliases=[str(value) for value in record.get("synonyms", [])],
+                pubchem_cid=int(record["pubchem_cid"]),
+                iupac_name=record.get("iupac_name"),
+                canonical_smiles=record.get("canonical_smiles"),
+                isomeric_smiles=record.get("canonical_smiles"),
+                signatures=measured.get(inchikey).signatures if inchikey in measured else [],
+                availability_status=_availability(reference_contexts, measured.get(inchikey)),
+                availability_reason=str(record.get("audit_reason") or "") or None,
+                reference_contexts=reference_contexts,
+                source_compound_ids=[str(value) for value in record.get("source_compound_ids", [])],
+            )
+
+    for inchikey, linked in measured.items():
+        output.setdefault(inchikey, linked)
+    return output
+
+
 def search_compounds(
     repo_root: Path, query: str, limit: int
 ) -> tuple[_CatalogueDoc, list[CatalogueCompound]]:
-    doc = load_catalogue(repo_root.resolve())
+    root = repo_root.resolve()
+    doc = load_catalogue(root)
     needle = query.strip().casefold()
-    ranked: list[tuple[int, str, _CompoundRecord]] = []
-    for compound in doc.compounds:
+    ranked: list[tuple[int, str, CatalogueCompound]] = []
+    for compound in unified_identity_index(root).values():
         terms = [
             compound.preferred_name,
             compound.compound_id,
-            str(compound.pubchem_cid),
-            f"cid {compound.pubchem_cid}",
+            str(compound.pubchem_cid or ""),
+            f"cid {compound.pubchem_cid}" if compound.pubchem_cid else "",
             compound.iupac_name or "",
+            compound.canonical_smiles or "",
+            compound.isomeric_smiles or "",
             *compound.aliases,
+            *compound.source_compound_ids,
+            *compound.lincs_perturbagen_ids,
         ]
         normalized = [term.casefold() for term in terms]
         if needle in normalized:
@@ -217,7 +354,7 @@ def search_compounds(
             continue
         ranked.append((rank, compound.preferred_name.casefold(), compound))
     ranked.sort(key=lambda item: (item[0], item[1]))
-    return doc, [_compound(item[2]) for item in ranked[:limit]]
+    return doc, [item[2] for item in ranked[:limit]]
 
 
 def get_compound(repo_root: Path, compound_id: str) -> tuple[_CatalogueDoc, CatalogueCompound]:
@@ -230,33 +367,7 @@ def get_compound(repo_root: Path, compound_id: str) -> tuple[_CatalogueDoc, Cata
 
 def identity_index(repo_root: Path) -> dict[str, CatalogueCompound]:
     """Return only committed, versioned identities; callers must not fill gaps from live APIs."""
-    root = repo_root.resolve()
-    catalogue = (
-        {compound.compound_id: _compound(compound) for compound in load_catalogue(root).compounds}
-        if (root / CATALOGUE_RELPATH).is_file()
-        else {}
-    )
-    if not (root / IDENTITIES_RELPATH).is_file():
-        return catalogue
-    identities = load_reference_identities(root)
-    output: dict[str, CatalogueCompound] = {}
-    for item in identities.identities:
-        if item.resolution_status != "resolved" or item.pubchem_cid is None:
-            continue
-        measured = catalogue.get(item.inchikey)
-        output[item.inchikey] = CatalogueCompound(
-            compound_id=item.inchikey,
-            preferred_name=(
-                item.preferred_name or item.iupac_name or f"PubChem CID {item.pubchem_cid}"
-            ),
-            aliases=item.synonyms,
-            pubchem_cid=item.pubchem_cid,
-            iupac_name=item.iupac_name,
-            canonical_smiles=item.canonical_smiles,
-            isomeric_smiles=item.isomeric_smiles,
-            signatures=measured.signatures if measured else [],
-        )
-    return output
+    return unified_identity_index(repo_root.resolve())
 
 
 def get_signature(repo_root: Path, signature_id: str) -> CatalogueSignatureDetail:

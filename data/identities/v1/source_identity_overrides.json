@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "artifact_version": "2026-07-16",
+  "description": "Reviewed source-compound identities that are scientifically relevant to the endpoint datasets but absent from the committed reference support matrices.",
+  "records": [
+    {
+      "inchikey": "IISBACLAFKSPIT-UHFFFAOYSA-N",
+      "preferred_name": "Bisphenol A",
+      "pubchem_cid": 6623,
+      "iupac_name": "4-[2-(4-hydroxyphenyl)propan-2-yl]phenol",
+      "synonyms": [
+        "BPA",
+        "80-05-7",
+        "Bisphenol-A",
+        "2,2-Bis(4-hydroxyphenyl)propane",
+        "4,4'-Isopropylidenediphenol"
+      ],
+      "canonical_smiles": "CC(C)(C1=CC=C(C=C1)O)C2=CC=C(C=C2)O",
+      "source_compound_ids": ["80-05-7(6), 27100-33-0(7)"],
+      "source_presence": {
+        "CERAPP": "Present as an experimentally active ER record.",
+        "CoMPARA": "No committed staged source record is available for verification.",
+        "LINCS": "No compatible 978-gene support profile is present in the committed ER or AR reference artifacts."
+      },
+      "audit_outcome": "B",
+      "audit_reason": "Present in the CERAPP endpoint source data but absent from the committed LINCS-derived support overlap; therefore no compatible measured transcriptomic signature can be analyzed in this reference set.",
+      "retrieved_at": "2026-07-16",
+      "source": "PubChem PUG REST",
+      "source_url": "https://pubchem.ncbi.nlm.nih.gov/compound/6623"
+    }
+  ]
+}

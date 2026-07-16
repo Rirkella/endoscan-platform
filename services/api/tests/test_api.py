@@ -181,6 +181,22 @@ def test_health_lists_warmed_endpoints(client) -> None:
     assert body["explanation_capabilities"]["AR"]["declared_method"] == "linear_coefficient"
     assert body["explanation_capabilities"]["ER"]["available"] is True
     assert body["explanation_capabilities"]["AR"]["available"] is True
+    assert body["pubmed"]["configured"] is False
+    assert body["pubmed"]["available"] is False
+
+
+def test_startup_reports_configured_pubmed_capability(repo_root, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from endoscan_api import app as app_module
+
+    monkeypatch.setenv("NCBI_EMAIL", "research-contact@example.org")
+    isolated = TestClient(app_module.create_app(repo_root=repo_root))
+    assert isolated.get("/health").json()["pubmed"] == {
+        "configured": True,
+        "available": True,
+        "reason": None,
+    }
 
 
 def test_startup_marks_missing_declared_dependency_before_analysis(repo_root, monkeypatch) -> None:

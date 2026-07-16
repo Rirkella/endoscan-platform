@@ -24,7 +24,7 @@
       "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=QAIPRVGONGVQAS-DUXPYHPUSA-N; staged from GSE92742 gctx; CERAPP label=0.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
       "file_sha256": "0967117a654aaacf78c64d2aa4b3f2af0d941ac4dc653d0302ffce4d31564e5b",
       "source_signature_sha256": "34dcd31778e23d6515ebf780d870d8a364ccdbc1dea6613bec04d9f9f8a5177b",
-      "note": "This real measured example produces a distinct ER/AR signal pattern in the current experimental models."
+      "expected_result": "Expected example result: ER and AR below threshold"
     },
     {
       "id": "lincs-gse92742-cid-450-mcf7-a549",
@@ -47,7 +47,7 @@
       "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=VOXZDWNPVJITMN-UHFFFAOYSA-N; staged from GSE92742 gctx; CERAPP label=1.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
       "file_sha256": "0410c867820457b92e54cce16ed44f660a1ee74d72149379f323f80fc7d0170f",
       "source_signature_sha256": "5088bb5e57160bda354097435107e3d08cec3ff677050cb67688971879b6cbbe",
-      "note": "This real measured example produces a distinct ER/AR signal pattern in the current experimental models."
+      "expected_result": "Expected example result: ER above threshold · AR below threshold"
     },
     {
       "id": "lincs-gse92742-closantel-mcf7-a549",
@@ -70,7 +70,7 @@
       "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=JMPFSEBWVLAJKM-UHFFFAOYSA-N; staged from GSE92742 gctx; CERAPP label=0.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
       "file_sha256": "0fda8b3287c4a48df24d4b79c7b8660cac58cc2ee49a152416d4d0160d944fb2",
       "source_signature_sha256": "c9872e4cabea1b68854b34d6d51e816765b86d3e91720bf24c01746c8f5205c7",
-      "note": "This real measured example produces a distinct ER/AR signal pattern in the current experimental models."
+      "expected_result": "Expected example result: ER below threshold · AR above threshold"
     },
     {
       "id": "lincs-gse92742-benzethonium-mcf7-a549",
@@ -93,7 +93,7 @@
       "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=SIYLLGKDQZGJHK-UHFFFAOYSA-N; staged from GSE92742 gctx; CERAPP label=1.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
       "file_sha256": "344ea966d02ff1f8ffa1cb09fdb99d98607082069ccefcf8c2ab6efe419cb4d7",
       "source_signature_sha256": "75dc5b479f772f07f843dffa0b2247a4f5eb2ab47a01b3dc3b4f5ec7823ff59e",
-      "note": "This real measured example produces a distinct ER/AR signal pattern in the current experimental models."
+      "expected_result": "Expected example result: ER and AR above threshold"
     }
   ]
 }

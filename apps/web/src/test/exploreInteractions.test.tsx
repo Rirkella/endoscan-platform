@@ -30,9 +30,9 @@ describe("interactive real reference explorer", () => {
     ) as SVGCircleElement;
     fireEvent.keyDown(activePoint, { key: "Enter" });
     expect(
-      await screen.findByRole("dialog", { name: /Reference signature details/i }),
+      await screen.findByRole("region", { name: /Reference signature details/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/one measured compound-level/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Aggregated reference profile/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Proximity does not prove a shared mechanism/i)).toBeInTheDocument();
   });
 
@@ -60,27 +60,28 @@ describe("interactive real reference explorer", () => {
       "true",
     );
     expect(
-      await screen.findByRole("button", { name: /Analyze this measured signature/i }),
+      await screen.findByRole("button", { name: /Analyze this aggregated reference profile/i }),
     ).toBeInTheDocument();
     // The action targets this shareable Analyze URL. Render it directly because jsdom's
     // AbortSignal implementation is incompatible with React Router's navigation Request.
     view.unmount();
-    const signatureId = catalogueSearch.results[0].signatures[0].signature_id;
-    renderApp(`/analyze?catalogue_signature=${encodeURIComponent(signatureId)}`);
+    renderApp(`/analyze?reference_context=ER&reference_compound=${encodeURIComponent(compoundId)}`);
     const runButton = await screen.findByRole("button", {
       name: /^Analyze signature$/i,
     });
     expect(runButton).not.toBeDisabled();
-    expect(screen.getByText(/^PUBLIC$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^REFERENCE$/i)).toBeInTheDocument();
+    fireEvent.click(runButton);
+    await screen.findByRole("tab", { name: /^Overview$/i });
+    expect(screen.getByText(/LINCS Level 5 differential z-score/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not choose the control/i)).toBeInTheDocument();
   });
 
-  it("keeps an honest unavailable action for points absent from the small catalogue", async () => {
+  it("offers the exact aggregate support vector for points absent from the small catalogue", async () => {
     renderApp("/explore");
     await screen.findByTestId("explore-scatter");
     fireEvent.click(document.querySelector("circle[data-compound='CID_00']") as SVGCircleElement);
-    expect(await screen.findByText(/full gene-expression vector is not available/i)).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Analyze this measured signature/i }),
-    ).not.toBeInTheDocument();
+    expect(await screen.findByText(/only the exact aggregate support vector is available/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Analyze this aggregated reference profile/i })).toBeInTheDocument();
   });
 });

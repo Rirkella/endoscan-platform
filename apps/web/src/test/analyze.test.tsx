@@ -110,8 +110,12 @@ describe("Analyze stepped flow + result overview", () => {
     renderApp("/analyze");
     await analyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Similar signatures$/i }));
-    expect(await screen.findByText(/Caffeic Acid/i)).toBeInTheDocument();
-    expect(screen.getByText(/very similar response/i)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Caffeic Acid/i)).length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: /Most similar full gene-expression profiles/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/ER: Active/i).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("neighbor-marker-1")).toBeInTheDocument();
+    expect(screen.getByText(/2D map is a visual approximation/i)).toBeInTheDocument();
+    expect(screen.queryByText(/very similar response/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Technical provenance|Raw Euclidean|SHA-256/i)).not.toBeInTheDocument();
   });
 
@@ -202,15 +206,17 @@ describe("Analyze stepped flow + result overview", () => {
 describe("evidence tab — correct method label per endpoint", () => {
   beforeEach(() => installFetchMock());
 
-  it("ER evidence shows TreeSHAP + real limitations", async () => {
+  it("ER evidence shows contributors plus the compact experimental status", async () => {
     renderApp("/analyze");
     await analyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     // ER is the first scored endpoint → its explanation auto-loads.
     expect(await screen.findByText(/Genes contributing to this endpoint signal/i)).toBeInTheDocument();
     expect(screen.queryByText(/^TreeSHAP$|Attribution method details/i)).not.toBeInTheDocument();
-    // Integrated limitations remain visible with the evidence.
-    expect(screen.getByText(/NOT regulatory-grade validation/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Experimental model$/i)).toBeInTheDocument();
+    expect(screen.getByText(/still undergoing validation/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /View model validation/i })).toHaveAttribute("href", "/library/ER");
+    expect(screen.queryByText(/NOT regulatory-grade validation|AUROC|Brier score/i)).not.toBeInTheDocument();
   });
 
   it("AR evidence shows the linear-coefficient label (never SHAP)", async () => {
@@ -262,17 +268,14 @@ describe("integrated honesty framing", () => {
     }
   });
 
-  it("limitations (status + CI reason + scope + disclaimer) are readable in the evidence tab", async () => {
+  it("keeps model validation details out of the primary evidence tab", async () => {
     renderApp("/analyze");
     await analyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     await screen.findByText(/Genes contributing to this endpoint signal/i);
-    expect(screen.getAllByTitle(/Model status: experimental/i).length).toBeGreaterThan(0);
-    expect(
-      screen.getByText(/auroc 95% CI lower bound 0.675 < 0.75 floor/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Scope of claim/i)).toBeInTheDocument();
-    expect(screen.getByText(/NOT regulatory-grade validation/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Experimental model$/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /View model validation/i })).toBeInTheDocument();
+    expect(screen.queryByText(/auroc 95% CI lower bound|Scope of claim|NOT regulatory-grade validation/i)).not.toBeInTheDocument();
   });
 });
 

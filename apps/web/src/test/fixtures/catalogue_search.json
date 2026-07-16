@@ -19,6 +19,11 @@
       "iupac_name": "(E)-3-(3,4-dihydroxyphenyl)prop-2-enoic acid",
       "canonical_smiles": "C1=CC(=C(C=C1C=CC(=O)O)O)O",
       "isomeric_smiles": "C1=CC(=C(C=C1/C=C/C(=O)O)O)O",
+      "availability_status": "Reference profile available",
+      "availability_reason": "An exact aggregate support-vector row is available in the ER and AR reference sets.",
+      "reference_contexts": ["ER", "AR"],
+      "source_compound_ids": ["QAIPRVGONGVQAS-DUXPYHPUSA-N"],
+      "lincs_perturbagen_ids": [],
       "signatures": [
         {
           "signature_id": "lincs-gse92742-caffeic-acid-mcf7-a549",

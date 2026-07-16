@@ -6,6 +6,7 @@ export interface Health {
   endpoints_loaded: string[];
   explain_available: boolean;
   explanation_capabilities: Record<string, ExplanationCapabilityStatus>;
+  pubmed: { configured: boolean; available: boolean; reason: string | null };
 }
 
 export interface ExplanationCapabilityStatus {
@@ -219,11 +220,16 @@ export interface CatalogueCompound {
   compound_id: string;
   preferred_name: string;
   aliases: string[];
-  pubchem_cid: number;
+  pubchem_cid: number | null;
   iupac_name: string | null;
   canonical_smiles: string | null;
   isomeric_smiles: string | null;
   signatures: CatalogueSignatureSummary[];
+  availability_status: string;
+  availability_reason: string | null;
+  reference_contexts: string[];
+  source_compound_ids: string[];
+  lincs_perturbagen_ids: string[];
 }
 
 export interface CatalogueSearchResponse {
@@ -264,6 +270,9 @@ export interface ExplorePoint {
   source_dataset: string | null;
   experimental_contexts: string[];
   full_signature_id: string | null;
+  full_vector_available?: boolean;
+  underlying_condition_available?: boolean;
+  profile_type?: "Aggregated reference profile" | string;
 }
 
 export interface ExploreCounts {
@@ -304,6 +313,9 @@ export interface ExploreNeighbor {
   source_dataset: string | null;
   experimental_contexts: string[];
   full_signature_id: string | null;
+  full_vector_available?: boolean;
+  underlying_condition_available?: boolean;
+  profile_type?: "Aggregated reference profile" | string;
   similarity_category: string;
   similarity_rank: number;
   similarity_percentile: number;
@@ -366,6 +378,33 @@ export interface PathwaysResponse {
   pathways: PathwayCard[];
   exploratory_pathways: PathwayCard[];
   method_block: PathwayMethodBlock | null;
+}
+
+export interface ExploreReferenceSignature {
+  context: string;
+  compound_id: string;
+  preferred_name: string | null;
+  pubchem_cid: number | null;
+  endpoint_label: string | null;
+  profile_type: "Aggregated reference profile";
+  full_vector_available: true;
+  underlying_condition_available: boolean;
+  underlying_conditions: Array<Record<string, unknown>>;
+  value_type: "differential_zscore";
+  value_type_label: string;
+  reference_comparison: string;
+  source_dataset: string;
+  cell_models: string[];
+  aggregation_description: string;
+  aggregate_pathway_warning: string;
+  feature_names: string[];
+  signature: Signature;
+  n_genes: number;
+  support_row_index: number;
+  support_sha256: string;
+  source_key: string;
+  source_sha256: string;
+  provenance: Record<string, unknown>;
 }
 
 // --- Endpoint-independent full-signature biological response ---

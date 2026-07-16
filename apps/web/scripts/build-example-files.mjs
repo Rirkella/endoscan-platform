@@ -8,6 +8,12 @@ const catalogue = JSON.parse(readFileSync(resolve(repoRoot, "data/catalogue/v1/c
 const formats = ["csv", "tsv", "csv", "tsv"];
 const slugs = ["caffeic-acid", "cid-450", "closantel", "benzethonium"];
 const examples = [];
+const expectedResults = [
+  "Expected example result: ER and AR below threshold",
+  "Expected example result: ER above threshold · AR below threshold",
+  "Expected example result: ER below threshold · AR above threshold",
+  "Expected example result: ER and AR above threshold",
+];
 
 for (const [index, compound] of catalogue.compounds.entries()) {
   const measured = compound.signatures[0];
@@ -44,7 +50,7 @@ for (const [index, compound] of catalogue.compounds.entries()) {
     source_signature_sha256: createHash("sha256")
       .update(readFileSync(resolve(repoRoot, measured.signature_path)))
       .digest("hex"),
-    note: "This real measured example produces a distinct ER/AR signal pattern in the current experimental models.",
+    expected_result: expectedResults[index],
   });
 }
 

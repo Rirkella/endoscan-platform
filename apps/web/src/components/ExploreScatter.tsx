@@ -5,6 +5,7 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent,
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -28,6 +29,9 @@ interface Props {
   pointNames?: Record<string, string>;
   labelFilter?: "all" | "active" | "inactive" | "unlabeled";
   onSelect?: (point: ExplorePoint) => void;
+  activeNeighborId?: string | null;
+  focusId?: string | null;
+  onNeighborHover?: (compoundId: string | null) => void;
 }
 
 interface ViewBox {
@@ -58,6 +62,9 @@ export function ExploreScatter({
   pointNames = {},
   labelFilter = "all",
   onSelect,
+  activeNeighborId = null,
+  focusId = null,
+  onNeighborHover,
 }: Props) {
   const [view, setView] = useState<ViewBox>({ x: 0, y: 0, width: W, height: H });
   const panStart = useRef<{
@@ -65,6 +72,21 @@ export function ExploreScatter({
     clientY: number;
     view: ViewBox;
   } | null>(null);
+
+  useEffect(() => {
+    if (!focusId || points.length === 0) return;
+    const point = points.find((item) => item.compound_id === focusId);
+    if (!point) return;
+    const scaled = scaleFor(points);
+    const width = W * 0.42;
+    const height = H * 0.42;
+    setView({
+      x: Math.min(W - width, Math.max(0, scaled.sx(point.x) - width / 2)),
+      y: Math.min(H - height, Math.max(0, scaled.sy(point.y) - height / 2)),
+      width,
+      height,
+    });
+  }, [focusId, points]);
 
   if (points.length === 0) return null;
   const { sx, sy } = scaleFor(points);
@@ -143,6 +165,7 @@ export function ExploreScatter({
       >
         {points.map((point) => {
           const highlighted = neighborIds.has(point.compound_id);
+          const activeNeighbor = activeNeighborId === point.compound_id;
           const selected = selectedId === point.compound_id;
           const pointLabel = point.label ?? "unlabeled";
           const visible = labelFilter === "all" || labelFilter === pointLabel;
@@ -161,12 +184,14 @@ export function ExploreScatter({
               display={visible ? undefined : "none"}
               cx={sx(point.x)}
               cy={sy(point.y)}
-              r={selected ? 7.5 : highlighted ? 6 : 3.5}
+              r={selected ? 7.5 : activeNeighbor ? 7 : highlighted ? 6 : 3.5}
               fill={fill}
               fillOpacity={selected || highlighted ? 1 : 0.7}
-              stroke={selected ? "#0369a1" : highlighted ? "#111827" : "none"}
+              stroke={selected ? "#0369a1" : activeNeighbor ? "#0f766e" : highlighted ? "#111827" : "none"}
               strokeWidth={selected ? 2.5 : highlighted ? 1.5 : 0}
               onClick={() => onSelect?.(point)}
+              onMouseEnter={() => highlighted && onNeighborHover?.(point.compound_id)}
+              onMouseLeave={() => highlighted && onNeighborHover?.(null)}
               onKeyDown={(event) => selectWithKeyboard(event, point)}
             >
               <title>
@@ -175,6 +200,28 @@ export function ExploreScatter({
                   "unlabelled"}. Select for details.
               </title>
             </circle>
+          );
+        })}
+
+        {locate?.neighbors.slice(0, 5).map((neighbor, index) => {
+          const point = points.find((item) => item.compound_id === neighbor.compound_id);
+          if (!point) return null;
+          return (
+            <g
+              key={`neighbor-marker-${neighbor.compound_id}`}
+              role="button"
+              tabIndex={0}
+              data-testid={`neighbor-marker-${index + 1}`}
+              data-active={activeNeighborId === neighbor.compound_id ? "true" : undefined}
+              onMouseEnter={() => onNeighborHover?.(neighbor.compound_id)}
+              onMouseLeave={() => onNeighborHover?.(null)}
+              onClick={() => onSelect?.(point)}
+              onKeyDown={(event) => selectWithKeyboard(event as unknown as KeyboardEvent<SVGCircleElement>, point)}
+            >
+              <circle cx={sx(point.x)} cy={sy(point.y)} r={8} fill="#ffffff" stroke="#0f766e" strokeWidth={activeNeighborId === neighbor.compound_id ? 3 : 2} />
+              <text x={sx(point.x)} y={sy(point.y) + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill="#0f4f46">{index + 1}</text>
+              <title>{`${index + 1}. ${neighbor.preferred_name ?? neighbor.compound_id}`}</title>
+            </g>
           );
         })}
 

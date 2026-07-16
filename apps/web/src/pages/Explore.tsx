@@ -29,6 +29,10 @@ type LabelFilter = "all" | "active" | "inactive" | "unlabeled";
 interface SearchMatch {
   compoundId: string;
   name: string | null;
+  status: string;
+  reason: string | null;
+  referenceContexts: string[];
+  inSelectedMap: boolean;
 }
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
@@ -45,6 +49,8 @@ export function Explore() {
   const [context, setContext] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState<LabelFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeNeighborId, setActiveNeighborId] = useState<string | null>(null);
+  const [focusId, setFocusId] = useState<string | null>(null);
   const [selectedCompound, setSelectedCompound] = useState<CatalogueCompound | null>(null);
   const [selectedLoading, setSelectedLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -96,14 +102,20 @@ export function Explore() {
     const byId = map.data.points
       .filter((point) => point.compound_id.toLowerCase().includes(query.toLowerCase()))
       .slice(0, 10)
-      .map((point) => ({ compoundId: point.compound_id, name: null }));
+      .map((point) => ({ compoundId: point.compound_id, name: point.preferred_name, status: "Reference profile available", reason: null, referenceContexts: [map.data!.context], inSelectedMap: true }));
     try {
       const response = await api.searchCatalogue(query, 20);
-      const named = response.results
-        .filter((compound) => mapIds.has(compound.compound_id))
-        .map((compound) => ({
+      const named = response.results.map((compound) => ({
           compoundId: compound.compound_id,
           name: compound.preferred_name,
+          status: compound.reference_contexts.includes(map.data!.context)
+            ? compound.availability_status
+            : compound.reference_contexts.length
+              ? "Present in another endpoint reference set"
+              : compound.availability_status,
+          reason: compound.availability_reason,
+          referenceContexts: compound.reference_contexts,
+          inSelectedMap: mapIds.has(compound.compound_id),
         }));
       const seen = new Set(named.map((match) => match.compoundId));
       setSearchMatches([...named, ...byId.filter((match) => !seen.has(match.compoundId))]);
@@ -143,6 +155,8 @@ export function Explore() {
               setContext(e.target.value);
               explore.reset();
               setSelectedId(null);
+              setActiveNeighborId(null);
+              setFocusId(null);
               setLabelFilter("all");
               setSearchMatches(null);
             }}
@@ -216,16 +230,19 @@ export function Explore() {
       {searchMatches != null && (
         <div className="reference-search-results" aria-live="polite">
           {searchMatches.length === 0 ? (
-            <p>No matching measured signature exists in this endpoint map.</p>
+            <p>No known compound identity or reference record matched this search.</p>
           ) : (
             searchMatches.map((match) => (
               <button
                 key={match.compoundId}
                 type="button"
-                onClick={() => setSelectedId(match.compoundId)}
+                onClick={() => match.inSelectedMap && setSelectedId(match.compoundId)}
+                aria-disabled={!match.inSelectedMap}
               >
                 <strong>{match.name ?? "Reference signature"}</strong>
                 <span className="mono">{match.compoundId}</span>
+                <span className="search-availability">{match.status}</span>
+                {match.reason && <small>{match.reason}</small>}
               </button>
             ))
           )}
@@ -266,6 +283,9 @@ export function Explore() {
                     : undefined
                 }
                 onSelect={(point) => setSelectedId(point.compound_id)}
+                activeNeighborId={activeNeighborId}
+                focusId={focusId}
+                onNeighborHover={setActiveNeighborId}
               />
               <div className="reference-legend">
                 {labelled ? (
@@ -295,6 +315,16 @@ export function Explore() {
         </section>
 
         {/* B — place a measured signature */}
+        {selectedId && map.data ? (
+          <ReferenceDetailsPanel
+            point={map.data.points.find((item) => item.compound_id === selectedId) ?? null}
+            compound={selectedCompound}
+            loading={selectedLoading}
+            context={context ?? map.data.context}
+            onClose={() => setSelectedId(null)}
+            onAnalyze={() => navigate(`/analyze?reference_context=${encodeURIComponent(context ?? map.data!.context)}&reference_compound=${encodeURIComponent(selectedId)}`)}
+          />
+        ) : (
         <aside className="reference-place">
           <p className="aside-label">Place a signature</p>
           <p className="check-plain">
@@ -324,18 +354,18 @@ export function Explore() {
               )}
 
               <p className="aside-label" style={{ marginTop: "16px" }}>
-                Nearest reference signatures
+                Most similar full gene-expression profiles
               </p>
               <p className="check-plain">
                 Similar response patterns. This does not prove the same effect.
               </p>
-              <ul className="reference-neighbors" data-testid="similar-compounds">
-                {explore.result.neighbors.map((n) => (
-                  <li key={n.compound_id}>
-                    <strong>{n.preferred_name ?? "Compound name unavailable"}</strong>
-                    <span>{n.similarity_category} · rank {n.similarity_rank} of {map.data?.counts.n_total}</span>
+              <p className="map-distance-note">The neighbour list is ranked using the complete 978-gene profiles. The 2D map is a visual approximation, so apparent distance on the map may differ from the full-profile ranking.</p>
+              <ol className="reference-neighbors numbered-neighbors" data-testid="similar-compounds">
+                {explore.result.neighbors.slice(0, 5).map((n, index) => (
+                  <li key={n.compound_id} onMouseEnter={() => setActiveNeighborId(n.compound_id)} onMouseLeave={() => setActiveNeighborId(null)}>
+                    <button type="button" className="neighbor-focus" onClick={() => setFocusId(n.compound_id)}><span>{index + 1}.</span><strong>{n.preferred_name ?? "Compound name unavailable"}</strong></button>
                     {n.source_dataset && <span>{n.source_dataset}</span>}
-                    {n.label && <span>endpoint label: {n.label}</span>}
+                    {n.label && <span className={`endpoint-reference-badge endpoint-${n.label}`}>{context}: {n.label === "active" ? "Active" : "Inactive"}</span>}
                     <details>
                       <summary>Technical details</summary>
                       <span className="mono">InChIKey {n.compound_id}</span>
@@ -343,7 +373,8 @@ export function Explore() {
                     </details>
                   </li>
                 ))}
-              </ul>
+              </ol>
+              <p className="endpoint-label-caveat">Active and inactive refer only to the selected endpoint reference dataset.</p>
 
               <details
                 data-testid="explore-technical"
@@ -413,31 +444,17 @@ export function Explore() {
             </div>
           )}
         </aside>
+        )}
       </div>
-
-      {selectedId && map.data && (
-        <ReferenceDetailsDrawer
-          point={map.data.points.find((item) => item.compound_id === selectedId) ?? null}
-          compound={selectedCompound}
-          loading={selectedLoading}
-          context={context ?? map.data.context}
-          pointDefinition={map.data.manifest.point_definition}
-          onClose={() => setSelectedId(null)}
-          onAnalyze={(signatureId) =>
-            navigate(`/analyze?catalogue_signature=${encodeURIComponent(signatureId)}`)
-          }
-        />
-      )}
     </div>
   );
 }
 
-function ReferenceDetailsDrawer({
+function ReferenceDetailsPanel({
   point,
   compound,
   loading,
   context,
-  pointDefinition,
   onClose,
   onAnalyze,
 }: {
@@ -445,23 +462,22 @@ function ReferenceDetailsDrawer({
   compound: CatalogueCompound | null;
   loading: boolean;
   context: string;
-  pointDefinition: string;
   onClose: () => void;
-  onAnalyze: (signatureId: string) => void;
+  onAnalyze: () => void;
 }) {
   if (!point) return null;
-  const signature = compound?.signatures[0];
+  const pubchemCid = compound?.pubchem_cid ?? point.pubchem_cid;
   return (
     <aside
       className="reference-details-drawer"
-      role="dialog"
+      role="region"
       aria-label="Reference signature details"
     >
       <div className="reference-drawer-head">
         <div>
-          <p className="eyebrow">Selected measured signature</p>
+          <p className="eyebrow">Selected compound</p>
           <h2>{compound?.preferred_name ?? point.preferred_name ?? "Compound name unavailable"}</h2>
-          <p>Condition-aggregated measured signature</p>
+          <p>Aggregated reference profile</p>
         </div>
         <button
           type="button"
@@ -472,50 +488,41 @@ function ReferenceDetailsDrawer({
           Close
         </button>
       </div>
+      {pubchemCid && <img className="compound-structure" src={`https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${pubchemCid}/PNG?record_type=2d`} alt={`2D chemical structure for ${compound?.preferred_name ?? point.preferred_name ?? point.compound_id}`} />}
+      <p className="reference-profile-explanation">This profile combines the measured experimental conditions selected for this compound when the reference map was built.</p>
       <dl className="reference-drawer-list">
         {(compound?.pubchem_cid ?? point.pubchem_cid) && (
           <div><dt>PubChem CID</dt><dd>{compound?.pubchem_cid ?? point.pubchem_cid}</dd></div>
         )}
         <div>
-          <dt>Endpoint dataset label</dt>
-          <dd>{point.label ? `${point.label} for ${context}` : "No label in this endpoint dataset"}</dd>
+          <dt>{context} reference</dt>
+          <dd>{point.label ? <span className={`endpoint-reference-badge endpoint-${point.label}`}>{context}: {point.label === "active" ? "Active" : "Inactive"}</span> : "No label in this endpoint dataset"}</dd>
         </div>
-        <div><dt>Source dataset</dt><dd>{point.source_dataset || "LINCS L1000"}</dd></div>
+        <div><dt>Gene-expression measurements</dt><dd>LINCS L1000, Level 5</dd></div>
+        <div><dt>Cell models</dt><dd>MCF7 — human breast cancer cell line<br />A549 — human lung adenocarcinoma cell line</dd></div>
         {(point.experimental_contexts ?? []).length > 0 && (
           <div><dt>Experimental context</dt><dd>{(point.experimental_contexts ?? []).join("; ")}</dd></div>
         )}
       </dl>
-      <details className="technical-disclosure">
-        <summary>Technical provenance</summary>
-        <dl className="reference-drawer-list">
-          <div><dt>InChIKey</dt><dd className="mono">{point.compound_id}</dd></div>
-          <div><dt>Point definition</dt><dd>{pointDefinition}</dd></div>
-          <div><dt>UMAP coordinates</dt><dd>{point.x.toFixed(3)}, {point.y.toFixed(3)}</dd></div>
-        </dl>
-      </details>
       <p className="reference-label-note">
         Proximity does not prove a shared mechanism, toxicity, or safety profile. A submitted query
         is placed approximately; this selected reference point is part of the precomputed map.
       </p>
       {loading ? (
-        <p className="check-plain">Checking for an analyzable public record…</p>
-      ) : signature ? (
+        <p className="check-plain">Preparing reference actions…</p>
+      ) : (
         <div className="reference-drawer-action">
-          <p>{signature.dataset} {signature.processing_level} · {signature.cell_lines.join(" + ")}</p>
           <button
             className="button primary"
             type="button"
-            onClick={() => onAnalyze(signature.signature_id)}
+            onClick={onAnalyze}
           >
-            Analyze this measured signature
+            Analyze this aggregated reference profile
           </button>
+          <button className="button outline" type="button" disabled={!point.underlying_condition_available}>View underlying experiments</button>
+          {pubchemCid && <a className="detail-link" href={`https://pubchem.ncbi.nlm.nih.gov/compound/${pubchemCid}`} target="_blank" rel="noreferrer">Open source record</a>}
+          {!point.underlying_condition_available && <p>Condition-specific measurements are not committed in this demonstrator; only the exact aggregate support vector is available.</p>}
         </div>
-      ) : (
-        <p className="check-plain">
-          This compound is included in the reference map, but its full gene-expression vector is
-          not available in the current public catalogue. It can be explored here but cannot yet be
-          re-analysed. A transcriptomic signature is never reconstructed from 2D UMAP coordinates.
-        </p>
       )}
     </aside>
   );

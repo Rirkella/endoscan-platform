@@ -39,17 +39,26 @@ export type ResultTab = "overview" | "biological" | "endpoint" | "similar" | "re
 export interface PreparedInput {
   title: string;
   subtitle: string;
-  kind: "file" | "paste" | "catalogue";
+  kind: "file" | "paste" | "catalogue" | "reference";
   signature: Signature;
   parse: ParseResult;
   allowExtra: boolean;
   inputValueType: InputValueType;
+  profileType?: string;
+  valueTypeLabel?: string;
+  referenceComparison?: string;
+  aggregationWarning?: string;
+  cellModels?: string[];
+  experimentalContext?: string;
 }
 
 export function Analyze() {
   const [searchParams] = useSearchParams();
   const catalogueSignatureId = searchParams.get("catalogue_signature");
+  const referenceContext = searchParams.get("reference_context");
+  const referenceCompound = searchParams.get("reference_compound");
   const catalogueHandled = useRef(false);
+  const referenceHandled = useRef(false);
   const endpoints = useAsync(() => api.listEndpoints(), []);
   const endpointList = endpoints.data ?? [];
   const analyze = useAnalyze(endpointList);
@@ -93,6 +102,45 @@ export function Analyze() {
       .catch(setCatalogueError)
       .finally(() => setCatalogueLoading(false));
   }, [catalogueSignatureId]);
+
+  useEffect(() => {
+    if (!referenceContext || !referenceCompound || referenceHandled.current) return;
+    referenceHandled.current = true;
+    setCatalogueLoading(true);
+    setCatalogueError(null);
+    void api
+      .getReferenceSignature(referenceContext, referenceCompound)
+      .then(async (detail) => {
+        const referenceFile = new File(
+          [JSON.stringify(detail.signature)],
+          `${detail.context}-${detail.compound_id}-aggregated-reference.json`,
+          { type: "application/json" },
+        );
+        const parsed = await api.parseSignature({
+          file: referenceFile,
+          format: "json",
+          input_value_type: detail.value_type,
+        });
+        if (!parsed.signature) throw new Error("The reference support vector could not be prepared.");
+        onPrepared({
+          title: detail.preferred_name ?? detail.compound_id,
+          subtitle: `${detail.profile_type} · ${detail.context} reference set`,
+          kind: "reference",
+          signature: parsed.signature,
+          parse: parsed,
+          allowExtra: false,
+          inputValueType: parsed.input_value_type,
+          profileType: detail.profile_type,
+          valueTypeLabel: detail.value_type_label,
+          referenceComparison: detail.reference_comparison,
+          aggregationWarning: detail.aggregate_pathway_warning,
+          cellModels: detail.cell_models,
+          experimentalContext: detail.aggregation_description,
+        });
+      })
+      .catch(setCatalogueError)
+      .finally(() => setCatalogueLoading(false));
+  }, [referenceContext, referenceCompound]);
 
   function onPrepared(input: PreparedInput) {
     setPrepared(input);
@@ -287,13 +335,14 @@ function ResultWorkspace({
         <BiologicalResponsePanel
           signature={input.signature}
           inputValueType={input.inputValueType}
+          aggregationWarning={input.aggregationWarning}
         />
       )}
       {tab === "endpoint" && (
         <EvidencePanel
           signals={signals}
           signature={input.signature}
-          compound={input.kind === "catalogue" ? input.title : undefined}
+          compound={input.kind === "catalogue" || input.kind === "reference" ? input.title : undefined}
         />
       )}
       {tab === "similar" && <ReferencePanel endpoints={endpoints} signature={input.signature} />}
@@ -381,8 +430,11 @@ function OverviewTab({
           <dl className="metadata-list">
             <div>
               <dt>Source</dt>
-              <dd>{input.kind === "file" ? "Uploaded file" : input.kind === "catalogue" ? "Public measured signature" : "Pasted signature"}</dd>
+              <dd>{input.kind === "file" ? "Uploaded file" : input.kind === "catalogue" ? "Public measured signature" : input.kind === "reference" ? "Aggregated reference profile" : "Pasted signature"}</dd>
             </div>
+            <div><dt>Value type</dt><dd>{input.valueTypeLabel ?? input.inputValueType.replace(/_/g, " ")}</dd></div>
+            {input.referenceComparison && <div><dt>Reference comparison</dt><dd>{input.referenceComparison}</dd></div>}
+            {input.cellModels?.length ? <div><dt>Cell models</dt><dd>{input.cellModels.join("; ")}</dd></div> : null}
             <div>
               <dt>Genes provided</dt>
               <dd>{Object.keys(input.signature).length}</dd>

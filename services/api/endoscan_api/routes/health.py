@@ -18,4 +18,5 @@ def health(request: Request) -> HealthResponse:
         endpoints_loaded=list(state.endpoints_loaded),
         explain_available=bool(state.explain_available),
         explanation_capabilities=dict(state.explanation_capabilities),
+        pubmed=dict(state.pubmed_capability),
     )

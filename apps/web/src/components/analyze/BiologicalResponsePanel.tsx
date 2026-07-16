@@ -2,10 +2,11 @@ import { api } from "../../api/client";
 import type { BiologicalPathwayCard, InputValueType, Signature } from "../../api/types";
 import { useAsync } from "../../hooks/useAsync";
 import { ErrorNotice } from "../ErrorNotice";
+import { GeneLevelResponse } from "./GeneLevelResponse";
 
 const INPUT_DESCRIPTIONS: Record<InputValueType, string> = {
   differential_zscore:
-    "This analysis is independent of the ER and AR models. Genes are ranked by how strongly their expression increased or decreased relative to the matched experimental control. Reactome pathways are highlighted when their genes cluster toward either end of that ranked response.",
+    "This analysis is independent of the ER and AR models. Genes are ranked by their LINCS Level 5 differential z-scores, calculated upstream using the corresponding experimental controls. EndoScan does not select a control. Reactome pathways are highlighted when their genes cluster toward either end of that ranked response.",
   log2_fold_change:
     "Genes are ranked by signed log2 fold change relative to the supplied comparison; pathway enrichment is independent of the endpoint models.",
   ranked_statistic:
@@ -17,9 +18,11 @@ const INPUT_DESCRIPTIONS: Record<InputValueType, string> = {
 export function BiologicalResponsePanel({
   signature,
   inputValueType,
+  aggregationWarning,
 }: {
   signature: Signature;
   inputValueType: InputValueType;
+  aggregationWarning?: string;
 }) {
   const state = useAsync(
     () => api.interpretBiologicalResponse(signature, inputValueType),
@@ -40,6 +43,7 @@ export function BiologicalResponsePanel({
           <p>{INPUT_DESCRIPTIONS[inputValueType]}</p>
         </div>
       </header>
+      {aggregationWarning && <p className="aggregate-warning">{aggregationWarning}</p>}
 
       {state.loading && <p className="check-plain">Analyzing the ranked biological response…</p>}
       {state.error != null && <ErrorNotice error={state.error} />}
@@ -47,7 +51,8 @@ export function BiologicalResponsePanel({
         <div className="biological-empty" role="status">
           <p>{inputValueType === "raw_expression"
             ? "A directional pathway analysis requires a differential signature or matched control."
-            : "No strong differential response was detected relative to the matched experimental control."}</p>
+            : "No Reactome pathway reached the current FDR threshold for this signature."}</p>
+          {inputValueType !== "raw_expression" && <p>Individual genes may still show differential values, but their changes did not form a statistically supported Reactome pathway pattern after multiple-testing correction.</p>}
         </div>
       )}
       {state.data?.status === "ok" && supported.length > 0 && (
@@ -64,6 +69,7 @@ export function BiologicalResponsePanel({
           />
         </div>
       )}
+      <GeneLevelResponse signature={signature} />
     </section>
   );
 }

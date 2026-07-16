@@ -1,11 +1,11 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { EndoscanApiError, api } from "../../api/client";
 import { predictionScore, type ExplanationCapabilityStatus, type PathwaysResponse, type Signature } from "../../api/types";
 import type { EndpointSignal } from "../../hooks/useAnalyze";
 import { useAsync } from "../../hooks/useAsync";
 import { GeneContributionCards } from "../GeneContributionCards";
-import { LimitationsPanel } from "../LimitationsPanel";
 import { LiteraturePanel } from "../LiteraturePanel";
 import { PathwaysPanel } from "../PathwaysPanel";
 
@@ -57,7 +57,11 @@ export function EvidencePanel({
           compound={compound}
           capability={active.explanation}
         />
-        <section className="evidence-embed"><LimitationsPanel limitations={active.result!.limitations} /></section>
+        <section className="compact-model-status" aria-label="Model status">
+          <span className="status-chip status-note">Experimental model</span>
+          <p>This model is still undergoing validation and is intended for research prioritisation only.</p>
+          <Link to={`/library/${encodeURIComponent(active.endpoint_id)}`}>View model validation</Link>
+        </section>
       </div>
     </div>
   );

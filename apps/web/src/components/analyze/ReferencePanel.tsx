@@ -10,6 +10,9 @@ import { ExploreScatter } from "../ExploreScatter";
 
 export function ReferencePanel({ endpoints, signature }: { endpoints: EndpointSummary[]; signature: Signature }) {
   const [context, setContext] = useState(endpoints[0]?.endpoint_id ?? "");
+  const [activeNeighborId, setActiveNeighborId] = useState<string | null>(null);
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const [selectedNeighborId, setSelectedNeighborId] = useState<string | null>(null);
   const map = useAsync(() => context ? api.exploreUmap(context) : Promise.reject(new Error("no context")), [context]);
   const explore = useExplore(context);
 
@@ -31,7 +34,7 @@ export function ReferencePanel({ endpoints, signature }: { endpoints: EndpointSu
           {endpoints.length > 1 && (
             <label className="reference-context-select">
               Endpoint reference set
-              <select value={context} onChange={(event) => { setContext(event.target.value); explore.reset(); }}>
+              <select value={context} onChange={(event) => { setContext(event.target.value); explore.reset(); setFocusId(null); setSelectedNeighborId(null); }}>
                 {endpoints.map((endpoint) => <option key={endpoint.endpoint_id} value={endpoint.endpoint_id}>{endpoint.biological_target} ({endpoint.endpoint_id})</option>)}
               </select>
             </label>
@@ -40,28 +43,56 @@ export function ReferencePanel({ endpoints, signature }: { endpoints: EndpointSu
         {(map.loading || !context) && <p className="check-plain">Loading the reference landscape…</p>}
         {notComputed && <div className="no-signature"><strong>No reference map for {context} yet</strong></div>}
         {map.error != null && !notComputed && <ErrorNotice error={map.error} />}
-        {map.data && <ExploreScatter points={map.data.points} locate={explore.result} />}
+        {map.data && <ExploreScatter
+          points={map.data.points}
+          locate={explore.result}
+          activeNeighborId={activeNeighborId}
+          focusId={focusId}
+          selectedId={selectedNeighborId}
+          onNeighborHover={setActiveNeighborId}
+          onSelect={(point) => {
+            setFocusId(point.compound_id);
+            setSelectedNeighborId(point.compound_id);
+          }}
+        />}
+        <p className="map-distance-note">The neighbour list is ranked using the complete 978-gene profiles. The 2D map is a visual approximation, so apparent distance on the map may differ from the full-profile ranking.</p>
       </section>
 
       <aside className="neighbor-panel">
         <p className="aside-label">Relative similarity</p>
-        <h2>Nearest distinct named compounds</h2>
+        <h2>Most similar full gene-expression profiles</h2>
         <p className="check-plain">Reference records aggregate measured conditions; context is shown only when available.</p>
         {explore.running && <p className="check-plain">Finding similar compounds…</p>}
         {explore.error != null && <ErrorNotice error={explore.error} />}
-        {explore.result && <NeighborResults result={explore.result} total={map.data?.counts.n_total} />}
+        {explore.result && <NeighborResults
+          result={explore.result}
+          context={context}
+          selectedId={selectedNeighborId}
+          onHover={setActiveNeighborId}
+          onFocus={(id) => {
+            setFocusId(id);
+            setSelectedNeighborId(id);
+          }}
+        />}
         <Link className="detail-link" to="/explore">Open the full reference view</Link>
       </aside>
     </div>
   );
 }
 
-function NeighborResults({ result, total }: { result: ExploreLocateResult; total?: number }) {
+function NeighborResults({ result, context, selectedId, onHover, onFocus }: {
+  result: ExploreLocateResult;
+  context: string;
+  selectedId: string | null;
+  onHover: (id: string | null) => void;
+  onFocus: (id: string) => void;
+}) {
   const named = result.neighbors.filter((neighbor) => neighbor.preferred_name).slice(0, 5);
   const unresolved = result.neighbors.filter((neighbor) => !neighbor.preferred_name);
   const closerUnresolved = named.length
     ? unresolved.filter((neighbor) => neighbor.similarity_rank < named[0].similarity_rank).length
     : unresolved.length;
+  const selected = result.neighbors.find((neighbor) => neighbor.compound_id === selectedId) ?? null;
   return (
     <>
       {result.exact_match && (
@@ -70,11 +101,21 @@ function NeighborResults({ result, total }: { result: ExploreLocateResult; total
           <p>{result.exact_match.preferred_name || "Identity unresolved"}</p>
         </div>
       )}
-      {closerUnresolved > 0 && (
-        <p className="unresolved-note">{closerUnresolved} closer reference {closerUnresolved === 1 ? "record could" : "records could"} not be resolved to a public compound name.</p>
+      {closerUnresolved > 0 && <p className="unresolved-note">{closerUnresolved} closer reference {closerUnresolved === 1 ? "record could" : "records could"} not be resolved to a public compound name.</p>}
+      {selected && (
+        <section className="selected-neighbor-summary" aria-label="Selected neighbour compound summary">
+          <p className="aside-label">Selected map point</p>
+          <strong>{selected.preferred_name ?? "Identity unresolved"}</strong>
+          <span>Aggregated reference profile</span>
+          {selected.label && <span className={`endpoint-reference-badge endpoint-${selected.label}`}>{context}: {selected.label === "active" ? "Active" : "Inactive"}</span>}
+          {selected.source_dataset && <span>{selected.source_dataset}</span>}
+          {selected.full_vector_available && <Link to={`/analyze?reference_context=${encodeURIComponent(context)}&reference_compound=${encodeURIComponent(selected.compound_id)}`}>Analyze this aggregated reference profile</Link>}
+        </section>
       )}
       {named.length > 0 ? (
-        <ul className="reference-neighbors">{named.map((neighbor) => <NamedNeighbor key={neighbor.compound_id} neighbor={neighbor} total={total} />)}</ul>
+        <ol className="reference-neighbors numbered-neighbors">
+          {named.map((neighbor, index) => <NamedNeighbor key={neighbor.compound_id} neighbor={neighbor} number={index + 1} context={context} onHover={onHover} onFocus={onFocus} />)}
+        </ol>
       ) : <p className="check-plain">No named neighbour is available in this result.</p>}
       {unresolved.length > 0 && (
         <details className="unresolved-references">
@@ -82,19 +123,25 @@ function NeighborResults({ result, total }: { result: ExploreLocateResult; total
           <ol>{unresolved.map((neighbor) => <li key={neighbor.compound_id}>{ordinal(neighbor.similarity_rank)} closest · identity unresolved</li>)}</ol>
         </details>
       )}
-      <p className="check-plain">Relative similarity is an empirical rank, not a probability or model confidence.</p>
+      <p className="check-plain">Relative similarity is an empirical full-profile rank, not a probability or model confidence.</p>
+      <p className="endpoint-label-caveat">Active and inactive refer only to the selected endpoint reference dataset.</p>
     </>
   );
 }
 
-function NamedNeighbor({ neighbor, total }: { neighbor: ExploreNeighbor; total?: number }) {
+function NamedNeighbor({ neighbor, number, context, onHover, onFocus }: {
+  neighbor: ExploreNeighbor;
+  number: number;
+  context: string;
+  onHover: (id: string | null) => void;
+  onFocus: (id: string) => void;
+}) {
   return (
-    <li>
-      <strong>{neighbor.preferred_name}</strong>
-      <span className="similarity-label">{neighbor.similarity_category || "Similar response"} · {ordinal(neighbor.similarity_rank)} closest among {total ?? "the"} reference signatures</span>
-      {neighbor.label && <span>Labelled {neighbor.label}</span>}
+    <li onMouseEnter={() => onHover(neighbor.compound_id)} onMouseLeave={() => onHover(null)} data-neighbor-row={neighbor.compound_id}>
+      <button type="button" className="neighbor-focus" onClick={() => onFocus(neighbor.compound_id)}><span>{number}.</span><strong>{neighbor.preferred_name}</strong></button>
+      {neighbor.label && <span className={`endpoint-reference-badge endpoint-${neighbor.label}`}>{context}: {neighbor.label === "active" ? "Active" : "Inactive"}</span>}
       {(neighbor.experimental_contexts ?? []).slice(0, 2).map((item) => <span key={item}>{item}</span>)}
-      {neighbor.full_signature_id && <Link to={`/analyze?catalogue_signature=${encodeURIComponent(neighbor.full_signature_id)}`}>Analyze this measured signature</Link>}
+      {neighbor.full_vector_available && <Link to={`/analyze?reference_context=${encodeURIComponent(context)}&reference_compound=${encodeURIComponent(neighbor.compound_id)}`}>Analyze this aggregated reference profile</Link>}
     </li>
   );
 }

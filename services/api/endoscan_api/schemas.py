@@ -54,6 +54,7 @@ __all__ = [
     "ExploreMapResponse",
     "ExploreNeighbor",
     "ExplorePoint",
+    "ExploreReferenceSignature",
     "HealthResponse",
     "LimitationsBlock",
     "LiteratureArticle",
@@ -69,6 +70,7 @@ __all__ = [
     "PathwayMethodBlock",
     "PathwaysRequest",
     "PathwaysResponse",
+    "PubMedCapabilityStatus",
     "PredictRequest",
     "PredictionResult",
 ]
@@ -118,6 +120,15 @@ class HealthResponse(BaseModel):
     endpoints_loaded: list[str]
     explain_available: bool
     explanation_capabilities: dict[str, ExplanationCapabilityStatus]
+    pubmed: PubMedCapabilityStatus
+
+
+class PubMedCapabilityStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    configured: bool
+    available: bool
+    reason: str | None = None
 
 
 class ExplanationCapabilityStatus(BaseModel):
@@ -353,11 +364,16 @@ class CatalogueCompound(BaseModel):
     compound_id: str
     preferred_name: str
     aliases: list[str]
-    pubchem_cid: int
+    pubchem_cid: int | None
     iupac_name: str | None = None
     canonical_smiles: str | None = None
     isomeric_smiles: str | None = None
     signatures: list[CatalogueSignatureSummary]
+    availability_status: str = "Condition-specific signatures available"
+    availability_reason: str | None = None
+    reference_contexts: list[str] = Field(default_factory=list)
+    source_compound_ids: list[str] = Field(default_factory=list)
+    lincs_perturbagen_ids: list[str] = Field(default_factory=list)
 
 
 class CatalogueSearchResponse(BaseModel):
@@ -404,6 +420,9 @@ class ExplorePoint(BaseModel):
     source_dataset: str | None = None
     experimental_contexts: list[str] = Field(default_factory=list)
     full_signature_id: str | None = None
+    full_vector_available: bool = True
+    underlying_condition_available: bool = False
+    profile_type: str = "Aggregated reference profile"
 
 
 class ExploreCounts(BaseModel):
@@ -469,6 +488,9 @@ class ExploreNeighbor(BaseModel):
     source_dataset: str | None = None
     experimental_contexts: list[str] = Field(default_factory=list)
     full_signature_id: str | None = None
+    full_vector_available: bool = True
+    underlying_condition_available: bool = False
+    profile_type: str = "Aggregated reference profile"
     similarity_category: str
     similarity_rank: int
     similarity_percentile: float
@@ -501,6 +523,37 @@ class ExploreLocateResponse(BaseModel):
     neighbors: list[ExploreNeighbor]
     domain: ExploreDomain
     exact_match: ExploreNeighbor | None = None
+
+
+class ExploreReferenceSignature(BaseModel):
+    """Exact support-matrix row and its explicit aggregate provenance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    context: str
+    compound_id: str
+    preferred_name: str | None = None
+    pubchem_cid: int | None = None
+    endpoint_label: str | None = None
+    profile_type: Literal["Aggregated reference profile"] = "Aggregated reference profile"
+    full_vector_available: Literal[True] = True
+    underlying_condition_available: bool = False
+    underlying_conditions: list[dict] = Field(default_factory=list)
+    value_type: Literal["differential_zscore"] = "differential_zscore"
+    value_type_label: str = "LINCS Level 5 differential z-score"
+    reference_comparison: str
+    source_dataset: str = "LINCS L1000, Level 5"
+    cell_models: list[str] = Field(default_factory=list)
+    aggregation_description: str
+    aggregate_pathway_warning: str
+    feature_names: list[str]
+    signature: dict[str, float]
+    n_genes: int
+    support_row_index: int
+    support_sha256: str
+    source_key: str
+    source_sha256: str
+    provenance: dict
 
 
 # --- Biological pathways (Reactome over-representation for an /explain result) --------

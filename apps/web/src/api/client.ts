@@ -14,6 +14,7 @@ import type {
   ExplanationResult,
   ExploreLocateResult,
   ExploreMap,
+  ExploreReferenceSignature,
   Health,
   InputValueType,
   LiteraturePathwayInput,
@@ -150,6 +151,10 @@ export const api = {
   // Explore: the committed data-space (UMAP) map for a context (404 when not yet computed).
   exploreUmap: (context: string) =>
     getJson<ExploreMap>(`/explore/${encodeURIComponent(context)}/umap`),
+  getReferenceSignature: (context: string, compoundId: string) =>
+    getJson<ExploreReferenceSignature>(
+      `/explore/${encodeURIComponent(context)}/signatures/${encodeURIComponent(compoundId)}`,
+    ),
   // Place by nearest neighbours; exact stored records use their committed map coordinates.
   exploreLocate: (context: string, signature: Signature, allow_extra = false) =>
     postJson<ExploreLocateResult>("/explore/locate", { context, signature, allow_extra }),
