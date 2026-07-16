@@ -4,22 +4,67 @@ import { Link } from "react-router-dom";
 import { EndoscanApiError, api } from "../../api/client";
 import type { EndpointSummary, ExploreLocateResult, ExploreNeighbor, Signature } from "../../api/types";
 import { useAsync } from "../../hooks/useAsync";
-import { useExplore } from "../../hooks/useExplore";
 import { ErrorNotice } from "../ErrorNotice";
 import { ExploreScatter } from "../ExploreScatter";
 
-export function ReferencePanel({ endpoints, signature }: { endpoints: EndpointSummary[]; signature: Signature }) {
-  const [context, setContext] = useState(endpoints[0]?.endpoint_id ?? "");
+export function ReferencePanel({
+  endpoints,
+  signature,
+  initialContext,
+  placementCache = {},
+  analysisPath,
+  onContext,
+  onPlacement,
+  onPlacementError,
+}: {
+  endpoints: EndpointSummary[];
+  signature: Signature;
+  initialContext?: string | null;
+  placementCache?: Record<string, ExploreLocateResult>;
+  analysisPath: string;
+  onContext?: (endpointId: string) => void;
+  onPlacement?: (endpointId: string, result: ExploreLocateResult) => void;
+  onPlacementError?: (endpointId: string, error: unknown) => void;
+}) {
+  const [context, setContext] = useState(initialContext ?? endpoints[0]?.endpoint_id ?? "");
   const [activeNeighborId, setActiveNeighborId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [selectedNeighborId, setSelectedNeighborId] = useState<string | null>(null);
+  const [placement, setPlacement] = useState<ExploreLocateResult | null>(placementCache[context] ?? null);
+  const [placementError, setPlacementError] = useState<unknown>(null);
+  const [placing, setPlacing] = useState(!placementCache[context]);
+  const [attempt, setAttempt] = useState(0);
   const map = useAsync(() => context ? api.exploreUmap(context) : Promise.reject(new Error("no context")), [context]);
-  const explore = useExplore(context);
 
   useEffect(() => {
-    if (context && map.data) explore.locate(signature);
+    if (!context || !map.data) return;
+    const cached = placementCache[context];
+    if (cached && attempt === 0) {
+      setPlacement(cached);
+      setPlacementError(null);
+      setPlacing(false);
+      return;
+    }
+    let alive = true;
+    setPlacing(true);
+    setPlacementError(null);
+    api.exploreLocate(context, signature)
+      .then((result) => {
+        if (!alive) return;
+        setPlacement(result);
+        setPlacing(false);
+        onPlacement?.(context, result);
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setPlacementError(error);
+        setPlacing(false);
+        onPlacementError?.(context, error);
+      });
+    return () => { alive = false; };
+    // Persistence callbacks must not trigger a new placement request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context, map.data, signature]);
+  }, [attempt, context, map.data, signature]);
 
   const notComputed = map.error instanceof EndoscanApiError && map.error.status === 404;
   return (
@@ -34,7 +79,7 @@ export function ReferencePanel({ endpoints, signature }: { endpoints: EndpointSu
           {endpoints.length > 1 && (
             <label className="reference-context-select">
               Endpoint reference set
-              <select value={context} onChange={(event) => { setContext(event.target.value); explore.reset(); setFocusId(null); setSelectedNeighborId(null); }}>
+              <select value={context} onChange={(event) => { const next = event.target.value; setContext(next); onContext?.(next); setPlacement(placementCache[next] ?? null); setAttempt(0); setFocusId(null); setSelectedNeighborId(null); }}>
                 {endpoints.map((endpoint) => <option key={endpoint.endpoint_id} value={endpoint.endpoint_id}>{endpoint.biological_target} ({endpoint.endpoint_id})</option>)}
               </select>
             </label>
@@ -45,7 +90,7 @@ export function ReferencePanel({ endpoints, signature }: { endpoints: EndpointSu
         {map.error != null && !notComputed && <ErrorNotice error={map.error} />}
         {map.data && <ExploreScatter
           points={map.data.points}
-          locate={explore.result}
+          locate={placement}
           activeNeighborId={activeNeighborId}
           focusId={focusId}
           selectedId={selectedNeighborId}
@@ -62,10 +107,10 @@ export function ReferencePanel({ endpoints, signature }: { endpoints: EndpointSu
         <p className="aside-label">Relative similarity</p>
         <h2>Most similar full gene-expression profiles</h2>
         <p className="check-plain">Reference records aggregate measured conditions; context is shown only when available.</p>
-        {explore.running && <p className="check-plain">Finding similar compounds…</p>}
-        {explore.error != null && <ErrorNotice error={explore.error} />}
-        {explore.result && <NeighborResults
-          result={explore.result}
+        {placing && <p className="check-plain">Finding similar compounds…</p>}
+        {placementError != null && <><ErrorNotice error={placementError} /><button className="detail-link" type="button" onClick={() => setAttempt((value) => value + 1)}>Recalculate reference placement</button></>}
+        {placement && <NeighborResults
+          result={placement}
           context={context}
           selectedId={selectedNeighborId}
           onHover={setActiveNeighborId}
@@ -74,7 +119,8 @@ export function ReferencePanel({ endpoints, signature }: { endpoints: EndpointSu
             setSelectedNeighborId(id);
           }}
         />}
-        <Link className="detail-link" to="/explore">Open the full reference view</Link>
+        {placement && placementError == null && <button className="detail-link" type="button" onClick={() => setAttempt((value) => value + 1)}>Recalculate reference placement</button>}
+        <Link className="detail-link" to={`/explore?return_to=${encodeURIComponent(analysisPath)}`}>Open the full reference view</Link>
       </aside>
     </div>
   );

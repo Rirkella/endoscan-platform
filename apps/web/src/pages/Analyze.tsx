@@ -11,16 +11,13 @@
 // report/known-molecule areas are explicitly badged as not-yet-available.
 
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { api } from "../api/client";
 import {
   predictionScore,
   type EndpointCompatibility,
   type EndpointSummary,
-  type InputValueType,
-  type ParseResult,
-  type Signature,
 } from "../api/types";
 import { PlannedBadge } from "../components/PlannedBadge";
 import { ErrorNotice } from "../components/ErrorNotice";
@@ -31,28 +28,23 @@ import { SourceStep } from "../components/analyze/SourceStep";
 import { ValidationStep } from "../components/analyze/ValidationStep";
 import { type EndpointSignal, useAnalyze } from "../hooks/useAnalyze";
 import { useAsync } from "../hooks/useAsync";
+import {
+  guestAnalysisRepository,
+  setActiveAnalysisId,
+  type GuestAnalysisRecord,
+  type PreparedAnalysisInput,
+} from "../session/guestAnalysis";
 
 export type AnalyzeStep = "source" | "validate" | "running" | "result";
 export type ResultTab = "overview" | "biological" | "endpoint" | "similar" | "report";
 
 // What the user prepared, for display in validate/result headers. `signature` is the REAL payload.
-export interface PreparedInput {
-  title: string;
-  subtitle: string;
-  kind: "file" | "paste" | "catalogue" | "reference";
-  signature: Signature;
-  parse: ParseResult;
-  allowExtra: boolean;
-  inputValueType: InputValueType;
-  profileType?: string;
-  valueTypeLabel?: string;
-  referenceComparison?: string;
-  aggregationWarning?: string;
-  cellModels?: string[];
-  experimentalContext?: string;
-}
+export type PreparedInput = PreparedAnalysisInput;
 
 export function Analyze() {
+  const { analysisId } = useParams<{ analysisId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const catalogueSignatureId = searchParams.get("catalogue_signature");
   const referenceContext = searchParams.get("reference_context");
@@ -60,7 +52,8 @@ export function Analyze() {
   const catalogueHandled = useRef(false);
   const referenceHandled = useRef(false);
   const endpoints = useAsync(() => api.listEndpoints(), []);
-  const endpointList = endpoints.data ?? [];
+  const [record, setRecord] = useState<GuestAnalysisRecord | null>(null);
+  const endpointList = endpoints.data ?? record?.model_registry_snapshot ?? [];
   const analyze = useAnalyze(endpointList);
 
   const [step, setStep] = useState<AnalyzeStep>("source");
@@ -69,9 +62,73 @@ export function Analyze() {
   const [runError, setRunError] = useState<unknown>(null);
   const [catalogueLoading, setCatalogueLoading] = useState(false);
   const [catalogueError, setCatalogueError] = useState<unknown>(null);
+  const [restoring, setRestoring] = useState(Boolean(analysisId));
+  const [unavailable, setUnavailable] = useState(false);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
+  const [selectedEndpoint, setSelectedEndpoint] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!catalogueSignatureId || catalogueHandled.current) return;
+    if (!analysisId) {
+      setRecord(null);
+      setPrepared(null);
+      setStep("source");
+      setUnavailable(false);
+      setRestoring(false);
+      setResultTab("overview");
+      setSelectedEndpoint(null);
+      catalogueHandled.current = false;
+      referenceHandled.current = false;
+      return;
+    }
+    let alive = true;
+    setRestoring(true);
+    setUnavailable(false);
+    void guestAnalysisRepository.get(analysisId)
+      .then((saved) => {
+        if (!alive) return;
+        if (!saved) {
+          setUnavailable(true);
+          return;
+        }
+        const requestedTab = parseResultTab(searchParams.get("tab")) ?? saved.last_viewed_tab;
+        const requestedEndpoint = searchParams.get("endpoint") ?? saved.selected_endpoint;
+        setActiveAnalysisId(saved.id);
+        setRecord(saved);
+        setPrepared(saved.prepared_input);
+        setResultTab(requestedTab);
+        setSelectedEndpoint(requestedEndpoint);
+        if (saved.analysis_result) {
+          analyze.hydrate({
+            signals: saved.analysis_result.signals,
+            signature: saved.signature,
+            summary: saved.analysis_result.summary,
+          });
+          setRunError(saved.analysis_result.run_error);
+          setStep("result");
+        } else {
+          setStep(saved.status === "running" ? "validate" : "validate");
+        }
+        void guestAnalysisRepository.touch(saved.id, { tab: requestedTab, endpoint: requestedEndpoint })
+          .catch(() => setStorageWarning("This analysis is available now but could not be saved in the session workspace."));
+        const scroll = readScrollPosition(saved.id);
+        if (scroll > 0) requestAnimationFrame(() => window.scrollTo({ top: scroll }));
+      })
+      .catch(() => {
+        if (alive) setUnavailable(true);
+      })
+      .finally(() => {
+        if (alive) setRestoring(false);
+      });
+    return () => {
+      alive = false;
+      saveScrollPosition(analysisId);
+    };
+    // Loading a saved result must not depend on live endpoint requests or rerun analysis.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisId]);
+
+  useEffect(() => {
+    if (analysisId || !catalogueSignatureId || catalogueHandled.current) return;
     catalogueHandled.current = true;
     setCatalogueLoading(true);
     setCatalogueError(null);
@@ -101,10 +158,10 @@ export function Analyze() {
       })
       .catch(setCatalogueError)
       .finally(() => setCatalogueLoading(false));
-  }, [catalogueSignatureId]);
+  }, [analysisId, catalogueSignatureId]);
 
   useEffect(() => {
-    if (!referenceContext || !referenceCompound || referenceHandled.current) return;
+    if (analysisId || !referenceContext || !referenceCompound || referenceHandled.current) return;
     referenceHandled.current = true;
     setCatalogueLoading(true);
     setCatalogueError(null);
@@ -140,41 +197,120 @@ export function Analyze() {
       })
       .catch(setCatalogueError)
       .finally(() => setCatalogueLoading(false));
-  }, [referenceContext, referenceCompound]);
+  }, [analysisId, referenceContext, referenceCompound]);
 
-  function onPrepared(input: PreparedInput) {
+  async function onPrepared(input: PreparedInput) {
     setPrepared(input);
     setStep("validate");
+    try {
+      const saved = await guestAnalysisRepository.create(input, endpointList);
+      if (!guestAnalysisRepository.isDurable()) {
+        setStorageWarning("This analysis is available now but could not be saved in the session workspace.");
+      }
+      setRecord(saved);
+      setActiveAnalysisId(saved.id);
+      const target = `/analyze/${encodeURIComponent(saved.id)}`;
+      window.history.replaceState(window.history.state, "", target);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    } catch (error) {
+      setStorageWarning("This analysis is available now but could not be saved in the session workspace.");
+      console.warn("Guest analysis persistence failed", error);
+    }
   }
 
   async function onRun() {
     if (!prepared) return;
     setStep("running");
     setRunError(null);
+    if (record) await persistPatch({ status: "running" });
     try {
-      await analyze.run(
+      const completed = await analyze.run(
         prepared.signature,
         prepared.parse.compatible_endpoint_ids,
         prepared.allowExtra,
         prepared.inputValueType,
       );
+      const status = completed.summary.status === "ok"
+        ? "completed"
+        : completed.summary.status === "partial"
+          ? "partially_completed"
+          : "failed";
+      await persistPatch({
+        status,
+        analysis_result: { signals: completed.signals, summary: completed.summary, run_error: null },
+      });
     } catch (e) {
       setRunError(e);
+      await persistPatch({
+        status: "failed",
+        analysis_result: { signals: [], summary: null, run_error: errorMessage(e) },
+      });
     } finally {
-      setResultTab("overview");
+      changeTab("overview");
       setStep("result");
     }
   }
 
-  function reset() {
-    setStep("source");
-    setPrepared(null);
-    setResultTab("overview");
-    setRunError(null);
+  async function persistPatch(patch: Partial<GuestAnalysisRecord>) {
+    if (!record) return;
+    setRecord((current) => current ? { ...current, ...patch } : current);
+    try {
+      const saved = await guestAnalysisRepository.update(record.id, patch);
+      if (!guestAnalysisRepository.isDurable()) {
+        setStorageWarning("This analysis is available now but could not be saved in the session workspace.");
+      }
+      setRecord(saved);
+    } catch {
+      setStorageWarning("This analysis is available now but could not be saved in the session workspace.");
+    }
   }
+
+  async function saveCapability(
+    field: "endpoint_explanations" | "endpoint_pathways" | "supporting_literature" | "reference_placements",
+    key: string,
+    value: unknown,
+  ) {
+    if (!record) return;
+    const latest = await guestAnalysisRepository.get(record.id).catch(() => null) ?? record;
+    await persistPatch({ [field]: { ...latest[field], [key]: value } } as Partial<GuestAnalysisRecord>);
+  }
+
+  async function saveCapabilityError(key: string, error: unknown) {
+    if (!record) return;
+    const latest = await guestAnalysisRepository.get(record.id).catch(() => null) ?? record;
+    await persistPatch({
+      status: latest.status === "failed" ? "failed" : "partially_completed",
+      errors_by_capability: { ...latest.errors_by_capability, [key]: errorMessage(error) },
+    });
+  }
+
+  function changeTab(tab: ResultTab) {
+    setResultTab(tab);
+    if (!analysisId) return;
+    const params = new URLSearchParams(location.search);
+    params.set("tab", tab);
+    if (selectedEndpoint) params.set("endpoint", selectedEndpoint);
+    window.history.replaceState(window.history.state, "", `${location.pathname}?${params.toString()}`);
+    void persistPatch({ last_viewed_tab: tab, last_opened_at: new Date().toISOString() });
+  }
+
+  function changeSelectedEndpoint(endpointId: string) {
+    setSelectedEndpoint(endpointId);
+    if (analysisId) {
+      const params = new URLSearchParams(location.search);
+      params.set("tab", "endpoint");
+      params.set("endpoint", endpointId);
+      window.history.replaceState(window.history.state, "", `${location.pathname}?${params.toString()}`);
+      void persistPatch({ selected_endpoint: endpointId, last_viewed_tab: "endpoint" });
+    }
+  }
+
+  if (restoring) return <section className="session-state"><h1>Restoring analysis…</h1><p>Loading the saved result from this browser session.</p></section>;
+  if (unavailable) return <UnavailableAnalysis />;
 
   return (
     <div className="analyze-page">
+      {storageWarning && <div className="session-storage-warning" role="status"><span>{storageWarning}</span><button type="button" onClick={() => setStorageWarning(null)}>Dismiss</button></div>}
       {step !== "result" && (
         <>
           <div className="page-header">
@@ -220,11 +356,55 @@ export function Analyze() {
           allFailed={analyze.summary?.status === "all_failed"}
           runError={runError}
           tab={resultTab}
-          setTab={setResultTab}
-          onNew={reset}
+          setTab={changeTab}
+          selectedEndpoint={selectedEndpoint}
+          onSelectedEndpoint={changeSelectedEndpoint}
+          record={record}
+          analysisPath={analysisId ? `/analyze/${encodeURIComponent(analysisId)}?tab=${encodeURIComponent(resultTab)}${selectedEndpoint ? `&endpoint=${encodeURIComponent(selectedEndpoint)}` : ""}` : "/analyze"}
+          onBiologicalResponse={(result) => void persistPatch({ biological_response: result })}
+          onExplanation={(endpointId, result) => void saveCapability("endpoint_explanations", endpointId, result)}
+          onPathways={(endpointId, result) => void saveCapability("endpoint_pathways", endpointId, result)}
+          onLiterature={(endpointId, result) => void saveCapability("supporting_literature", endpointId, result)}
+          onPlacement={(endpointId, result) => void saveCapability("reference_placements", endpointId, result)}
+          onCapabilityError={(key, error) => void saveCapabilityError(key, error)}
+          onNew={() => navigate("/analyze")}
         />
       )}
+      {record && <p className="session-privacy-note">Stored locally in this browser for the current guest session.</p>}
     </div>
+  );
+}
+
+function parseResultTab(value: string | null): ResultTab | null {
+  return (["overview", "biological", "endpoint", "similar", "report"] as ResultTab[]).includes(value as ResultTab)
+    ? value as ResultTab
+    : null;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? "Unknown error");
+}
+
+function saveScrollPosition(analysisId: string): void {
+  try { sessionStorage.setItem(`endoscan.scroll.${analysisId}`, String(window.scrollY)); } catch { /* optional */ }
+}
+
+function readScrollPosition(analysisId: string): number {
+  try { return Number(sessionStorage.getItem(`endoscan.scroll.${analysisId}`) ?? 0) || 0; } catch { return 0; }
+}
+
+function UnavailableAnalysis() {
+  const navigate = useNavigate();
+  return (
+    <section className="session-state">
+      <p className="eyebrow">Guest session</p>
+      <h1>This analysis is not available in the current browser session.</h1>
+      <p>It may have been deleted, cleared, or created in another browser session.</p>
+      <div className="session-state-actions">
+        <button className="button primary" type="button" onClick={() => navigate("/projects")}>Go to Projects</button>
+        <button className="button secondary" type="button" onClick={() => navigate("/analyze")}>Start a new analysis</button>
+      </div>
+    </section>
   );
 }
 
@@ -267,6 +447,16 @@ function ResultWorkspace({
   runError,
   tab,
   setTab,
+  selectedEndpoint,
+  onSelectedEndpoint,
+  record,
+  analysisPath,
+  onBiologicalResponse,
+  onExplanation,
+  onPathways,
+  onLiterature,
+  onPlacement,
+  onCapabilityError,
   onNew,
 }: {
   input: PreparedInput;
@@ -276,6 +466,16 @@ function ResultWorkspace({
   runError: unknown;
   tab: ResultTab;
   setTab: (t: ResultTab) => void;
+  selectedEndpoint: string | null;
+  onSelectedEndpoint: (endpointId: string) => void;
+  record: GuestAnalysisRecord | null;
+  analysisPath: string;
+  onBiologicalResponse: (result: GuestAnalysisRecord["biological_response"] extends infer T ? NonNullable<T> : never) => void;
+  onExplanation: (endpointId: string, result: GuestAnalysisRecord["endpoint_explanations"][string]) => void;
+  onPathways: (endpointId: string, result: GuestAnalysisRecord["endpoint_pathways"][string]) => void;
+  onLiterature: (endpointId: string, result: GuestAnalysisRecord["supporting_literature"][string]) => void;
+  onPlacement: (endpointId: string, result: GuestAnalysisRecord["reference_placements"][string]) => void;
+  onCapabilityError: (key: string, error: unknown) => void;
   onNew: () => void;
 }) {
   const scored = signals.filter((s) => s.result != null);
@@ -286,7 +486,7 @@ function ResultWorkspace({
       <div className="result-header">
         <div>
           <button className="back-link" onClick={onNew}>
-            Back to new analysis
+          New analysis
           </button>
           <p className="eyebrow">Transcriptomic analysis result</p>
           <h1>{input.title}</h1>
@@ -336,6 +536,9 @@ function ResultWorkspace({
           signature={input.signature}
           inputValueType={input.inputValueType}
           aggregationWarning={input.aggregationWarning}
+          initialResult={record?.biological_response}
+          onResult={onBiologicalResponse}
+          onError={(error) => onCapabilityError("biological-response", error)}
         />
       )}
       {tab === "endpoint" && (
@@ -343,9 +546,27 @@ function ResultWorkspace({
           signals={signals}
           signature={input.signature}
           compound={input.kind === "catalogue" || input.kind === "reference" ? input.title : undefined}
+          selectedEndpoint={selectedEndpoint}
+          onSelectedEndpoint={onSelectedEndpoint}
+          explanationCache={record?.endpoint_explanations}
+          pathwayCache={record?.endpoint_pathways}
+          literatureCache={record?.supporting_literature}
+          onExplanation={onExplanation}
+          onPathways={onPathways}
+          onLiterature={onLiterature}
+          onCapabilityError={onCapabilityError}
         />
       )}
-      {tab === "similar" && <ReferencePanel endpoints={endpoints} signature={input.signature} />}
+      {tab === "similar" && <ReferencePanel
+        endpoints={endpoints}
+        signature={input.signature}
+        initialContext={selectedEndpoint}
+        placementCache={record?.reference_placements}
+        analysisPath={analysisPath}
+        onContext={onSelectedEndpoint}
+        onPlacement={onPlacement}
+        onPlacementError={(endpointId, error) => onCapabilityError(`reference-placement:${endpointId}`, error)}
+      />}
       {tab === "report" && <ReportTab input={input} signals={signals} nAbove={nAbove} />}
     </div>
   );
@@ -414,7 +635,6 @@ function OverviewTab({
             <EndpointResultCard
               key={s.endpoint_id}
               signal={s}
-              signature={input.signature}
               compatibility={input.parse.compatibility.find(
                 (item) => item.endpoint_id === s.endpoint_id,
               )}
@@ -469,12 +689,10 @@ function OverviewTab({
 
 function EndpointResultCard({
   signal,
-  signature,
   compatibility,
   onEvidence,
 }: {
   signal: EndpointSignal;
-  signature: Signature;
   compatibility?: EndpointCompatibility;
   onEvidence: () => void;
 }) {
@@ -537,7 +755,6 @@ function EndpointResultCard({
       <p className="score-disclaimer">
         Model signal score — not a calibrated probability of a real-world outcome.
       </p>
-      <EndpointCardClues endpointId={signal.endpoint_id} signature={signature} />
       <details className="technical-disclosure endpoint-technical">
         <summary>Model and provenance details</summary>
         <dl className="technical-grid">
@@ -551,33 +768,6 @@ function EndpointResultCard({
         View endpoint evidence
       </button>
     </article>
-  );
-}
-
-function EndpointCardClues({
-  endpointId,
-  signature,
-}: {
-  endpointId: string;
-  signature?: Signature;
-}) {
-  if (!signature) return null;
-  return <EndpointCardCluesLoaded endpointId={endpointId} signature={signature} />;
-}
-
-function EndpointCardCluesLoaded({ endpointId, signature }: { endpointId: string; signature: Signature }) {
-  const explanation = useAsync(() => api.explain(endpointId, signature, 3), [endpointId, signature]);
-  const pathways = useAsync(() => api.interpretPathways(endpointId, signature), [endpointId, signature]);
-  if (!explanation.data && !pathways.data?.pathways.length) return null;
-  return (
-    <div className="endpoint-clues">
-      {explanation.data && (
-        <div><span>Leading contributors</span><strong>{explanation.data.top_contributors.slice(0, 3).map((item) => item.gene).join(" · ")}</strong></div>
-      )}
-      {pathways.data?.pathways.length ? (
-        <div><span>Biological clues</span><strong>{pathways.data.pathways.slice(0, 2).map((item) => item.name).join(" · ")}</strong></div>
-      ) : null}
-    </div>
   );
 }
 

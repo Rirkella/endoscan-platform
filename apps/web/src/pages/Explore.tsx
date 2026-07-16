@@ -10,7 +10,7 @@
 // Input uses the same server-validated upload path as Analyze; raw JSON remains advanced.
 
 import { type FormEvent, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { EndoscanApiError, api } from "../api/client";
 import type {
@@ -45,6 +45,9 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 
 export function Explore() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedReturn = searchParams.get("return_to");
+  const returnTo = requestedReturn?.startsWith("/analyze/") ? requestedReturn : null;
   const endpoints = useAsync(() => api.listEndpoints(), []);
   const [context, setContext] = useState<string | null>(null);
   const [labelFilter, setLabelFilter] = useState<LabelFilter>("all");
@@ -144,6 +147,7 @@ export function Explore() {
             similar response patterns — not necessarily the same toxicological effect.
           </p>
         </div>
+        {returnTo && <Link className="button secondary" to={returnTo}>Back to analysis</Link>}
       </div>
 
       <div className="reference-toolbar">

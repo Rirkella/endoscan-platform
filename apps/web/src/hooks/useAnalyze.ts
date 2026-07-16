@@ -29,6 +29,11 @@ export interface AnalyzeState {
   summary: AnalyzeResponse["summary"] | null;
 }
 
+export interface CompletedAnalyzeState {
+  signals: EndpointSignal[];
+  summary: AnalyzeResponse["summary"];
+}
+
 // Phase 2: one POST /analyze call returns the per-endpoint array (server-side fan-out with
 // per-endpoint isolation). Falls back to a client-side /predict fan-out if /analyze is absent
 // (404) — graceful during rollout. Never hardcodes the endpoint set.
@@ -64,7 +69,7 @@ export function useAnalyze(endpoints: EndpointSummary[]) {
     endpointIds: string[],
     allowExtra = false,
     inputValueType: InputValueType = "ranked_statistic",
-  ) {
+  ): Promise<CompletedAnalyzeState> {
     setState({ signals: [], signature, running: true, summary: null });
     let signals: EndpointSignal[];
     let summary: AnalyzeResponse["summary"] | null = null;
@@ -108,8 +113,14 @@ export function useAnalyze(endpoints: EndpointSummary[]) {
         throw err;
       }
     }
+    const completed = { signals, summary: summary! };
     setState({ signals, signature, running: false, summary });
+    return completed;
   }
 
-  return { ...state, run };
+  function hydrate(next: Pick<AnalyzeState, "signals" | "signature" | "summary">) {
+    setState({ ...next, running: false });
+  }
+
+  return { ...state, run, hydrate };
 }

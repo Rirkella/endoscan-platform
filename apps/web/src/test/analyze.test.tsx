@@ -245,7 +245,7 @@ describe("evidence tab — correct method label per endpoint", () => {
     await analyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     expect(await screen.findByText(/Endpoint explanation could not be prepared/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry explanation" })).toBeInTheDocument();
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(screen.getByText(/Pathway and literature context are unavailable/i)).toBeInTheDocument();
   });

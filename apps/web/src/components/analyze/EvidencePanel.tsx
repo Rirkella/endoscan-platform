@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { EndoscanApiError, api } from "../../api/client";
-import { predictionScore, type ExplanationCapabilityStatus, type PathwaysResponse, type Signature } from "../../api/types";
+import {
+  predictionScore,
+  type ExplanationCapabilityStatus,
+  type ExplanationResult,
+  type LiteratureResponse,
+  type PathwaysResponse,
+  type Signature,
+} from "../../api/types";
 import type { EndpointSignal } from "../../hooks/useAnalyze";
-import { useAsync } from "../../hooks/useAsync";
 import { GeneContributionCards } from "../GeneContributionCards";
 import { LiteraturePanel } from "../LiteraturePanel";
 import { PathwaysPanel } from "../PathwaysPanel";
@@ -13,13 +19,37 @@ export function EvidencePanel({
   signals,
   signature,
   compound,
+  selectedEndpoint,
+  onSelectedEndpoint,
+  explanationCache = {},
+  pathwayCache = {},
+  literatureCache = {},
+  onExplanation,
+  onPathways,
+  onLiterature,
+  onCapabilityError,
 }: {
   signals: EndpointSignal[];
   signature: Signature;
   compound?: string;
+  selectedEndpoint?: string | null;
+  onSelectedEndpoint?: (endpointId: string) => void;
+  explanationCache?: Record<string, ExplanationResult>;
+  pathwayCache?: Record<string, PathwaysResponse>;
+  literatureCache?: Record<string, LiteratureResponse>;
+  onExplanation?: (endpointId: string, result: ExplanationResult) => void;
+  onPathways?: (endpointId: string, result: PathwaysResponse) => void;
+  onLiterature?: (endpointId: string, result: LiteratureResponse) => void;
+  onCapabilityError?: (key: string, error: unknown) => void;
 }) {
   const scored = signals.filter((signal) => signal.result != null);
-  const [selected, setSelected] = useState(scored[0]?.endpoint_id ?? "");
+  const [internalSelected, setInternalSelected] = useState(scored[0]?.endpoint_id ?? "");
+  const selected = selectedEndpoint ?? internalSelected;
+
+  function select(endpointId: string) {
+    setInternalSelected(endpointId);
+    onSelectedEndpoint?.(endpointId);
+  }
 
   if (scored.length === 0) return <div className="evidence-empty"><p>No endpoint produced a result to explain for this signature.</p></div>;
   const active = scored.find((signal) => signal.endpoint_id === selected) ?? scored[0];
@@ -32,7 +62,7 @@ export function EvidencePanel({
           <button
             key={signal.endpoint_id}
             className={signal.endpoint_id === active.endpoint_id ? "selected" : ""}
-            onClick={() => setSelected(signal.endpoint_id)}
+            onClick={() => select(signal.endpoint_id)}
           >
             <span className="endpoint-code code-generic">{signal.endpoint_id}</span>
             <span>
@@ -56,6 +86,13 @@ export function EvidencePanel({
           signature={signature}
           compound={compound}
           capability={active.explanation}
+          initialExplanation={explanationCache[active.endpoint_id]}
+          initialPathways={pathwayCache[active.endpoint_id]}
+          initialLiterature={literatureCache[active.endpoint_id]}
+          onExplanation={(result) => onExplanation?.(active.endpoint_id, result)}
+          onPathways={(result) => onPathways?.(active.endpoint_id, result)}
+          onLiterature={(result) => onLiterature?.(active.endpoint_id, result)}
+          onCapabilityError={(capability, error) => onCapabilityError?.(`${capability}:${active.endpoint_id}`, error)}
         />
         <section className="compact-model-status" aria-label="Model status">
           <span className="status-chip status-note">Experimental model</span>
@@ -72,11 +109,25 @@ function EndpointExplanation({
   signature,
   compound,
   capability,
+  initialExplanation,
+  initialPathways,
+  initialLiterature,
+  onExplanation,
+  onPathways,
+  onLiterature,
+  onCapabilityError,
 }: {
   endpointId: string;
   signature: Signature;
   compound?: string;
   capability: ExplanationCapabilityStatus;
+  initialExplanation?: ExplanationResult;
+  initialPathways?: PathwaysResponse;
+  initialLiterature?: LiteratureResponse;
+  onExplanation?: (result: ExplanationResult) => void;
+  onPathways?: (result: PathwaysResponse) => void;
+  onLiterature?: (result: LiteratureResponse) => void;
+  onCapabilityError?: (capability: string, error: unknown) => void;
 }) {
   if (!capability.available) {
     return (
@@ -89,13 +140,74 @@ function EndpointExplanation({
       </>
     );
   }
-  return <AvailableExplanation endpointId={endpointId} signature={signature} compound={compound} />;
+  return <AvailableExplanation
+    endpointId={endpointId}
+    signature={signature}
+    compound={compound}
+    initialExplanation={initialExplanation}
+    initialPathways={initialPathways}
+    initialLiterature={initialLiterature}
+    onExplanation={onExplanation}
+    onPathways={onPathways}
+    onLiterature={onLiterature}
+    onCapabilityError={onCapabilityError}
+  />;
 }
 
-function AvailableExplanation({ endpointId, signature, compound }: { endpointId: string; signature: Signature; compound?: string }) {
+function AvailableExplanation({
+  endpointId,
+  signature,
+  compound,
+  initialExplanation,
+  initialPathways,
+  initialLiterature,
+  onExplanation,
+  onPathways,
+  onLiterature,
+  onCapabilityError,
+}: {
+  endpointId: string;
+  signature: Signature;
+  compound?: string;
+  initialExplanation?: ExplanationResult;
+  initialPathways?: PathwaysResponse;
+  initialLiterature?: LiteratureResponse;
+  onExplanation?: (result: ExplanationResult) => void;
+  onPathways?: (result: PathwaysResponse) => void;
+  onLiterature?: (result: LiteratureResponse) => void;
+  onCapabilityError?: (capability: string, error: unknown) => void;
+}) {
   const [attempt, setAttempt] = useState(0);
-  const state = useAsync(() => api.explain(endpointId, signature), [endpointId, signature, attempt]);
-  const [pathways, setPathways] = useState<PathwaysResponse | null>(null);
+  const [state, setState] = useState<{ data: ExplanationResult | null; error: unknown; loading: boolean }>({
+    data: initialExplanation ?? null,
+    error: null,
+    loading: !initialExplanation,
+  });
+  const [pathways, setPathways] = useState<PathwaysResponse | null>(initialPathways ?? null);
+
+  useEffect(() => {
+    if (initialExplanation && attempt === 0) {
+      setState({ data: initialExplanation, error: null, loading: false });
+      return;
+    }
+    let alive = true;
+    setState((current) => ({ data: attempt > 0 ? current.data : null, error: null, loading: true }));
+    api.explain(endpointId, signature)
+      .then((data) => {
+        if (!alive) return;
+        setState({ data, error: null, loading: false });
+        onExplanation?.(data);
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setState((current) => ({ data: current.data, error, loading: false }));
+        onCapabilityError?.("explanation", error);
+      });
+    return () => { alive = false; };
+    // Persistence callbacks are intentionally not dependencies; changing a parent callback must not
+    // repeat an explanation request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt, endpointId, signature]);
 
   if (state.error != null) {
     const requestId = state.error instanceof EndoscanApiError ? state.error.request_id : null;
@@ -103,7 +215,7 @@ function AvailableExplanation({ endpointId, signature, compound }: { endpointId:
       <>
         <section className="evidence-embed explanation-error" role="alert">
           <strong>Endpoint explanation could not be prepared.</strong>
-          <button className="detail-link" type="button" onClick={() => setAttempt((value) => value + 1)}>Retry</button>
+          <button className="detail-link" type="button" onClick={() => setAttempt((value) => value + 1)}>Retry explanation</button>
           {requestId && requestId !== "unavailable" && (
             <details><summary>Error details</summary><p>Request ID: <span className="mono">{requestId}</span></p></details>
           )}
@@ -121,7 +233,13 @@ function AvailableExplanation({ endpointId, signature, compound }: { endpointId:
       </section>
       {state.data && (
         <>
-          <section className="evidence-embed"><PathwaysPanel endpointId={endpointId} signature={signature} onResult={setPathways} /></section>
+          <section className="evidence-embed"><PathwaysPanel
+            endpointId={endpointId}
+            signature={signature}
+            initialResult={initialPathways}
+            onResult={(result) => { setPathways(result); onPathways?.(result); }}
+            onError={(error) => onCapabilityError?.("pathways", error)}
+          /></section>
           <section className="evidence-embed">
             <LiteraturePanel
               endpointId={endpointId}
@@ -132,6 +250,9 @@ function AvailableExplanation({ endpointId, signature, compound }: { endpointId:
                 genes: item.genes_influencing_result,
               }))}
               compound={compound}
+              initialResult={initialLiterature}
+              onResult={onLiterature}
+              onError={(error) => onCapabilityError?.("literature", error)}
             />
           </section>
         </>

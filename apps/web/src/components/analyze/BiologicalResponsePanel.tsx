@@ -1,6 +1,7 @@
+import { useEffect, useState } from "react";
+
 import { api } from "../../api/client";
-import type { BiologicalPathwayCard, InputValueType, Signature } from "../../api/types";
-import { useAsync } from "../../hooks/useAsync";
+import type { BiologicalPathwayCard, BiologicalResponse, InputValueType, Signature } from "../../api/types";
 import { ErrorNotice } from "../ErrorNotice";
 import { GeneLevelResponse } from "./GeneLevelResponse";
 
@@ -19,15 +20,45 @@ export function BiologicalResponsePanel({
   signature,
   inputValueType,
   aggregationWarning,
+  initialResult,
+  onResult,
+  onError,
 }: {
   signature: Signature;
   inputValueType: InputValueType;
   aggregationWarning?: string;
+  initialResult?: BiologicalResponse | null;
+  onResult?: (result: BiologicalResponse) => void;
+  onError?: (error: unknown) => void;
 }) {
-  const state = useAsync(
-    () => api.interpretBiologicalResponse(signature, inputValueType),
-    [signature, inputValueType],
-  );
+  const [state, setState] = useState<{ data: BiologicalResponse | null; error: unknown; loading: boolean }>({
+    data: initialResult ?? null,
+    error: null,
+    loading: !initialResult,
+  });
+
+  useEffect(() => {
+    if (initialResult) {
+      setState({ data: initialResult, error: null, loading: false });
+      return;
+    }
+    let alive = true;
+    setState({ data: null, error: null, loading: true });
+    api.interpretBiologicalResponse(signature, inputValueType)
+      .then((data) => {
+        if (!alive) return;
+        setState({ data, error: null, loading: false });
+        onResult?.(data);
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setState({ data: null, error, loading: false });
+        onError?.(error);
+      });
+    return () => { alive = false; };
+    // Persistence callbacks are intentionally excluded so a parent render cannot rerun the request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialResult, inputValueType, signature]);
 
   const supported = state.data?.status === "ok"
     ? [...state.data.increased_pathways, ...state.data.decreased_pathways]

@@ -7,19 +7,19 @@
 import { useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 
+import { useActiveAnalysisId, useGuestAnalyses } from "./session/useGuestAnalyses";
+
 interface NavItem {
   to: string;
   label: string;
-  preview?: boolean; // a planned/mock area — tagged in the nav so it never reads as fully working
 }
 
-// Sidebar workspace nav — meaningful product labels, real routes. Projects is a preview (no
-// persistence backend), tagged so it is never presented as an equal working section.
+// Sidebar workspace nav with real routes and a session-local analysis workspace.
 const NAV: NavItem[] = [
   { to: "/analyze", label: "Analyze" },
   { to: "/library", label: "Model library" },
   { to: "/explore", label: "Reference data" },
-  { to: "/projects", label: "Projects", preview: true },
+  { to: "/projects", label: "Projects" },
 ];
 
 function currentLabel(pathname: string): string {
@@ -33,6 +33,9 @@ function currentLabel(pathname: string): string {
 export default function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const { pathname } = useLocation();
+  const activeAnalysisId = useActiveAnalysisId();
+  const { analyses } = useGuestAnalyses();
+  const activeAnalysis = analyses.find((item) => item.id === activeAnalysisId) ?? null;
 
   return (
     <div className="app-shell">
@@ -63,15 +66,24 @@ export default function App() {
           {NAV.map((item) => (
             <NavLink
               key={item.to}
-              to={item.to}
+              to={item.to === "/analyze" && activeAnalysisId ? `/analyze/${encodeURIComponent(activeAnalysisId)}` : item.to}
               className={({ isActive }) => (isActive ? "nav-active" : "")}
               onClick={() => setMobileNav(false)}
             >
               <span>{item.label}</span>
-              {item.preview && <small className="nav-preview">Preview</small>}
+              {item.to === "/projects" && analyses.length > 0 && <small className="nav-count">{analyses.length}</small>}
             </NavLink>
           ))}
         </nav>
+
+        <Link className="sidebar-new-analysis" to="/analyze" onClick={() => setMobileNav(false)}>New analysis</Link>
+
+        {activeAnalysis && (
+          <div className="current-analysis-indicator">
+            <span>Current analysis</span>
+            <strong>{activeAnalysis.user_defined_name || activeAnalysis.title}</strong>
+          </div>
+        )}
 
         <div className="sidebar-footer">
           <div className="workspace-avatar">ES</div>

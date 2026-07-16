@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api } from "../api/client";
-import type { LiteratureArticle, LiteraturePathwayInput } from "../api/types";
-import { useAsync } from "../hooks/useAsync";
+import type { LiteratureArticle, LiteraturePathwayInput, LiteratureResponse } from "../api/types";
 import { ErrorNotice } from "./ErrorNotice";
 
 export function LiteraturePanel({
@@ -10,17 +9,48 @@ export function LiteraturePanel({
   genes,
   pathways,
   compound,
+  initialResult,
+  onResult,
+  onError,
 }: {
   endpointId: string;
   genes: string[];
   pathways: LiteraturePathwayInput[];
   compound?: string;
+  initialResult?: LiteratureResponse | null;
+  onResult?: (result: LiteratureResponse) => void;
+  onError?: (error: unknown) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const state = useAsync(
-    () => api.interpretLiterature(endpointId, genes, pathways, compound),
-    [endpointId, genes.join(","), JSON.stringify(pathways), compound],
-  );
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<{ data: LiteratureResponse | null; error: unknown; loading: boolean }>({
+    data: initialResult ?? null,
+    error: null,
+    loading: !initialResult,
+  });
+
+  useEffect(() => {
+    if (initialResult && attempt === 0) {
+      setState({ data: initialResult, error: null, loading: false });
+      return;
+    }
+    let alive = true;
+    setState((current) => ({ data: attempt > 0 ? current.data : null, error: null, loading: true }));
+    api.interpretLiterature(endpointId, genes, pathways, compound)
+      .then((data) => {
+        if (!alive) return;
+        setState({ data, error: null, loading: false });
+        onResult?.(data);
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setState((current) => ({ data: current.data, error, loading: false }));
+        onError?.(error);
+      });
+    return () => { alive = false; };
+    // Stable scalar keys keep cached records from repeating PubMed requests on remount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt, endpointId, genes.join(","), JSON.stringify(pathways), compound]);
   const articles = state.data?.articles ?? [];
   const visible = showAll ? articles : articles.slice(0, 5);
 
@@ -29,6 +59,7 @@ export function LiteraturePanel({
       <div className="literature-heading"><h3>Supporting literature</h3></div>
       {state.loading && <p className="check-plain">Finding supporting literature…</p>}
       {state.error != null && <ErrorNotice error={state.error} />}
+      {state.error != null && <button className="detail-link" type="button" onClick={() => setAttempt((value) => value + 1)}>Refresh literature</button>}
       {state.data && state.data.status !== "ok" && (
         <p className="check-plain">{state.data.reason ?? "No eligible supporting publications were found."}</p>
       )}
@@ -42,6 +73,7 @@ export function LiteraturePanel({
           {showAll ? "Show strongest articles" : "Show more"}
         </button>
       )}
+      {state.data && !state.error && <button className="detail-link" type="button" onClick={() => setAttempt((value) => value + 1)}>Refresh literature</button>}
     </section>
   );
 }

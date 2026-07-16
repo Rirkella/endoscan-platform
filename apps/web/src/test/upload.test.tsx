@@ -77,6 +77,8 @@ describe("signature upload (source step)", () => {
     const uploaded = form.get("file") as File;
     expect(uploaded.name).toBe("lincs-caffeic-acid-mcf7-a549.csv");
     expect(form.get("format")).toBe("csv");
+    fireEvent.click(screen.getByRole("button", { name: /Use this signature/i }));
+    expect((await screen.findAllByText("Caffeic Acid")).length).toBeGreaterThan(0);
   });
 
   it("JSON paste works as the secondary advanced path", async () => {

@@ -160,8 +160,11 @@ function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => voi
   function useUploaded(r: ParseResult) {
     if (!r.signature) return;
     onPrepared({
-      title: file?.name ?? "Uploaded signature",
-      subtitle: "Uploaded gene-expression signature",
+      title: selectedExample?.name ?? file?.name ?? "Uploaded signature",
+      subtitle: selectedExample
+        ? `${selectedExample.dataset} ${selectedExample.processing_level} · ${selectedExample.cell_lines.join(" + ")}`
+        : "Uploaded gene-expression signature",
+      filename: file?.name,
       kind: "file",
       signature: r.signature,
       parse: r,
