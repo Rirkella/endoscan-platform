@@ -4,13 +4,15 @@
     "biological_target": "Estrogen Receptor",
     "status": "experimental",
     "input_type": "transcriptomics",
-    "frozen": true
+    "frozen": true,
+    "explanation": { "declared_method": "tree_shap", "available": true, "missing_dependencies": [], "reason": null }
   },
   {
     "endpoint_id": "AR",
     "biological_target": "Androgen Receptor",
     "status": "experimental",
     "input_type": "transcriptomics",
-    "frozen": false
+    "frozen": false,
+    "explanation": { "declared_method": "linear_coefficient", "available": true, "missing_dependencies": [], "reason": null }
   }
 ]

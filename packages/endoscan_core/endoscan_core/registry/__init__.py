@@ -9,7 +9,7 @@ At M1 this package provides:
 No training, inference, data, or agent logic lives here.
 """
 
-from .schema import EndpointEntry, EndpointIndex, EndpointStatus
+from .schema import EndpointEntry, EndpointIndex, EndpointStatus, ExplanationCapability
 from .store import (
     EndpointNotFoundError,
     FrozenEndpointError,
@@ -29,6 +29,7 @@ __all__ = [
     "EndpointEntry",
     "EndpointIndex",
     "EndpointStatus",
+    "ExplanationCapability",
     "EndpointNotFoundError",
     "FrozenEndpointError",
     "RegistryError",

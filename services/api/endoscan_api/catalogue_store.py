@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -16,6 +17,7 @@ from .schemas import (
 )
 
 CATALOGUE_RELPATH = Path("data/catalogue/v1/catalogue.json")
+IDENTITIES_RELPATH = Path("data/identities/v1/reference_identities.json")
 SIGNATURE_ROOT = Path("apps/web/src/demo-signatures")
 
 
@@ -62,6 +64,49 @@ class _CatalogueDoc(BaseModel):
     catalogue_version: str
     sources: dict[str, CatalogueSourceBlock]
     compounds: list[_CompoundRecord]
+
+
+class _ReferenceIdentityRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    inchikey: str
+    preferred_name: str | None
+    pubchem_cid: int | None
+    iupac_name: str | None
+    synonyms: list[str]
+    canonical_smiles: str | None
+    isomeric_smiles: str | None
+    resolution_status: str
+    failure_category: str | None
+    retrieved_at: str
+    source: str
+
+
+class _ReferenceIdentityDoc(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    schema_version: str
+    artifact_version: str
+    statistics: dict
+    records_sha256: str
+    identities: list[_ReferenceIdentityRecord]
+
+
+@lru_cache(maxsize=4)
+def load_reference_identities(repo_root: Path) -> _ReferenceIdentityDoc:
+    try:
+        raw = json.loads((repo_root / IDENTITIES_RELPATH).read_text(encoding="utf-8"))
+        doc = _ReferenceIdentityDoc.model_validate(raw)
+    except (OSError, ValueError) as exc:
+        raise CatalogueCorruptError("the reference identity artifact could not be loaded") from exc
+    canonical = json.dumps(
+        [item.model_dump() for item in doc.identities],
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    if hashlib.sha256(canonical).hexdigest() != doc.records_sha256:
+        raise CatalogueCorruptError("the reference identity artifact checksum did not match")
+    return doc
 
 
 def _signature_path(repo_root: Path, relative: str) -> Path:
@@ -185,12 +230,33 @@ def get_compound(repo_root: Path, compound_id: str) -> tuple[_CatalogueDoc, Cata
 
 def identity_index(repo_root: Path) -> dict[str, CatalogueCompound]:
     """Return only committed, versioned identities; callers must not fill gaps from live APIs."""
-    if not (repo_root.resolve() / CATALOGUE_RELPATH).is_file():
-        # Reference-map fixtures and deployments without the optional catalogue remain usable;
-        # every point is then explicitly unresolved rather than queried from a live identity API.
-        return {}
-    doc = load_catalogue(repo_root.resolve())
-    return {compound.compound_id: _compound(compound) for compound in doc.compounds}
+    root = repo_root.resolve()
+    catalogue = (
+        {compound.compound_id: _compound(compound) for compound in load_catalogue(root).compounds}
+        if (root / CATALOGUE_RELPATH).is_file()
+        else {}
+    )
+    if not (root / IDENTITIES_RELPATH).is_file():
+        return catalogue
+    identities = load_reference_identities(root)
+    output: dict[str, CatalogueCompound] = {}
+    for item in identities.identities:
+        if item.resolution_status != "resolved" or item.pubchem_cid is None:
+            continue
+        measured = catalogue.get(item.inchikey)
+        output[item.inchikey] = CatalogueCompound(
+            compound_id=item.inchikey,
+            preferred_name=(
+                item.preferred_name or item.iupac_name or f"PubChem CID {item.pubchem_cid}"
+            ),
+            aliases=item.synonyms,
+            pubchem_cid=item.pubchem_cid,
+            iupac_name=item.iupac_name,
+            canonical_smiles=item.canonical_smiles,
+            isomeric_smiles=item.isomeric_smiles,
+            signatures=measured.signatures if measured else [],
+        )
+    return output
 
 
 def get_signature(repo_root: Path, signature_id: str) -> CatalogueSignatureDetail:

@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from endoscan_api import create_app
+from endoscan_api.catalogue_store import load_reference_identities
 
 
 def test_search_by_name_surfaces_version_identity_and_measured_context(client: TestClient) -> None:
@@ -45,6 +46,27 @@ def test_search_never_substitutes_unmeasured_or_fabricated_results(client: TestC
     response = client.get("/catalogue/v1/compounds", params={"query": "not-a-real-record"})
     assert response.status_code == 200
     assert response.json()["results"] == []
+
+
+def test_versioned_reference_identity_artifact_is_verified_and_high_coverage(
+    repo_root: Path,
+) -> None:
+    artifact = load_reference_identities(repo_root)
+    assert artifact.artifact_version == "2026-07-16"
+    assert artifact.statistics == {
+        "total_unique_inchikeys": 1023,
+        "resolved": 1018,
+        "unresolved": 5,
+        "resolved_percentage": 99.51,
+        "failed_lookup_categories": {
+            "not_found": 5,
+            "invalid_inchikey": 0,
+            "transient_error": 0,
+        },
+        "pubchem_requests": 103,
+    }
+    assert len(artifact.identities) == 1023
+    assert sum(item.resolution_status == "resolved" for item in artifact.identities) == 1018
 
 
 def test_signature_detail_is_exact_committed_measured_payload(

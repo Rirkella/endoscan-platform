@@ -106,13 +106,13 @@ describe("Analyze stepped flow + result overview", () => {
     expect(screen.getAllByText(/not a calibrated probability/i)).toHaveLength(3);
   });
 
-  it("shows reference distances and map provenance for the submitted signature", async () => {
+  it("shows named similar compounds without raw map provenance", async () => {
     renderApp("/analyze");
     await analyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Similar signatures$/i }));
     expect(await screen.findByText(/Caffeic Acid/i)).toBeInTheDocument();
-    expect(screen.getByText(/Technical provenance/i)).toBeInTheDocument();
     expect(screen.getByText(/very similar response/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Technical provenance|Raw Euclidean|SHA-256/i)).not.toBeInTheDocument();
   });
 
   it("below-threshold is NEUTRAL, not green/safe (fixture: both endpoints below threshold)", async () => {
@@ -130,11 +130,12 @@ describe("Analyze stepped flow + result overview", () => {
 
   it("a bundled REAL demo signature completes the whole Analyze flow (no JSON copying)", async () => {
     renderApp("/analyze");
-    // Open the demo tab and run the first bundled real demo with one click.
-    fireEvent.click(await screen.findByRole("tab", { name: /Try a demo/i }));
-    const demoButtons = await screen.findAllByRole("button", { name: /Use this demo/i });
-    expect(demoButtons.length).toBeGreaterThan(0); // real demos are bundled
-    fireEvent.click(demoButtons[0]);
+    expect(screen.queryByRole("tab", { name: /Try a demo/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Upload" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Public catalogue" })).toBeInTheDocument();
+    expect(screen.getByText("Caffeic Acid")).toBeInTheDocument();
+    fireEvent.click((await screen.findAllByRole("button", { name: /Use example file/i }))[0]);
+    fireEvent.click(await screen.findByRole("button", { name: /Use this signature/i }));
     // Straight into validate → run → results, no raw JSON required.
     const runBtn = await screen.findByRole("button", { name: /^Analyze signature$/i });
     await waitFor(() => expect(runBtn).not.toBeDisabled());
@@ -158,6 +159,7 @@ describe("Analyze stepped flow + result overview", () => {
           status: "experimental",
           input_type: "transcriptomics",
           frozen: false,
+          explanation: { declared_method: "linear_coefficient", available: true, missing_dependencies: [], reason: null },
         })),
       },
       "POST /api/analyze": { body: { results: six } },
@@ -205,7 +207,8 @@ describe("evidence tab — correct method label per endpoint", () => {
     await analyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     // ER is the first scored endpoint → its explanation auto-loads.
-    expect(await screen.findByText(/^TreeSHAP$/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Genes contributing to this endpoint signal/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^TreeSHAP$|Attribution method details/i)).not.toBeInTheDocument();
     // Integrated limitations remain visible with the evidence.
     expect(screen.getByText(/NOT regulatory-grade validation/i)).toBeInTheDocument();
   });
@@ -217,7 +220,8 @@ describe("evidence tab — correct method label per endpoint", () => {
     // Select AR in the endpoint selector.
     const selector = screen.getByText("Endpoints").closest("aside") as HTMLElement;
     fireEvent.click(within(selector).getByText("Androgen Receptor"));
-    expect((await screen.findAllByText(/Linear coefficient × input value/i)).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/Genes contributing to this endpoint signal/i)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Linear coefficient|TreeSHAP/i);
   });
 
   it("explain 501 renders a clean, non-scary state (live API drives availability)", async () => {
@@ -234,9 +238,10 @@ describe("evidence tab — correct method label per endpoint", () => {
     renderApp("/analyze");
     await analyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
-    expect(
-      await screen.findByText(/aren.t available for this endpoint.s model type/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Endpoint explanation could not be prepared/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByText(/Pathway and literature context are unavailable/i)).toBeInTheDocument();
   });
 });
 
@@ -261,7 +266,7 @@ describe("integrated honesty framing", () => {
     renderApp("/analyze");
     await analyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
-    await screen.findByText(/^TreeSHAP$/i); // ER evidence loaded
+    await screen.findByText(/Genes contributing to this endpoint signal/i);
     expect(screen.getAllByTitle(/Model status: experimental/i).length).toBeGreaterThan(0);
     expect(
       screen.getByText(/auroc 95% CI lower bound 0.675 < 0.75 floor/i),

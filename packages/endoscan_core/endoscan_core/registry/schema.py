@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 ENDPOINT_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
-class EndpointStatus(str, Enum):
+class EndpointStatus(StrEnum):
     """Lifecycle of a registry entry.
 
     Flow: ``candidate`` → ``dataset_ready`` → ``under_review`` → one terminal
@@ -48,6 +48,15 @@ class EndpointStatus(str, Enum):
     deprecated = "deprecated"
 
 
+class ExplanationCapability(BaseModel):
+    """Declared explanation contract required to serve a registered endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["tree_shap", "linear_coefficient"]
+    required_dependencies: list[str] = Field(default_factory=list)
+
+
 class EndpointEntry(BaseModel):
     """A single registered endpoint — the registry's unit of record."""
 
@@ -62,6 +71,7 @@ class EndpointEntry(BaseModel):
     feature_schema_path: str
     metrics_path: str
     explainer_path: str | None = None
+    explanation: ExplanationCapability | None = None
     model_card_path: str
     dataset_card_path: str
     status: EndpointStatus = EndpointStatus.candidate

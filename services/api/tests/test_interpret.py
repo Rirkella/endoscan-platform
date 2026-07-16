@@ -51,7 +51,16 @@ def repo_with_reactome() -> Path:
 
 @pytest.fixture(scope="module")
 def client(repo_with_reactome: Path) -> TestClient:
-    return TestClient(create_app(repo_root=repo_with_reactome))
+    app = create_app(repo_root=repo_with_reactome)
+    # These route tests replace explain() with a deterministic stub, so its declared
+    # capability is intentionally made available even though this minimal fixture omits models.
+    app.state.explanation_capabilities["ER"] = {
+        "declared_method": "tree_shap",
+        "available": True,
+        "missing_dependencies": [],
+        "reason": None,
+    }
+    return TestClient(app)
 
 
 def _stub_explain(method: str, toward: list[str], away: list[str] | None = None):

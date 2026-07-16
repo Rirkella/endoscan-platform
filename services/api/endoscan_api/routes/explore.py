@@ -41,13 +41,13 @@ router = APIRouter(tags=["explore"])
 _EXACT_TOLERANCE = 1e-9
 
 
-def _identity_fields(compound_id: str, identities: dict, source_key: str) -> dict:
+def _identity_fields(compound_id: str, identities: dict, _source_key: str) -> dict:
     compound = identities.get(compound_id)
     if compound is None:
         return {
             "preferred_name": None,
             "pubchem_cid": None,
-            "source_dataset": source_key or None,
+            "source_dataset": "LINCS L1000",
             "experimental_contexts": [],
             "full_signature_id": None,
         }
@@ -60,7 +60,7 @@ def _identity_fields(compound_id: str, identities: dict, source_key: str) -> dic
     return {
         "preferred_name": compound.preferred_name,
         "pubchem_cid": compound.pubchem_cid,
-        "source_dataset": signature.dataset if signature else source_key or None,
+        "source_dataset": signature.dataset if signature else "LINCS L1000",
         "experimental_contexts": contexts,
         "full_signature_id": signature.signature_id if signature else None,
     }

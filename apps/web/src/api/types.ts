@@ -5,6 +5,14 @@ export interface Health {
   status: string;
   endpoints_loaded: string[];
   explain_available: boolean;
+  explanation_capabilities: Record<string, ExplanationCapabilityStatus>;
+}
+
+export interface ExplanationCapabilityStatus {
+  declared_method: string | null;
+  available: boolean;
+  missing_dependencies: string[];
+  reason: string | null;
 }
 
 export type EndpointStatus = string; // e.g. "experimental" — rendered as returned, never assumed
@@ -15,6 +23,7 @@ export interface EndpointSummary {
   status: EndpointStatus;
   input_type: string;
   frozen: boolean;
+  explanation: ExplanationCapabilityStatus;
 }
 
 export interface LimitationsBlock {
@@ -71,6 +80,7 @@ export interface EndpointDetail {
   status: EndpointStatus;
   frozen: boolean;
   source_refs: string[];
+  explanation: ExplanationCapabilityStatus;
   variants: ContextVariant[];
 }
 

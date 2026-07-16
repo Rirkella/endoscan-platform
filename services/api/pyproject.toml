@@ -1,8 +1,4 @@
-# EndoScan thin serving API — a READ-ONLY FastAPI over endoscan_core.
-#
-# This service holds NO science. Every route is a thin wrapper over a tested
-# endoscan_core function (registry.store + inference). It is a uv workspace member
-# and depends on endoscan-core via the workspace source.
+# EndoScan thin serving API — a read-only FastAPI over endoscan_core.
 
 [project]
 name = "endoscan-api"
@@ -13,18 +9,13 @@ dependencies = [
     "endoscan-core",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
-    # Required by FastAPI to parse multipart/form-data uploads (POST /signatures/parse).
+    # Required for multipart/form-data signature uploads.
     "python-multipart>=0.0.9",
-    # Standard ORA statistics for POST /interpret/pathways (hypergeometric tail; BH is local).
-    # API-side only — no statistics live in endoscan_core. Present transitively via sklearn too.
+    # API-side enrichment statistics.
     "scipy>=1.11",
+    # ER declares TreeSHAP support, so this is a serving-runtime dependency.
+    "shap>=0.44",
 ]
-
-# Explainability EXTRA — mirrors endoscan-core[explain]. TreeSHAP is only needed by
-# POST /explain (endoscan_core.inference.explain imports shap lazily). Without it the
-# service still serves /predict; /explain returns a clean 503.
-[project.optional-dependencies]
-explain = ["shap>=0.44"]
 
 [build-system]
 requires = ["hatchling"]

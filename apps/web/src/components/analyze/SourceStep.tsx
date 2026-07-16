@@ -1,23 +1,15 @@
-// Source step. Three ways to start, in priority order:
-//   Upload   — REAL: upload a measured signature file (POST /signatures/parse; the server is the one
-//              gene validator). Raw JSON paste is demoted to a collapsed "Advanced" disclosure.
-//   Demo     — REAL: the bundled curated demo signatures. One click loads a real measured signature
-//              into the same validate → run pipeline as an upload (no JSON copying required).
-//   Catalogue— REAL: search verified identities with committed public measured signatures, select
-//              one, and pass it through the common validator. A molecule name is never scored
-//              directly — EndoScan stays transcriptomics-first.
+// Source step. Upload and the verified public catalogue are the only entry points.
+// Every selected signature is serialized as a File and sent through multipart /signatures/parse.
 
 import { type FormEvent, useState } from "react";
 
 import { api } from "../../api/client";
 import type { CatalogueCompound, InputValueType, ParseResult } from "../../api/types";
-import { demoSignatures } from "../../demo-signatures";
-import { demoDisplay } from "../../demo-signatures/display";
 import { exampleSignatureFiles, type ExampleSignatureFile } from "../../example-files";
 import { ErrorNotice } from "../ErrorNotice";
 import type { PreparedInput } from "../../pages/Analyze";
 
-type Mode = "upload" | "demo" | "catalogue";
+type Mode = "upload" | "catalogue";
 
 type InputFormat = "json" | "csv" | "tsv";
 
@@ -40,7 +32,7 @@ export function SourceStep({
   return (
     <section className="source-layout">
       <div className="source-main">
-        <div className="segmented segmented-3" role="tablist" aria-label="Input source">
+        <div className="segmented" role="tablist" aria-label="Input source">
           <button
             role="tab"
             aria-selected={mode === "upload"}
@@ -49,14 +41,7 @@ export function SourceStep({
           >
             Upload
           </button>
-          <button
-            role="tab"
-            aria-selected={mode === "demo"}
-            className={mode === "demo" ? "selected" : ""}
-            onClick={() => setMode("demo")}
-          >
-            Try a demo
-          </button>
+
           <button
             role="tab"
             aria-selected={mode === "catalogue"}
@@ -67,10 +52,7 @@ export function SourceStep({
           </button>
         </div>
 
-        {mode === "upload" && (
-          <UploadPanel onPrepared={onPrepared} onTryDemo={() => setMode("demo")} />
-        )}
-        {mode === "demo" && <DemoPanel onPrepared={onPrepared} />}
+        {mode === "upload" && <UploadPanel onPrepared={onPrepared} />}
         {mode === "catalogue" && <CataloguePanel onPrepared={onPrepared} />}
       </div>
 
@@ -82,7 +64,7 @@ export function SourceStep({
             signatures, so a molecule name or structure is never scored on its own.
           </p>
           <p>
-            <strong>No data of your own?</strong> Run one of the real demo signatures — it goes
+            <strong>No data of your own?</strong> Use one of the named real example files — it goes
             through the same checks and models as an upload.
           </p>
         </div>
@@ -91,13 +73,7 @@ export function SourceStep({
   );
 }
 
-function UploadPanel({
-  onPrepared,
-  onTryDemo,
-}: {
-  onPrepared: (input: PreparedInput) => void;
-  onTryDemo: () => void;
-}) {
+function UploadPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [format, setFormat] = useState<InputFormat | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -246,9 +222,6 @@ function UploadPanel({
         </p>
         <span className="button primary upload-cta">{file ? file.name : "Choose data file"}</span>
       </label>
-      <button type="button" className="upload-demo-link" onClick={onTryDemo}>
-        or try a real demo instead
-      </button>
 
       <section className="example-files" aria-labelledby="example-files-title">
         <div>
@@ -259,7 +232,10 @@ function UploadPanel({
           <article key={example.id} className="example-file-card">
             <div>
               <strong>{example.name}</strong>
-              <small>978 measured landmark-gene values</small>
+              <small>PubChem CID {example.pubchem_cid} · {example.format.toUpperCase()}</small>
+              <small>{example.dataset} {example.processing_level} · {example.cell_lines.join(" + ")}</small>
+              <small>{example.dose ?? "Dose unavailable"} · {example.timepoint ?? "Time unavailable"}</small>
+              <p>{example.note}</p>
             </div>
             <button
               type="button"
@@ -272,7 +248,7 @@ function UploadPanel({
             <a href={example.url} download={example.filename}>Download</a>
             <details>
               <summary>Provenance</summary>
-              <p>{example.provenance}</p>
+              <p>Measured {example.processing_level} signature from {example.dataset} ({example.accession}).</p>
             </details>
           </article>
         ))}
@@ -368,98 +344,6 @@ function UploadPanel({
   );
 }
 
-function DemoPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void }) {
-  const [loading, setLoading] = useState<string | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  if (demoSignatures.length === 0) {
-    return (
-      <div className="demo-panel">
-        <div className="no-signature">
-          <strong>No demo signatures are bundled in this build</strong>
-          <p>Upload a measured signature file, or paste one as JSON under the Upload tab.</p>
-        </div>
-      </div>
-    );
-  }
-
-  async function runDemo(id: string) {
-    const demo = demoSignatures.find((d) => d.id === id);
-    if (!demo) return;
-    const d = demoDisplay(demo);
-    setLoading(id);
-    setError(null);
-    try {
-      const parsed = await api.parseSignature({
-        content: JSON.stringify(demo.signature),
-        format: "json",
-        input_value_type: "differential_zscore",
-      });
-      if (!parsed.signature) throw new Error("The demo signature could not be prepared.");
-      onPrepared({
-        title: d.name,
-        subtitle: `Real demo signature · ${d.source}`,
-        kind: "demo",
-        signature: parsed.signature,
-        parse: parsed,
-        allowExtra: false,
-        inputValueType: parsed.input_value_type,
-      });
-    } catch (e) {
-      setError(e);
-    } finally {
-      setLoading(null);
-    }
-  }
-
-  return (
-    <div className="demo-panel">
-      <div className="demo-panel-head">
-        <div>
-          <h2>Try a demo analysis</h2>
-          <p>
-            These are real, curated measured signatures. Pick one and run it through the full
-            analysis — no data of your own required.
-          </p>
-        </div>
-        <span className="status-chip status-good">Real curated data</span>
-      </div>
-      <div className="demo-grid">
-        {demoSignatures.map((demo) => {
-          const d = demoDisplay(demo);
-          return (
-            <article className="demo-card" key={demo.id}>
-              <h3>{d.name}</h3>
-              <p className="demo-card-note">{d.demonstrates}</p>
-              <dl className="demo-card-meta">
-                <div>
-                  <dt>Context</dt>
-                  <dd>{d.context}</dd>
-                </div>
-                <div>
-                  <dt>Source</dt>
-                  <dd>{d.source}</dd>
-                </div>
-                <div>
-                  <dt>Identifier</dt>
-                  <dd className="mono">{d.identifier}</dd>
-                </div>
-              </dl>
-              <button className="button primary full-button" disabled={loading != null} onClick={() => void runDemo(demo.id)}>
-                {loading === demo.id ? "Checking…" : "Use this demo"}
-              </button>
-            </article>
-          );
-        })}
-      </div>
-      {error != null && <ErrorNotice error={error} />}
-      <p className="demo-panel-foot">
-        Real measured signatures (LINCS Level 5). They are illustrative examples, not a claim about
-        any specific product or exposure.
-      </p>
-    </div>
-  );
-}
-
 function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CatalogueCompound[] | null>(null);
@@ -494,8 +378,13 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
     setError(null);
     try {
       const detail = await api.getCatalogueSignature(selected);
+      const catalogueFile = new File(
+        [JSON.stringify(detail.signature)],
+        `${detail.signature_id}.json`,
+        { type: "application/json" },
+      );
       const parsed = await api.parseSignature({
-        content: JSON.stringify(detail.signature),
+        file: catalogueFile,
         format: "json",
         input_value_type: "differential_zscore",
       });

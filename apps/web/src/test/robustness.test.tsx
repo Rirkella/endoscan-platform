@@ -20,6 +20,7 @@ function endpointsBody(eps: Ep[]) {
     status: "experimental",
     input_type: "transcriptomics",
     frozen: false,
+    explanation: { declared_method: "linear_coefficient", available: true, missing_dependencies: [], reason: null },
   }));
 }
 
@@ -126,23 +127,23 @@ describe("missing / sparse per-endpoint data does not crash the UI", () => {
     await runAnalyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     expect(
-      await screen.findByText(/No endpoint-specific pathway reached the current evidence threshold/i),
+      await screen.findByText(/No endpoint-specific pathway association reached the current evidence threshold/i),
     ).toBeInTheDocument();
   });
 
   it("no explanation available (501) → a calm 'not available' state in evidence", async () => {
-    installFor(eps, eps.map(okEntry), {
-      "POST /api/explain": {
-        status: 501,
-        body: { error: "explain_unsupported_for_model", detail: "no attributor", endpoint_id: "SOLO" },
-      },
+    installFetchMock({
+      "GET /api/endpoints": { body: endpointsBody(eps).map((endpoint) => ({ ...endpoint, explanation: { declared_method: "tree_shap", available: false, missing_dependencies: ["shap"], reason: "Missing runtime dependencies: shap." } })) },
+      "POST /api/analyze": { body: { results: eps.map(okEntry) } },
     });
     renderApp("/analyze");
     await runAnalyze();
     fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     expect(
-      await screen.findByText(/aren.t available for this endpoint.s model type/i),
+      await screen.findByText(/Endpoint explanation is not available/i),
     ).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByText(/Pathway and literature context are unavailable/i)).toBeInTheDocument();
   });
 
   it("no reference map for the endpoint → an honest empty state in the reference tab", async () => {

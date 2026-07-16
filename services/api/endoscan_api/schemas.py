@@ -40,6 +40,7 @@ __all__ = [
     "ContextBlock",
     "ContextVariant",
     "EndpointDetail",
+    "ExplanationCapabilityStatus",
     "EndpointCompatibility",
     "EndpointSummary",
     "ErrorResponse",
@@ -116,6 +117,16 @@ class HealthResponse(BaseModel):
     status: str
     endpoints_loaded: list[str]
     explain_available: bool
+    explanation_capabilities: dict[str, ExplanationCapabilityStatus]
+
+
+class ExplanationCapabilityStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    declared_method: str | None
+    available: bool
+    missing_dependencies: list[str] = Field(default_factory=list)
+    reason: str | None = None
 
 
 class EndpointSummary(BaseModel):
@@ -128,6 +139,7 @@ class EndpointSummary(BaseModel):
     status: str
     input_type: str
     frozen: bool
+    explanation: ExplanationCapabilityStatus
 
 
 class MetricsSummary(BaseModel):
@@ -187,6 +199,7 @@ class EndpointDetail(BaseModel):
     status: str
     frozen: bool
     source_refs: list[str]
+    explanation: ExplanationCapabilityStatus
     variants: list[ContextVariant]
 
 

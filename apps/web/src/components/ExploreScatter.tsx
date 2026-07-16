@@ -147,13 +147,13 @@ export function ExploreScatter({
           const pointLabel = point.label ?? "unlabeled";
           const visible = labelFilter === "all" || labelFilter === pointLabel;
           const fill = point.label ? (FILL[point.label] ?? UNLABELED) : UNLABELED;
-          const name = pointNames[point.compound_id];
+          const name = pointNames[point.compound_id] ?? point.preferred_name;
           return (
             <circle
               key={point.compound_id}
               role="button"
               tabIndex={visible ? 0 : -1}
-              aria-label={`${name ? `${name}, ` : ""}${point.compound_id}, ${point.label ? `${point.label} dataset label` : "unlabelled"}`}
+              aria-label={`${name ?? "Unresolved reference record"}, ${point.label ? `${point.label} dataset label` : "unlabelled"}`}
               data-compound={point.compound_id}
               data-label={pointLabel}
               data-neighbor={highlighted ? "true" : undefined}

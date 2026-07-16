@@ -4,6 +4,7 @@ import { EndoscanApiError, api } from "../api/client";
 import type {
   AnalyzeResponse,
   EndpointSummary,
+  ExplanationCapabilityStatus,
   InputValueType,
   PredictionResult,
   Signature,
@@ -16,6 +17,7 @@ export interface EndpointSignal {
   biological_target: string;
   model_version?: string;
   source_refs?: string[];
+  explanation: ExplanationCapabilityStatus;
   result: PredictionResult | null;
   error: unknown;
 }
@@ -46,11 +48,12 @@ export function useAnalyze(endpoints: EndpointSummary[]) {
           return {
             endpoint_id: e.endpoint_id,
             biological_target: e.biological_target,
+            explanation: e.explanation,
             result,
             error: null,
           };
         } catch (error) {
-          return { endpoint_id: e.endpoint_id, biological_target: e.biological_target, result: null, error };
+          return { endpoint_id: e.endpoint_id, biological_target: e.biological_target, explanation: e.explanation, result: null, error };
         }
       }),
     );
@@ -71,6 +74,12 @@ export function useAnalyze(endpoints: EndpointSummary[]) {
       signals = resp.results.map((r) => ({
         endpoint_id: r.endpoint_id,
         biological_target: r.biological_target,
+        explanation: endpoints.find((endpoint) => endpoint.endpoint_id === r.endpoint_id)?.explanation ?? {
+          declared_method: null,
+          available: false,
+          missing_dependencies: [],
+          reason: "Explanation capability was not declared by this endpoint.",
+        },
         model_version: r.model_version,
         source_refs: r.source_refs,
         result: r.result,

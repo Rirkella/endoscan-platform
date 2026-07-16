@@ -7,7 +7,7 @@
 //     projection) and there is no in-/out-of-domain verdict in the visible layer;
 //   - all technical detail (metric, percentile, UMAP params, provenance) lives in a collapsed
 //     "Technical details" disclosure so the main view stays plain and biological.
-// Input is demo / upload first; raw JSON is demoted into "Advanced technical input".
+// Input uses the same server-validated upload path as Analyze; raw JSON remains advanced.
 
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -19,8 +19,6 @@ import type {
   ParseResult,
   Signature,
 } from "../api/types";
-import { demoSignatures } from "../demo-signatures";
-import { demoDisplay } from "../demo-signatures/display";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { ExploreScatter } from "../components/ExploreScatter";
 import { useAsync } from "../hooks/useAsync";
@@ -395,8 +393,7 @@ export function Explore() {
                         <dt>Reference dataset</dt>
                         <dd>
                           {map.data.manifest.n_compounds} signatures ({context}); labels:{" "}
-                          {map.data.manifest.label_status}; source{" "}
-                          {map.data.manifest.source_key || "curated endpoint signatures"} ({map.data.manifest.source_sha256.slice(0, 12)}); built{" "}
+                          {map.data.manifest.label_status}; source LINCS L1000; built{" "}
                           {map.data.manifest.built_at ?? "unknown"}.
                         </dd>
                       </div>
@@ -424,8 +421,6 @@ export function Explore() {
           compound={selectedCompound}
           loading={selectedLoading}
           context={context ?? map.data.context}
-          sourceKey={map.data.manifest.source_key}
-          sourceHash={map.data.manifest.source_sha256}
           pointDefinition={map.data.manifest.point_definition}
           onClose={() => setSelectedId(null)}
           onAnalyze={(signatureId) =>
@@ -442,8 +437,6 @@ function ReferenceDetailsDrawer({
   compound,
   loading,
   context,
-  sourceKey,
-  sourceHash,
   pointDefinition,
   onClose,
   onAnalyze,
@@ -452,8 +445,6 @@ function ReferenceDetailsDrawer({
   compound: CatalogueCompound | null;
   loading: boolean;
   context: string;
-  sourceKey: string;
-  sourceHash: string;
   pointDefinition: string;
   onClose: () => void;
   onAnalyze: (signatureId: string) => void;
@@ -489,7 +480,7 @@ function ReferenceDetailsDrawer({
           <dt>Endpoint dataset label</dt>
           <dd>{point.label ? `${point.label} for ${context}` : "No label in this endpoint dataset"}</dd>
         </div>
-        <div><dt>Source dataset</dt><dd>{point.source_dataset || sourceKey || "Curated endpoint signatures"}</dd></div>
+        <div><dt>Source dataset</dt><dd>{point.source_dataset || "LINCS L1000"}</dd></div>
         {(point.experimental_contexts ?? []).length > 0 && (
           <div><dt>Experimental context</dt><dd>{(point.experimental_contexts ?? []).join("; ")}</dd></div>
         )}
@@ -500,7 +491,6 @@ function ReferenceDetailsDrawer({
           <div><dt>InChIKey</dt><dd className="mono">{point.compound_id}</dd></div>
           <div><dt>Point definition</dt><dd>{pointDefinition}</dd></div>
           <div><dt>UMAP coordinates</dt><dd>{point.x.toFixed(3)}, {point.y.toFixed(3)}</dd></div>
-          <div><dt>Artifact</dt><dd>{sourceKey}; SHA-256 {sourceHash}</dd></div>
         </dl>
       </details>
       <p className="reference-label-note">
@@ -531,8 +521,7 @@ function ReferenceDetailsDrawer({
   );
 }
 
-// Placement input: demo (real, one click) and upload first; raw JSON demoted to an advanced
-// disclosure so it never dominates the page.
+// Placement input: upload first; raw JSON is demoted to an advanced disclosure.
 function PlacementInput({
   disabled,
   onSignature,
@@ -540,16 +529,9 @@ function PlacementInput({
   disabled?: boolean;
   onSignature: (sig: Signature) => void;
 }) {
-  const [demoId, setDemoId] = useState("");
   const [uploadError, setUploadError] = useState<unknown>(null);
   const [pasteText, setPasteText] = useState("");
   const [pasteError, setPasteError] = useState<string | null>(null);
-
-  function pickDemo(id: string) {
-    setDemoId(id);
-    const demo = demoSignatures.find((d) => d.id === id);
-    if (demo) onSignature(demo.signature);
-  }
 
   async function onFile(f: File | null) {
     setUploadError(null);
@@ -590,25 +572,8 @@ function PlacementInput({
 
   return (
     <div className="placement-input">
-      {demoSignatures.length > 0 && (
-        <label className="placement-field">
-          <span>Choose a real demo signature</span>
-          <select value={demoId} disabled={disabled} onChange={(e) => pickDemo(e.target.value)}>
-            <option value="">Select a demo…</option>
-            {demoSignatures.map((d) => {
-              const dd = demoDisplay(d);
-              return (
-                <option key={d.id} value={d.id}>
-                  {dd.name}
-                </option>
-              );
-            })}
-          </select>
-        </label>
-      )}
-
       <label className="placement-field">
-        <span>Or upload a signature file</span>
+        <span>Upload a signature file</span>
         <input
           type="file"
           accept=".json,.csv,.tsv"

@@ -1,21 +1,17 @@
 import { api } from "../../api/client";
-import type {
-  BiologicalPathwayCard,
-  InputValueType,
-  Signature,
-} from "../../api/types";
+import type { BiologicalPathwayCard, InputValueType, Signature } from "../../api/types";
 import { useAsync } from "../../hooks/useAsync";
 import { ErrorNotice } from "../ErrorNotice";
 
 const INPUT_DESCRIPTIONS: Record<InputValueType, string> = {
   differential_zscore:
-    "Biological response induced by the perturbation relative to the matched experimental control.",
+    "This analysis is independent of the ER and AR models. Genes are ranked by how strongly their expression increased or decreased relative to the matched experimental control. Reactome pathways are highlighted when their genes cluster toward either end of that ranked response.",
   log2_fold_change:
-    "Biological response represented by signed log2 fold changes relative to the supplied comparison.",
+    "Genes are ranked by signed log2 fold change relative to the supplied comparison; pathway enrichment is independent of the endpoint models.",
   ranked_statistic:
-    "Biological response represented by the supplied signed ranking statistic.",
+    "Genes are ordered by the supplied signed statistic; pathway enrichment is independent of the endpoint models.",
   raw_expression:
-    "Raw expression values do not contain a direction relative to a matched reference.",
+    "A directional pathway analysis requires a differential signature or matched control.",
 };
 
 export function BiologicalResponsePanel({
@@ -30,58 +26,43 @@ export function BiologicalResponsePanel({
     [signature, inputValueType],
   );
 
+  const supported = state.data?.status === "ok"
+    ? [...state.data.increased_pathways, ...state.data.decreased_pathways]
+      .filter((item) => item.statistically_supported && item.q_value < 0.05)
+    : [];
+
   return (
     <section className="biological-response" aria-labelledby="biological-response-title">
       <header className="biological-response-header">
         <div>
           <p className="eyebrow">Full transcriptomic signature</p>
-          <h2 id="biological-response-title">Which biological processes appear altered?</h2>
+          <h2 id="biological-response-title">Pathways enriched in the full gene-expression response</h2>
           <p>{INPUT_DESCRIPTIONS[inputValueType]}</p>
         </div>
-        <span className="layer-badge">Endpoint-independent</span>
       </header>
 
       {state.loading && <p className="check-plain">Analyzing the ranked biological response…</p>}
       {state.error != null && <ErrorNotice error={state.error} />}
-      {state.data && state.data.status !== "ok" && (
+      {state.data && (state.data.status !== "ok" || supported.length === 0) && (
         <div className="biological-empty" role="status">
-          <strong>Biological-response pathways are not available for this input.</strong>
-          <p>{state.data.reason}</p>
+          <p>{inputValueType === "raw_expression"
+            ? "A directional pathway analysis requires a differential signature or matched control."
+            : "No strong differential response was detected relative to the matched experimental control."}</p>
         </div>
       )}
-      {state.data?.status === "ok" && (
-        <>
-          <div className="response-directions">
-            <PathwayDirection
-              title="Increased biological response"
-              tone="increased"
-              pathways={state.data.increased_pathways}
-            />
-            <PathwayDirection
-              title="Decreased biological response"
-              tone="decreased"
-              pathways={state.data.decreased_pathways}
-            />
-          </div>
-          {state.data.method_block && (
-            <details className="technical-disclosure">
-              <summary>Method and technical details</summary>
-              <dl className="technical-grid">
-                <div><dt>Exact method</dt><dd>{state.data.method_block.method}</dd></div>
-                <div><dt>Method version</dt><dd>{state.data.method_block.method_version}</dd></div>
-                <div><dt>Ranking statistic</dt><dd>{state.data.method_block.ranking_statistic}</dd></div>
-                <div><dt>Input value type</dt><dd>{state.data.method_block.input_value_type}</dd></div>
-                <div><dt>Tested gene universe</dt><dd>{state.data.method_block.universe_size} genes</dd></div>
-                <div><dt>Pathways tested</dt><dd>{state.data.method_block.pathways_tested}</dd></div>
-                <div><dt>Multiple testing</dt><dd>{state.data.method_block.correction}</dd></div>
-                <div>
-                  <dt>Gene-set size</dt>
-                  <dd>{state.data.method_block.min_gene_set_size}–{state.data.method_block.max_gene_set_size}</dd>
-                </div>
-              </dl>
-            </details>
-          )}
-        </>
+      {state.data?.status === "ok" && supported.length > 0 && (
+        <div className="response-directions">
+          <PathwayDirection
+            title="Pathways enriched among genes with increased expression"
+            tone="increased"
+            pathways={state.data.increased_pathways.filter((item) => item.statistically_supported && item.q_value < 0.05)}
+          />
+          <PathwayDirection
+            title="Pathways enriched among genes with decreased expression"
+            tone="decreased"
+            pathways={state.data.decreased_pathways.filter((item) => item.statistically_supported && item.q_value < 0.05)}
+          />
+        </div>
       )}
     </section>
   );
@@ -96,36 +77,35 @@ function PathwayDirection({
   tone: "increased" | "decreased";
   pathways: BiologicalPathwayCard[];
 }) {
+  if (pathways.length === 0) return null;
   const strongest = Math.max(1, ...pathways.map((item) => Math.abs(item.enrichment_statistic)));
   return (
     <section className={`response-direction response-${tone}`}>
       <h3>{title}</h3>
-      {pathways.length === 0 && <p className="check-plain">No pathway tendency was returned.</p>}
       <div className="response-pathway-list">
         {pathways.slice(0, 8).map((pathway) => (
           <article key={pathway.pathway_id} className="response-pathway-card">
             <div className="response-pathway-title">
               <h4>{pathway.name}</h4>
-              <span>{pathway.statistically_supported ? "FDR supported" : "Exploratory tendency"}</span>
+              <span>Enriched among genes with {tone} expression</span>
             </div>
-            <div className="pathway-strength" aria-label={`Enrichment statistic ${pathway.enrichment_statistic.toFixed(2)}`}>
+            <div className="pathway-strength" aria-label={`Enrichment score ${pathway.enrichment_statistic.toFixed(2)}`}>
               <span style={{ width: `${Math.max(5, Math.abs(pathway.enrichment_statistic) / strongest * 100)}%` }} />
             </div>
             <div className="pathway-stats">
-              <span>Strength {Math.abs(pathway.enrichment_statistic).toFixed(2)}</span>
-              <span>FDR {pathway.q_value.toPrecision(2)}</span>
+              <span>Enrichment score {pathway.enrichment_statistic.toFixed(2)}</span>
+              <span>FDR {formatFdr(pathway.q_value)}</span>
             </div>
-            <div className="gene-chips" aria-label="Leading-edge genes">
+            <div className="gene-chips" aria-label="Leading genes">
               {pathway.leading_edge_genes.slice(0, 5).map((gene) => <span key={gene}>{gene}</span>)}
             </div>
-            <details>
-              <summary>View details</summary>
-              <p>Reactome {pathway.pathway_id} · {pathway.pathway_size_in_universe} genes in the tested universe.</p>
-              <p>Signed rank enrichment statistic {pathway.enrichment_statistic.toFixed(3)}; p={pathway.p_value.toPrecision(3)}; q={pathway.q_value.toPrecision(3)}.</p>
-            </details>
           </article>
         ))}
       </div>
     </section>
   );
+}
+
+function formatFdr(value: number): string {
+  return value < 0.001 ? "< 0.001" : value.toFixed(3);
 }

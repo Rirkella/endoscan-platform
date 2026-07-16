@@ -27,7 +27,9 @@ def _status_str(entry: EndpointEntry) -> str:
     return entry.status.value if hasattr(entry.status, "value") else str(entry.status)
 
 
-def build_endpoint_detail(entry: EndpointEntry, repo_root: Path) -> EndpointDetail:
+def build_endpoint_detail(
+    entry: EndpointEntry, repo_root: Path, explanation: dict | None = None
+) -> EndpointDetail:
     """Compose the detail response (one context-variant today) from committed artifacts."""
     metrics = json.loads((repo_root / entry.metrics_path).read_text(encoding="utf-8"))
     model_card = (repo_root / entry.model_card_path).read_text(encoding="utf-8")
@@ -65,5 +67,12 @@ def build_endpoint_detail(entry: EndpointEntry, repo_root: Path) -> EndpointDeta
         status=status,
         frozen=entry.frozen,
         source_refs=list(entry.source_refs),
+        explanation=explanation
+        or {
+            "declared_method": entry.explanation.method if entry.explanation else None,
+            "available": False,
+            "missing_dependencies": [],
+            "reason": "Runtime capability was not evaluated.",
+        },
         variants=[variant],  # LIST — additive when contexts multiply
     )

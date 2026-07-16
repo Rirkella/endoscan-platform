@@ -200,6 +200,17 @@ def interpret_pathways(
         )
 
     # 2) The tested explanation at PINNED depth (science must not depend on a UI knob).
+    capability = request.app.state.explanation_capabilities.get(body.endpoint_id)
+    if capability is not None and not capability["available"]:
+        return JSONResponse(
+            status_code=503,
+            content=error_payload(
+                request,
+                error="explain_unavailable",
+                detail=capability["reason"] or "Explanation capability is unavailable.",
+                endpoint_id=body.endpoint_id,
+            ),
+        )
     try:
         result = explain(
             body.endpoint_id,

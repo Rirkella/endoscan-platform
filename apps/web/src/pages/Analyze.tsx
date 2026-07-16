@@ -1,7 +1,7 @@
 // Analyze — the primary flow, ported from prototype-v2's stepped workspace (source → validate →
 // running → result) and wired to the REAL API underneath:
-//   source     : upload a signature, pick a bundled demo, or select a verified measured public
-//                signature. Every path uses POST /signatures/parse; identity alone is never scored.
+//   source     : upload a signature/example file or select a verified measured public signature.
+//                Every path uses multipart POST /signatures/parse; identity alone is never scored.
 //   validate   : real gene coverage (from the parse preview) + real endpoint compatibility (/endpoints).
 //   running    : shown while POST /analyze is in flight.
 //   result     : overview (real scores/calls/thresholds/status), evidence (real /explain + pathways +
@@ -39,7 +39,7 @@ export type ResultTab = "overview" | "biological" | "endpoint" | "similar" | "re
 export interface PreparedInput {
   title: string;
   subtitle: string;
-  kind: "file" | "paste" | "demo" | "catalogue";
+  kind: "file" | "paste" | "catalogue";
   signature: Signature;
   parse: ParseResult;
   allowExtra: boolean;
@@ -69,8 +69,13 @@ export function Analyze() {
     void api
       .getCatalogueSignature(catalogueSignatureId)
       .then(async (detail) => {
+        const catalogueFile = new File(
+          [JSON.stringify(detail.signature)],
+          `${detail.signature_id}.json`,
+          { type: "application/json" },
+        );
         const parsed = await api.parseSignature({
-          content: JSON.stringify(detail.signature),
+          file: catalogueFile,
           format: "json",
           input_value_type: "differential_zscore",
         });
@@ -129,7 +134,7 @@ export function Analyze() {
               <p className="eyebrow">New screening</p>
               <h1>Analyze a gene-expression signature</h1>
               <p className="page-copy">
-                Start with a measured biological response — upload your own or try a real demo. Every
+                Start with a measured biological response — upload your own or use a named real example file. Every
                 input is checked before the models run. Results are experimental endpoint signals,
                 not clinical, regulatory or safety conclusions.
               </p>
@@ -376,7 +381,7 @@ function OverviewTab({
           <dl className="metadata-list">
             <div>
               <dt>Source</dt>
-              <dd>{input.kind === "file" ? "Uploaded file" : input.kind === "demo" ? "Bundled demo" : input.kind === "catalogue" ? "Public measured signature" : "Pasted signature"}</dd>
+              <dd>{input.kind === "file" ? "Uploaded file" : input.kind === "catalogue" ? "Public measured signature" : "Pasted signature"}</dd>
             </div>
             <div>
               <dt>Genes provided</dt>

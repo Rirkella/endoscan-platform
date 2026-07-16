@@ -1,6 +1,6 @@
 // Validation step (ported from prototype-v2's input check). Driven by REAL data:
 //   - gene coverage comes from the upload parse preview when present (matched / missing / extra vs
-//     the model's landmark schema); for pasted/demo input we show the provided gene count and note
+//     the model's landmark schema); for pasted input we show the provided gene count and note
 //     the server makes the final schema decision on run.
 //   - model compatibility lists the endpoints the API actually returned (/endpoints) — never a
 //     hardcoded ER/AR pair. The final gene-set validation is the server's, per endpoint.
@@ -43,7 +43,7 @@ export function ValidationStep({
 
         <div className="input-summary">
           <div className="file-mark">
-            {input.kind === "file" ? "CSV" : input.kind === "demo" ? "DEMO" : input.kind === "catalogue" ? "PUBLIC" : "JSON"}
+            {input.kind === "file" ? "FILE" : input.kind === "catalogue" ? "PUBLIC" : "JSON"}
           </div>
           <div>
             <strong>{input.title}</strong>

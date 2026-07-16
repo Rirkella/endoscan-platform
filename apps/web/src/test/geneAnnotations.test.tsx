@@ -8,37 +8,36 @@ import { geneLinks } from "../gene-annotations/links";
 import { explainER } from "./mockApi";
 
 describe("deterministic gene resources", () => {
-  it("builds external links from the gene symbol", () => {
+  it("builds safe external links from the gene symbol", () => {
     const links = geneLinks("ESR1");
     expect(links.map((item) => item.label)).toEqual(["GeneCards", "NCBI Gene", "UniProt", "Ensembl"]);
     expect(links.every((item) => item.url.includes("ESR1"))).toBe(true);
   });
 
-  it("keeps safe external links and omits unavailable annotation copy", () => {
-    render(<GeneAnnotation gene="ESR1" />);
-    const link = screen.getByRole("link", { name: "NCBI Gene" });
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  it("omits unavailable annotation copy and shows sourced copy when present", () => {
+    const { rerender } = render(<GeneAnnotation gene="ESR1" />);
+    expect(screen.getByRole("link", { name: "NCBI Gene" })).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.queryByText("annotation unavailable")).not.toBeInTheDocument();
-  });
-
-  it("shows a committed sourced annotation when one exists", () => {
-    render(<GeneAnnotation gene="BAMBI" />);
+    rerender(<GeneAnnotation gene="BAMBI" />);
     expect(screen.getByText(/source: NCBI Gene/i)).toBeInTheDocument();
   });
 });
 
 describe("gene contribution visualization", () => {
-  it("separates direction, ranks magnitude, and keeps annotations collapsed", () => {
-    render(<GeneContributionCards explanation={explainER as unknown as ExplanationResult} />);
-    const n = (explainER as unknown as ExplanationResult).top_contributors.length;
-    expect(screen.getByText("Increases this model’s signal")).toBeInTheDocument();
-    expect(screen.getByText("Decreases this model’s signal")).toBeInTheDocument();
-    expect(screen.queryByText("annotation unavailable")).not.toBeInTheDocument();
-    screen.getAllByText("Gene details").forEach((summary) => {
-      expect(summary.closest("details")).not.toHaveAttribute("open");
+  it("uses one absolute-magnitude ranking with signed values and directions", () => {
+    const explanation = explainER as unknown as ExplanationResult;
+    render(<GeneContributionCards explanation={explanation} />);
+    const items = Array.from(document.querySelectorAll(".contribution-ranking > li"));
+    expect(items).toHaveLength(explanation.top_contributors.length);
+    const expected = [...explanation.top_contributors].sort((a, b) => Math.abs(b.shap_value) - Math.abs(a.shap_value));
+    items.forEach((item, index) => {
+      expect(item).toHaveTextContent(String(index + 1));
+      expect(item).toHaveTextContent(expected[index].gene);
+      expect(item).toHaveTextContent(expected[index].shap_value.toFixed(4));
+      expect(item).toHaveTextContent(expected[index].shap_value >= 0 ? "increases score" : "decreases score");
     });
-    expect(document.querySelectorAll(".contribution-bar span")).toHaveLength(n);
-    expect(screen.getByText(/Ranked by absolute model contribution/i)).toBeInTheDocument();
+    expect(document.querySelectorAll(".diverging-contribution")).toHaveLength(expected.length);
+    expect(screen.queryByText(/Attribution method details|annotation unavailable/i)).not.toBeInTheDocument();
+    document.querySelectorAll(".gene-details").forEach((details) => expect(details).not.toHaveAttribute("open"));
   });
 });

@@ -62,34 +62,54 @@ def test_parse_file_uses_same_contract(client) -> None:
     assert response.json()["compatible_endpoint_ids"]
 
 
-@pytest.mark.parametrize(
-    ("filename", "fmt", "demo_filename"),
-    [
-        ("lincs-caffeic-acid-mcf7-a549.csv", "csv", "demo_low_low.json"),
-        ("lincs-cid-450-mcf7-a549.tsv", "tsv", "demo_er_high.json"),
-    ],
-)
-def test_committed_real_example_file_round_trips_through_multipart(
-    client, filename, fmt, demo_filename
-) -> None:
+def test_all_named_example_files_round_trip_through_multipart(client) -> None:
     examples = REPO_ROOT / "apps" / "web" / "public" / "examples"
-    path = examples / filename
     manifest = json.loads((examples / "manifest.json").read_text(encoding="utf-8"))
-    metadata = next(item for item in manifest["examples"] if item["file"] == filename)
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == metadata["file_sha256"]
-    response = client.post(
-        "/signatures/parse",
-        data={"format": fmt},
-        files={"file": (filename, path.read_bytes(), "text/plain")},
+    catalogue = json.loads(
+        (REPO_ROOT / "data/catalogue/v1/catalogue.json").read_text(encoding="utf-8")
     )
-    assert response.status_code == 200
-    body = response.json()
-    source_path = REPO_ROOT / "apps" / "web" / "src" / "demo-signatures" / demo_filename
-    source = json.loads(source_path.read_text(encoding="utf-8"))
-    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == metadata["source_sha256"]
-    assert body["signature"] == source["signature"]
-    assert set(body["compatible_endpoint_ids"]) >= {"ER", "AR"}
-    assert metadata["provenance"].startswith("REAL measured demo example")
+    names = {item["name"] for item in manifest["examples"]}
+    assert {"Caffeic Acid", "Closantel", "Benzethonium"} <= names
+    assert len(manifest["examples"]) == 4
+    for metadata, compound in zip(manifest["examples"], catalogue["compounds"], strict=True):
+        path = examples / metadata["filename"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == metadata["file_sha256"]
+        response = client.post(
+            "/signatures/parse",
+            data={"format": metadata["format"]},
+            files={"file": (metadata["filename"], path.read_bytes(), "text/plain")},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        source_path = REPO_ROOT / compound["signatures"][0]["signature_path"]
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        assert (
+            hashlib.sha256(source_path.read_bytes()).hexdigest()
+            == metadata["source_signature_sha256"]
+        )
+        assert body["signature"] == source["signature"]
+        assert set(body["compatible_endpoint_ids"]) >= {"ER", "AR"}
+        assert metadata["name"] == compound["preferred_name"]
+
+
+def test_caffeic_acid_real_multipart_stack_explains_every_declared_endpoint(client) -> None:
+    path = REPO_ROOT / "apps/web/public/examples/lincs-caffeic-acid-mcf7-a549.csv"
+    parsed = client.post(
+        "/signatures/parse",
+        data={"format": "csv"},
+        files={"file": (path.name, path.read_bytes(), "text/csv")},
+    )
+    assert parsed.status_code == 200
+    signature = parsed.json()["signature"]
+    health = client.get("/health").json()["explanation_capabilities"]
+    for endpoint_id in ("ER", "AR"):
+        assert health[endpoint_id]["available"] is True
+        payload = {"endpoint_id": endpoint_id, "signature": signature}
+        predicted = client.post("/predict", json=payload)
+        explained = client.post("/explain", json=payload)
+        assert predicted.status_code == 200
+        assert explained.status_code == 200
+        assert explained.json()["top_contributors"]
 
 
 def test_parse_incompatible_signature_is_200_with_per_endpoint_reasons(client) -> None:

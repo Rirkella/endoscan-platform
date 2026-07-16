@@ -4,5 +4,9 @@
     "ER",
     "AR"
   ],
-  "explain_available": true
+  "explain_available": true,
+  "explanation_capabilities": {
+    "ER": { "declared_method": "tree_shap", "available": true, "missing_dependencies": [], "reason": null },
+    "AR": { "declared_method": "linear_coefficient", "available": true, "missing_dependencies": [], "reason": null }
+  }
 }

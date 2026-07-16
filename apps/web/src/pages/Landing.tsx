@@ -73,7 +73,7 @@ export function Landing() {
           <article>
             <h3>Analyze your own transcriptomic response</h3>
             <p>
-              Upload a measured signature — or run a real demo — and see which endpoint signals it
+              Upload a measured signature — or use a named real example file — and see which endpoint signals it
               shows, with the genes, pathways and limitations behind each result.
             </p>
             <Link className="landing-text-action" to="/analyze">
@@ -127,7 +127,7 @@ export function Landing() {
             <span>1</span>
             <div>
               <strong>Add a signature</strong>
-              <p>Upload a measured response, or run a real demo.</p>
+              <p>Upload a measured response, or use a named real example file.</p>
             </div>
           </li>
           <li>
