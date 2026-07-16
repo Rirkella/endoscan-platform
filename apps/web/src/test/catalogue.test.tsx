@@ -39,7 +39,7 @@ describe("measured public signature catalogue", () => {
     fireEvent.click(useButton);
 
     const runButton = await screen.findByRole("button", {
-      name: /Run \d+ compatible endpoint model/i,
+      name: /^Analyze signature$/i,
     });
     await waitFor(() => expect(runButton).not.toBeDisabled());
     expect(screen.getByText(/^PUBLIC$/i)).toBeInTheDocument();

@@ -23,7 +23,7 @@ function EvidenceBadge({ label }: { label: string }) {
     <span
       className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${EVIDENCE_STYLE[label] ?? "bg-slate-100 text-slate-600"}`}
     >
-      {label} evidence
+      {label.startsWith("Exploratory") ? label : `${label} evidence`}
     </span>
   );
 }
@@ -46,7 +46,9 @@ function PathwayCardView({ card }: { card: PathwayCard }) {
           </span>
         ))}
       </div>
-      <p className="mt-2 text-[11px] text-muted">Source: Reactome</p>
+      <p className="mt-2 text-[11px] text-muted">
+        Overlap {card.overlap_count} genes · q-value {card.q_value.toPrecision(2)} · Source: Reactome
+      </p>
 
       {/* Technical details — one level deeper. The banned statistical terms live ONLY here. */}
       <details className="mt-2" data-testid="pathway-technical">
@@ -82,7 +84,9 @@ export function PathwaysPanel({
 
   return (
     <section className="mt-3 rounded-md border border-line bg-surface p-3" data-testid="pathways-panel">
-      <h4 className="text-sm font-semibold text-ink">Biological pathways</h4>
+      <h4 className="text-sm font-semibold text-ink">
+        Exploratory pathways among genes contributing to this endpoint signal
+      </h4>
 
       {/* Always-visible honest framing (both captions required, never in Technical details). */}
       <p className="mt-1 text-xs text-muted" data-testid="pathways-framing">
@@ -107,7 +111,9 @@ export function PathwaysPanel({
           </p>
         )}
         {state.data?.status === "ok" && state.data.pathways.length === 0 && (
-          <p className="text-xs text-muted">No pathways met the evidence threshold for this result.</p>
+          <p className="text-xs text-muted">
+            No endpoint-specific pathway reached the current evidence threshold.
+          </p>
         )}
         {state.data?.status === "ok" && state.data.pathways.length > 0 && (
           <ul className="mt-1 space-y-2">
@@ -116,13 +122,25 @@ export function PathwaysPanel({
             ))}
           </ul>
         )}
+        {state.data?.status === "ok" && (state.data.exploratory_pathways ?? []).length > 0 && (
+          <div className="mt-3">
+            <h5 className="text-xs font-semibold text-ink">
+              Exploratory — not statistically supported
+            </h5>
+            <ul className="mt-1 space-y-2">
+              {(state.data.exploratory_pathways ?? []).map((card) => (
+                <PathwayCardView key={card.pathway_id} card={card} />
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Section-level Technical details: the method block (input rule, test, universe, mapping,
             Reactome version/license) — the only place the statistical vocabulary appears. */}
         {state.data?.method_block && (
           <details className="mt-2" data-testid="pathways-method-block">
             <summary className="cursor-pointer text-[11px] font-medium text-ink">
-              Technical details — method
+              Method and technical details
             </summary>
             <dl className="mt-1 space-y-0.5 text-[11px] text-muted">
               <div>Input genes: {state.data.method_block.input_gene_rule}.</div>

@@ -22,9 +22,11 @@ import { PathwaysPanel } from "../PathwaysPanel";
 export function EvidencePanel({
   signals,
   signature,
+  compound,
 }: {
   signals: EndpointSignal[];
   signature: Signature;
+  compound?: string;
 }) {
   // Only endpoints that produced a result can be explained.
   const scored = signals.filter((s) => s.result != null);
@@ -69,11 +71,11 @@ export function EvidencePanel({
       <div className="evidence-main">
         <div className="evidence-title">
           <div>
-            <p className="eyebrow">Why this result</p>
+            <p className="eyebrow">Endpoint-specific model evidence</p>
             <h2>{active.biological_target} evidence</h2>
           </div>
           <span className={`status-chip ${active.result!.call ? "status-signal" : "status-neutral"}`}>
-            {active.result!.call ? "Active call" : "Inactive call"}
+            {active.result!.call ? "Above threshold" : "Below threshold"}
           </span>
         </div>
 
@@ -81,6 +83,7 @@ export function EvidencePanel({
           key={active.endpoint_id}
           endpointId={active.endpoint_id}
           signature={signature}
+          compound={compound}
         />
 
         <section className="evidence-embed">
@@ -94,9 +97,11 @@ export function EvidencePanel({
 function EndpointExplanation({
   endpointId,
   signature,
+  compound,
 }: {
   endpointId: string;
   signature: Signature;
+  compound?: string;
 }) {
   // Live explain call — availability is driven by the real API (a clean 501/503 renders honestly).
   const state = useAsync(() => api.explain(endpointId, signature), [endpointId]);
@@ -107,31 +112,24 @@ function EndpointExplanation({
       <section className="evidence-embed">
         {state.loading && <p className="embed-copy">Preparing gene contributions…</p>}
         {state.error != null && <ErrorNotice error={state.error} />}
-        {state.error != null && (
-          <p className="embed-copy">
-            Supporting literature needs contributing genes, so it is unavailable until this
-            explanation can be loaded.
-          </p>
-        )}
         {state.data && <GeneContributionCards explanation={state.data} />}
       </section>
       {/* Pathways run off THIS endpoint's explain result (own honest empty/too-few/unavailable states). */}
       <section className="evidence-embed">
         <PathwaysPanel endpointId={endpointId} signature={signature} onResult={setPathways} />
       </section>
-      {state.data && (
-        <section className="evidence-embed">
-          <LiteraturePanel
-            endpointId={endpointId}
-            genes={state.data.top_contributors.slice(0, 8).map((item) => item.gene)}
-            pathways={(pathways?.pathways ?? []).slice(0, 5).map((item) => ({
-              pathway_id: item.pathway_id,
-              name: item.name,
-              genes: item.genes_influencing_result,
-            }))}
-          />
-        </section>
-      )}
+      <section className="evidence-embed">
+        <LiteraturePanel
+          endpointId={endpointId}
+          genes={(state.data?.top_contributors ?? []).slice(0, 10).map((item) => item.gene)}
+          pathways={(pathways?.pathways ?? []).slice(0, 5).map((item) => ({
+            pathway_id: item.pathway_id,
+            name: item.name,
+            genes: item.genes_influencing_result,
+          }))}
+          compound={compound}
+        />
+      </section>
     </>
   );
 }

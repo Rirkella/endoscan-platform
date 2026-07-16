@@ -1,7 +1,13 @@
 import { useState } from "react";
 
 import { EndoscanApiError, api } from "../api/client";
-import type { AnalyzeResponse, EndpointSummary, PredictionResult, Signature } from "../api/types";
+import type {
+  AnalyzeResponse,
+  EndpointSummary,
+  InputValueType,
+  PredictionResult,
+  Signature,
+} from "../api/types";
 
 // One endpoint's prediction outcome. `result` on success, `error` on failure — a single
 // endpoint failing does NOT sink the others.
@@ -50,12 +56,17 @@ export function useAnalyze(endpoints: EndpointSummary[]) {
     );
   }
 
-  async function run(signature: Signature, endpointIds: string[], allowExtra = false) {
+  async function run(
+    signature: Signature,
+    endpointIds: string[],
+    allowExtra = false,
+    inputValueType: InputValueType = "ranked_statistic",
+  ) {
     setState({ signals: [], signature, running: true, summary: null });
     let signals: EndpointSignal[];
     let summary: AnalyzeResponse["summary"] | null = null;
     try {
-      const resp = await api.analyze(signature, endpointIds, allowExtra);
+      const resp = await api.analyze(signature, endpointIds, allowExtra, inputValueType);
       summary = resp.summary;
       signals = resp.results.map((r) => ({
         endpoint_id: r.endpoint_id,

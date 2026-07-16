@@ -77,6 +77,10 @@ def parse_signature(
     format: Annotated[str, Form()] = "json",
     allow_extra: Annotated[bool, Form()] = False,
     sample: Annotated[str | None, Form()] = None,
+    input_value_type: Annotated[
+        str,
+        Form(pattern="^(differential_zscore|log2_fold_change|ranked_statistic|raw_expression)$"),
+    ] = "ranked_statistic",
 ) -> ParseResult:
     """Parse one upload and report compatibility with every registered endpoint.
 
@@ -90,6 +94,7 @@ def parse_signature(
         return ParseResult(
             ready=False,
             format=format,
+            input_value_type=input_value_type,
             preview=ParsePreview(
                 n_detected=0,
                 samples=parsed.samples,
@@ -111,6 +116,7 @@ def parse_signature(
     return ParseResult(
         ready=bool(compatible_ids),
         format=format,
+        input_value_type=input_value_type,
         preview=ParsePreview(
             n_detected=len(parsed.mapping),
             samples=parsed.samples,

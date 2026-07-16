@@ -35,7 +35,7 @@ describe("signature upload (source step)", () => {
     expect(await screen.findByText(/compatible endpoint models/i)).toBeInTheDocument();
     expect(screen.getByText(/978 genes parsed/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Use this signature/i }));
-    const runBtn = await screen.findByRole("button", { name: /Run \d+ compatible endpoint model/i });
+    const runBtn = await screen.findByRole("button", { name: /^Analyze signature$/i });
     await waitFor(() => expect(runBtn).not.toBeDisabled());
     fireEvent.click(runBtn);
     expect((await screen.findAllByRole("article")).length).toBe(2);
@@ -87,7 +87,7 @@ describe("signature upload (source step)", () => {
       target: { value: '{"A1BG":0.1}' },
     });
     fireEvent.click(screen.getByRole("button", { name: /^Load signature$/i }));
-    const runBtn = await screen.findByRole("button", { name: /Run \d+ compatible endpoint model/i });
+    const runBtn = await screen.findByRole("button", { name: /^Analyze signature$/i });
     await waitFor(() => expect(runBtn).not.toBeDisabled());
     fireEvent.click(runBtn);
     expect((await screen.findAllByRole("article")).length).toBe(2);

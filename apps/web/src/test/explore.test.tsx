@@ -5,9 +5,11 @@
 // (no exact projection), no in-/out-of-domain verdict in the visible layer, no fabricated points,
 // and active/inactive framed as endpoint-dataset labels (not universal safe/harmful).
 
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import type { ExploreLocateResult, ExplorePoint } from "../api/types";
+import { ExploreScatter } from "../components/ExploreScatter";
 import { installFetchMock } from "./mockApi";
 import { renderApp } from "./renderApp";
 
@@ -70,12 +72,12 @@ describe("Reference data view", () => {
     await screen.findByTestId("explore-scatter");
     await placeSignature();
 
-    // Graded plain statement (fixture percentile 0.42 -> "close").
-    expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/close to/i);
+    // Placement and neighbour similarity are described separately.
+    expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/Approximate position/i);
     expect(screen.getByText(/Nearest reference signatures/i)).toBeInTheDocument();
     expect(screen.getByText(/does not prove the same effect/i)).toBeInTheDocument();
-    // Approximate-position language on the placement.
-    expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/Approximate position/i);
+    expect(screen.getByText(/very similar response/i)).toBeInTheDocument();
+    expect(screen.getByText(/rank 1 of 7/i)).toBeInTheDocument();
     // The scatter highlights the similar signatures + shows an approximate marker.
     await waitFor(() =>
       expect(document.querySelectorAll("circle[data-neighbor='true']").length).toBe(3),
@@ -102,15 +104,16 @@ describe("Reference data view", () => {
     expect(tech).toContain("feature schema");
   });
 
-  it("the close/far label maps transparently from the real percentile", async () => {
+  it("keeps isolation percentile separate from empirical neighbour similarity", async () => {
     renderApp("/explore");
     await screen.findByTestId("explore-scatter");
     await placeSignature();
 
     const tech = screen.getByTestId("explore-technical").textContent ?? "";
     expect(tech).toMatch(/42\.0%/);
-    expect(tech.toLowerCase()).toContain("≤50% → close");
-    expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/close/i);
+    expect(tech.toLowerCase()).toContain("separate from neighbour similarity ranks");
+    expect(screen.getByTestId("similarity-readout")).not.toHaveTextContent(/close/i);
+    expect(screen.getByTestId("similar-compounds")).toHaveTextContent(/very similar response/i);
   });
 
   it("a not-computed context shows an honest empty state with ZERO fabricated points", async () => {
@@ -122,4 +125,44 @@ describe("Reference data view", () => {
     expect(await screen.findByText(/No reference map for AR yet/i)).toBeInTheDocument();
     expect(pointCircles().length).toBe(0); // no placeholder / fake points
   });
+});
+
+it("marks an existing reference at exact stored coordinates without approximate language", () => {
+  const point: ExplorePoint = {
+    compound_id: "EXACT",
+    x: 1,
+    y: 2,
+    label: "active",
+    preferred_name: "Exact compound",
+    pubchem_cid: 1,
+    source_dataset: "Measured source",
+    experimental_contexts: [],
+    full_signature_id: "exact-signature",
+  };
+  const exact = {
+    ...point,
+    distance: 0,
+    similarity_category: "exact match",
+    similarity_rank: 0,
+    similarity_percentile: 0,
+  };
+  const locate: ExploreLocateResult = {
+    context: "ER",
+    placement: "exact_existing_reference",
+    approx_xy: { x: point.x, y: point.y },
+    exact_match: exact,
+    neighbors: [],
+    domain: {
+      metric: "distance_to_kth_training_neighbor",
+      k: 1,
+      query_kth_distance: 1,
+      training_reference_quantiles: {},
+      percentile: 0,
+    },
+  };
+  render(<ExploreScatter points={[point]} locate={locate} />);
+  expect(screen.getByTestId("explore-exact-marker")).toHaveTextContent(
+    /Exact existing reference record/i,
+  );
+  expect(screen.queryByTestId("explore-approx-marker")).not.toBeInTheDocument();
 });

@@ -6,6 +6,7 @@
 import type {
   AnalyzeResponse,
   ApiError,
+  BiologicalResponse,
   CatalogueSearchResponse,
   CatalogueSignatureDetail,
   EndpointDetail,
@@ -14,6 +15,7 @@ import type {
   ExploreLocateResult,
   ExploreMap,
   Health,
+  InputValueType,
   LiteraturePathwayInput,
   LiteratureResponse,
   ParseResult,
@@ -97,8 +99,17 @@ export const api = {
     postJson<ExplanationResult>("/explain", { endpoint_id, signature, top_n, allow_extra }),
 
   // Run only explicitly selected compatible endpoints (or all when omitted).
-  analyze: (signature: Signature, endpoint_ids?: string[], allow_extra = false) =>
-    postJson<AnalyzeResponse>("/analyze", { signature, endpoint_ids, allow_extra }),
+  analyze: (
+    signature: Signature,
+    endpoint_ids?: string[],
+    allow_extra = false,
+    input_value_type: InputValueType = "ranked_statistic",
+  ) => postJson<AnalyzeResponse>("/analyze", {
+    signature,
+    endpoint_ids,
+    allow_extra,
+    input_value_type,
+  }),
 
   searchCatalogue: (query: string, limit = 10) =>
     getJson<CatalogueSearchResponse>(
@@ -113,12 +124,19 @@ export const api = {
   interpretPathways: (endpoint_id: string, signature: Signature, allow_extra = false) =>
     postJson<PathwaysResponse>("/interpret/pathways", { endpoint_id, signature, allow_extra }),
 
+  interpretBiologicalResponse: (signature: Signature, input_value_type: InputValueType) =>
+    postJson<BiologicalResponse>("/interpret/biological-response", {
+      signature,
+      input_value_type,
+    }),
+
   interpretLiterature: (
     endpoint_id: string,
     genes: string[],
     pathways: LiteraturePathwayInput[],
     compound?: string,
     context?: string,
+    response_genes: string[] = [],
   ) =>
     postJson<LiteratureResponse>("/interpret/literature", {
       endpoint_id,
@@ -126,12 +144,13 @@ export const api = {
       pathways,
       compound,
       context,
+      response_genes,
     }),
 
   // Explore: the committed data-space (UMAP) map for a context (404 when not yet computed).
   exploreUmap: (context: string) =>
     getJson<ExploreMap>(`/explore/${encodeURIComponent(context)}/umap`),
-  // Place a signature by nearest neighbours (approximate; never an exact projection).
+  // Place by nearest neighbours; exact stored records use their committed map coordinates.
   exploreLocate: (context: string, signature: Signature, allow_extra = false) =>
     postJson<ExploreLocateResult>("/explore/locate", { context, signature, allow_extra }),
 
@@ -143,6 +162,7 @@ export const api = {
     format: "json" | "csv" | "tsv";
     allow_extra?: boolean;
     sample?: string | null;
+    input_value_type?: InputValueType;
   }): Promise<ParseResult> => {
     const fd = new FormData();
     if (opts.file) fd.append("file", opts.file);
@@ -150,6 +170,7 @@ export const api = {
     fd.append("format", opts.format);
     if (opts.allow_extra) fd.append("allow_extra", "true");
     if (opts.sample) fd.append("sample", opts.sample);
+    if (opts.input_value_type) fd.append("input_value_type", opts.input_value_type);
     const res = await fetch(url("/signatures/parse"), { method: "POST", body: fd });
     if (!res.ok) throw await toError(res);
     return (await res.json()) as ParseResult;

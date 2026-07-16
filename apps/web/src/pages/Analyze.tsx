@@ -18,12 +18,14 @@ import {
   predictionScore,
   type EndpointCompatibility,
   type EndpointSummary,
+  type InputValueType,
   type ParseResult,
   type Signature,
 } from "../api/types";
 import { PlannedBadge } from "../components/PlannedBadge";
 import { ErrorNotice } from "../components/ErrorNotice";
 import { EvidencePanel } from "../components/analyze/EvidencePanel";
+import { BiologicalResponsePanel } from "../components/analyze/BiologicalResponsePanel";
 import { ReferencePanel } from "../components/analyze/ReferencePanel";
 import { SourceStep } from "../components/analyze/SourceStep";
 import { ValidationStep } from "../components/analyze/ValidationStep";
@@ -31,7 +33,7 @@ import { type EndpointSignal, useAnalyze } from "../hooks/useAnalyze";
 import { useAsync } from "../hooks/useAsync";
 
 export type AnalyzeStep = "source" | "validate" | "running" | "result";
-export type ResultTab = "overview" | "evidence" | "reference" | "report";
+export type ResultTab = "overview" | "biological" | "endpoint" | "similar" | "report";
 
 // What the user prepared, for display in validate/result headers. `signature` is the REAL payload.
 export interface PreparedInput {
@@ -41,6 +43,7 @@ export interface PreparedInput {
   signature: Signature;
   parse: ParseResult;
   allowExtra: boolean;
+  inputValueType: InputValueType;
 }
 
 export function Analyze() {
@@ -69,6 +72,7 @@ export function Analyze() {
         const parsed = await api.parseSignature({
           content: JSON.stringify(detail.signature),
           format: "json",
+          input_value_type: "differential_zscore",
         });
         if (!parsed.signature) throw new Error("The selected measured signature could not be prepared.");
         onPrepared({
@@ -78,6 +82,7 @@ export function Analyze() {
           signature: parsed.signature,
           parse: parsed,
           allowExtra: false,
+          inputValueType: parsed.input_value_type,
         });
       })
       .catch(setCatalogueError)
@@ -98,6 +103,7 @@ export function Analyze() {
         prepared.signature,
         prepared.parse.compatible_endpoint_ids,
         prepared.allowExtra,
+        prepared.inputValueType,
       );
     } catch (e) {
       setRunError(e);
@@ -229,25 +235,33 @@ function ResultWorkspace({
           <button className="back-link" onClick={onNew}>
             Back to new analysis
           </button>
-          <p className="eyebrow">Screening result</p>
+          <p className="eyebrow">Transcriptomic analysis result</p>
           <h1>{input.title}</h1>
           <p>{input.subtitle}</p>
         </div>
         <div className="result-actions">
           <button className="button primary" onClick={() => setTab("report")}>
-            Open report
+            Preview report
           </button>
         </div>
       </div>
 
-      <nav className="result-tabs" aria-label="Result sections">
-        {(["overview", "evidence", "reference", "report"] as ResultTab[]).map((item) => (
+      <nav className="result-tabs" aria-label="Result sections" role="tablist">
+        {([
+          ["overview", "Overview"],
+          ["biological", "Biological response"],
+          ["endpoint", "Endpoint evidence"],
+          ["similar", "Similar signatures"],
+          ["report", "Report"],
+        ] as [ResultTab, string][]).map(([item, label]) => (
           <button
             key={item}
+            role="tab"
+            aria-selected={tab === item}
             className={tab === item ? "result-tab-active" : ""}
             onClick={() => setTab(item)}
           >
-            {item === "reference" ? "Reference context" : item[0].toUpperCase() + item.slice(1)}
+            {label}
           </button>
         ))}
       </nav>
@@ -260,12 +274,24 @@ function ResultWorkspace({
           nScored={scored.length}
           runError={runError}
           allFailed={allFailed}
-          onEvidence={() => setTab("evidence")}
-          onReference={() => setTab("reference")}
+          onEvidence={() => setTab("endpoint")}
+          onReference={() => setTab("similar")}
         />
       )}
-      {tab === "evidence" && <EvidencePanel signals={signals} signature={input.signature} />}
-      {tab === "reference" && <ReferencePanel endpoints={endpoints} signature={input.signature} />}
+      {tab === "biological" && (
+        <BiologicalResponsePanel
+          signature={input.signature}
+          inputValueType={input.inputValueType}
+        />
+      )}
+      {tab === "endpoint" && (
+        <EvidencePanel
+          signals={signals}
+          signature={input.signature}
+          compound={input.kind === "catalogue" ? input.title : undefined}
+        />
+      )}
+      {tab === "similar" && <ReferencePanel endpoints={endpoints} signature={input.signature} />}
       {tab === "report" && <ReportTab input={input} signals={signals} nAbove={nAbove} />}
     </div>
   );
@@ -295,16 +321,15 @@ function OverviewTab({
       <div className="overview-main">
         <section className="executive-summary">
           <div>
-            <p className="eyebrow">Screening summary</p>
+            <p className="eyebrow">Endpoint summary</p>
             <h2>
               {nAbove > 0
                 ? `${nAbove} of ${nScored} endpoint ${nScored === 1 ? "model is" : "models are"} above threshold`
                 : "No endpoint model is above its threshold"}
             </h2>
             <p>
-              Each score reflects similarity to a learned endpoint-associated expression pattern.
-              Interpret every result with the endpoint evidence and limitations — a score is not a
-              clinical, regulatory or safety conclusion.
+              Each score reflects an endpoint-associated expression pattern. Model signal score —
+              not a calibrated probability of a real-world outcome.
             </p>
           </div>
           <span className="summary-status">
@@ -335,6 +360,7 @@ function OverviewTab({
             <EndpointResultCard
               key={s.endpoint_id}
               signal={s}
+              signature={input.signature}
               compatibility={input.parse.compatibility.find(
                 (item) => item.endpoint_id === s.endpoint_id,
               )}
@@ -363,13 +389,13 @@ function OverviewTab({
           </dl>
         </section>
         <section>
-          <p className="aside-label">Reference placement</p>
+          <p className="aside-label">Similar measured signatures</p>
           <p className="mini-reference-copy">
-            See where this signature sits among known reference signatures. Distance is descriptive
+            Compare this response with named public reference signatures. Similarity is descriptive
             context, not a prediction.
           </p>
           <button className="detail-link" onClick={onReference}>
-            Open reference context
+            View similar signatures
           </button>
         </section>
         <section className="limitations-summary">
@@ -386,10 +412,12 @@ function OverviewTab({
 
 function EndpointResultCard({
   signal,
+  signature,
   compatibility,
   onEvidence,
 }: {
   signal: EndpointSignal;
+  signature: Signature;
   compatibility?: EndpointCompatibility;
   onEvidence: () => void;
 }) {
@@ -412,7 +440,7 @@ function EndpointResultCard({
           </p>
         )}
         <button className="detail-link" onClick={onEvidence}>
-          Inspect {signal.endpoint_id} evidence
+          View endpoint evidence
         </button>
       </article>
     );
@@ -434,6 +462,7 @@ function EndpointResultCard({
         </span>
       </div>
       <h3>{signal.biological_target}</h3>
+      <span className="endpoint-status-label">{r.limitations.status}</span>
       <p>Endpoint signal score</p>
       <div className="score-row">
         <strong className="tabular">{score.toFixed(2)}</strong>
@@ -443,44 +472,55 @@ function EndpointResultCard({
         <span style={{ width: `${pct}%` }} />
         <i style={{ left: `${thresholdPct}%` }} />
       </div>
-      <dl>
-        <div>
-          <dt>Model call</dt>
-          <dd className={above ? "call-signal" : ""}>{above ? "Above threshold" : "Below threshold"}</dd>
-        </div>
-        <div>
-          <dt>Model status</dt>
-          <dd>{r.limitations.status}</dd>
-        </div>
-        <div>
-          <dt>Input fit</dt>
-          <dd>
-            {compatibility
-              ? `${compatibility.n_matched} / ${compatibility.n_schema_genes} required genes`
-              : "Technical schema met"}
-          </dd>
-        </div>
-        {signal.model_version && (
-          <div>
-            <dt>Model version</dt>
-            <dd>{signal.model_version}</dd>
-          </div>
-        )}
-        {signal.source_refs && signal.source_refs.length > 0 && (
-          <div>
-            <dt>Data provenance</dt>
-            <dd>{signal.source_refs.join(", ")}</dd>
-          </div>
-        )}
-        <div>
-          <dt>Input handling</dt>
-          <dd>{r.standardized_input ? "Standardized by model pipeline" : "No standardization applied"}</dd>
-        </div>
-      </dl>
+      <p className="endpoint-interpretation">
+        {above
+          ? "Strong endpoint-associated expression pattern."
+          : "Expression pattern below the registered endpoint threshold."}
+      </p>
+      <p className="score-disclaimer">
+        Model signal score — not a calibrated probability of a real-world outcome.
+      </p>
+      <EndpointCardClues endpointId={signal.endpoint_id} signature={signature} />
+      <details className="technical-disclosure endpoint-technical">
+        <summary>Model and provenance details</summary>
+        <dl className="technical-grid">
+          <div><dt>Input fit</dt><dd>{compatibility ? `${compatibility.n_matched} / ${compatibility.n_schema_genes} required genes` : "Technical schema met"}</dd></div>
+          <div><dt>Model version</dt><dd>{signal.model_version || "Not recorded"}</dd></div>
+          <div><dt>Data provenance</dt><dd>{signal.source_refs?.join(", ") || "Not recorded"}</dd></div>
+          <div><dt>Input handling</dt><dd>{r.standardized_input ? "Standardized by the registered model pipeline" : "No standardization applied"}</dd></div>
+        </dl>
+      </details>
       <button className="detail-link" onClick={onEvidence}>
-        Inspect {signal.endpoint_id} evidence
+        View endpoint evidence
       </button>
     </article>
+  );
+}
+
+function EndpointCardClues({
+  endpointId,
+  signature,
+}: {
+  endpointId: string;
+  signature?: Signature;
+}) {
+  if (!signature) return null;
+  return <EndpointCardCluesLoaded endpointId={endpointId} signature={signature} />;
+}
+
+function EndpointCardCluesLoaded({ endpointId, signature }: { endpointId: string; signature: Signature }) {
+  const explanation = useAsync(() => api.explain(endpointId, signature, 3), [endpointId, signature]);
+  const pathways = useAsync(() => api.interpretPathways(endpointId, signature), [endpointId, signature]);
+  if (!explanation.data && !pathways.data?.pathways.length) return null;
+  return (
+    <div className="endpoint-clues">
+      {explanation.data && (
+        <div><span>Leading contributors</span><strong>{explanation.data.top_contributors.slice(0, 3).map((item) => item.gene).join(" · ")}</strong></div>
+      )}
+      {pathways.data?.pathways.length ? (
+        <div><span>Biological clues</span><strong>{pathways.data.pathways.slice(0, 2).map((item) => item.name).join(" · ")}</strong></div>
+      ) : null}
+    </div>
   );
 }
 
@@ -499,12 +539,16 @@ function ReportTab({
       <aside className="report-toc">
         <p className="aside-label">Report contents</p>
         {[
-          "Executive summary",
-          "Input and compatibility",
-          "Endpoint overview",
-          "Evidence",
-          "Reference context",
-          "Methods and limitations",
+          "Input and experimental context",
+          "Endpoint summary",
+          "Global biological response",
+          "Endpoint-specific evidence",
+          "Contributing genes",
+          "Endpoint-specific pathways",
+          "Supporting literature",
+          "Similar measured signatures",
+          "Limitations",
+          "Model and analysis provenance",
         ].map((item, index) => (
           <button key={item} className={index === 0 ? "selected" : ""} disabled>
             <span>{String(index + 1).padStart(2, "0")}</span>
@@ -515,7 +559,7 @@ function ReportTab({
       <article className="report-document">
         <div className="report-document-header">
           <div>
-            <p>ENDOSCAN SCREENING REPORT</p>
+            <p>ENDOSCAN ANALYSIS REPORT</p>
             <span>Preview — export is a planned capability</span>
           </div>
           <div>
@@ -525,8 +569,8 @@ function ReportTab({
         <div className="report-title">
           <div>
             <p className="eyebrow">Executive summary</p>
-            <h1>Endpoint screening result</h1>
-            <p>Transcriptomics-based pre-screening across the registered experimental endpoints.</p>
+            <h1>Transcriptomic analysis result</h1>
+            <p>Measured biological response and registered experimental endpoint signals.</p>
           </div>
           <span className="summary-status">
             <span className={`status-dot ${nAbove > 0 ? "status-dot-coral" : ""}`} aria-hidden />

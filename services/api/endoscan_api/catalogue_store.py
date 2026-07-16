@@ -183,6 +183,16 @@ def get_compound(repo_root: Path, compound_id: str) -> tuple[_CatalogueDoc, Cata
     raise CatalogueNotFoundError("compound is not in the measured-signature catalogue")
 
 
+def identity_index(repo_root: Path) -> dict[str, CatalogueCompound]:
+    """Return only committed, versioned identities; callers must not fill gaps from live APIs."""
+    if not (repo_root.resolve() / CATALOGUE_RELPATH).is_file():
+        # Reference-map fixtures and deployments without the optional catalogue remain usable;
+        # every point is then explicitly unresolved rather than queried from a live identity API.
+        return {}
+    doc = load_catalogue(repo_root.resolve())
+    return {compound.compound_id: _compound(compound) for compound in doc.compounds}
+
+
 def get_signature(repo_root: Path, signature_id: str) -> CatalogueSignatureDetail:
     doc = load_catalogue(repo_root.resolve())
     source_url = doc.sources["signatures"].url

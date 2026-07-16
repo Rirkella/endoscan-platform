@@ -52,6 +52,53 @@ function defaultRoutes(): Record<string, Resolver> {
     // Default to the honest "unavailable" state so existing Explain tests are undisturbed;
     // the pathways test overrides this with the ok fixture.
     "POST /api/interpret/pathways": { body: pathwaysUnavailable },
+    "POST /api/interpret/biological-response": {
+      body: {
+        status: "ok",
+        reason: null,
+        input_value_type: "differential_zscore",
+        increased_pathways: [
+          {
+            pathway_id: "R-HSA-UP",
+            name: "Estrogen-dependent gene expression",
+            direction: "increased",
+            enrichment_statistic: 3.4,
+            p_value: 0.0004,
+            q_value: 0.02,
+            leading_edge_genes: ["ESR1", "GREB1", "PGR"],
+            pathway_size_in_universe: 14,
+            statistically_supported: true,
+          },
+        ],
+        decreased_pathways: [
+          {
+            pathway_id: "R-HSA-DOWN",
+            name: "Cell cycle checkpoints",
+            direction: "decreased",
+            enrichment_statistic: -2.1,
+            p_value: 0.01,
+            q_value: 0.08,
+            leading_edge_genes: ["CDK1", "CCNB1"],
+            pathway_size_in_universe: 20,
+            statistically_supported: false,
+          },
+        ],
+        tested_gene_universe: ["ESR1", "GREB1", "PGR", "CDK1", "CCNB1"],
+        method_block: {
+          method: "Competitive preranked Wilcoxon rank-sum enrichment",
+          method_version: "endoscan-preranked-wilcoxon-1.0.0",
+          ranking_statistic: "supplied signed transcriptomic value",
+          input_value_type: "differential_zscore",
+          universe_size: 870,
+          pathways_tested: 420,
+          correction: "Benjamini-Hochberg FDR",
+          min_gene_set_size: 5,
+          max_gene_set_size: 500,
+          leading_edge_rule: "signed tail",
+          reactome: { reactome_version: "97" },
+        },
+      },
+    },
     "POST /api/interpret/literature": {
       body: {
         endpoint_id: "ER",

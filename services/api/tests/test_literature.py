@@ -12,10 +12,12 @@ from endoscan_api.literature import (
     LiteratureService,
     LiteratureTimeoutError,
     NcbiConfig,
+    _article,
     build_query_specs,
     get_literature_service,
 )
-from endoscan_api.schemas import LiteratureRequest
+from endoscan_api.literature_concepts import EndpointLiteratureConcept
+from endoscan_api.schemas import LiteratureQueryRecord, LiteratureRequest
 
 
 def _request(**updates) -> LiteratureRequest:
@@ -48,7 +50,7 @@ class PubmedTransport:
                     "result": {
                         "uids": ["12345"],
                         "12345": {
-                            "title": "Estrogen receptor transcription in human cells",
+                            "title": "ESR1 and estrogen receptor signaling in human cells",
                             "authors": [{"name": "Example A"}],
                             "fulljournalname": "Example Journal",
                             "pubdate": "2024 Jan",
@@ -57,7 +59,8 @@ class PubmedTransport:
                 }
             ).encode()
         return b"""<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>12345</PMID>
-          <Article><Abstract><AbstractText>Measured expression evidence.</AbstractText></Abstract>
+          <Article><Abstract><AbstractText>
+          ESR1 directly supports estrogen receptor signaling.</AbstractText></Abstract>
           </Article></MedlineCitation></PubmedArticle></PubmedArticleSet>"""
 
 
@@ -76,8 +79,9 @@ def test_success_records_queries_provenance_and_noncausal_reason() -> None:
     assert result.status == "ok"
     assert result.articles[0].pmid == "12345"
     assert result.articles[0].pubmed_url == "https://pubmed.ncbi.nlm.nih.gov/12345/"
-    assert "not evidence of causality" in result.articles[0].relevance_reason
-    assert result.articles[0].abstract_excerpt == "Measured expression evidence."
+    assert "only entities already shown" in result.articles[0].relevance_reason
+    assert result.articles[0].displayed_relationship == "ESR1 ↔ Estrogen receptor"
+    assert "ESR1 directly" in result.articles[0].abstract_excerpt
     assert result.queries and all(record.query for record in result.queries)
     assert result.provenance.provider == "NCBI PubMed E-utilities"
     assert result.provenance.email_configured is True
@@ -117,6 +121,97 @@ def test_query_builder_sanitizes_fields_and_is_bounded() -> None:
     specs = build_query_specs(body, 'Estrogen receptor [unsafe]')
     assert len(specs) <= 10
     assert all("[unsafe]" not in spec.query and '"quoted"' not in spec.query for spec in specs)
+
+
+def _er_concept() -> EndpointLiteratureConcept:
+    return EndpointLiteratureConcept(
+        endpoint_id="ER",
+        preferred_name="Estrogen Receptor",
+        search_terms=("estrogen receptor", "estrogen receptor alpha", "ESR1"),
+        excluded_ambiguous_terms=("ER",),
+        configuration_version="test",
+    )
+
+
+def test_curated_endpoint_query_never_uses_ambiguous_er_alone() -> None:
+    specs = build_query_specs(
+        _request(genes=["PHGDH"], pathways=[]), "Estrogen Receptor", _er_concept()
+    )
+    assert specs
+    assert all('"ER"[Title/Abstract]' not in spec.query for spec in specs)
+    assert all('"estrogen receptor"[Title/Abstract]' in spec.query for spec in specs)
+
+
+def _article_from_title(
+    title: str,
+    response_genes: list[str] | None = None,
+    abstract: str = "PHGDH and estrogen receptor are linked in the measured context.",
+):
+    body = _request(
+        genes=["PHGDH"], response_genes=response_genes or [], pathways=[], compound=None
+    )
+    records = [
+        LiteratureQueryRecord(
+            category="gene_endpoint",
+            query="recorded",
+            matched_genes=["PHGDH"],
+            matched_pathways=[],
+            pmids=["1"],
+        )
+    ]
+    return _article(
+        "1",
+        {"title": title, "authors": [], "pubdate": "2021"},
+        abstract,
+        records,
+        "Estrogen Receptor",
+        _er_concept(),
+        body,
+    )
+
+
+def test_closed_graph_excludes_endoplasmic_reticulum_and_incidental_gene_match() -> None:
+    title = "PHGDH response during endoplasmic reticulum stress"
+    assert _article_from_title(title, abstract=title) is None
+
+
+def test_retracted_record_is_never_supporting_evidence() -> None:
+    title = "RETRACTED: PHGDH and estrogen receptor signaling in breast cancer"
+    assert _article_from_title(title, abstract=title) is None
+
+
+def test_gene_endpoint_relationship_cannot_be_tautological() -> None:
+    body = _request(genes=["ESR1"], pathways=[], compound=None)
+    records = [
+        LiteratureQueryRecord(
+            category="gene_endpoint",
+            query="recorded",
+            matched_genes=["ESR1"],
+            matched_pathways=[],
+            pmids=["1"],
+        )
+    ]
+    article = _article(
+        "1",
+        {"title": "ESR1 mutations in breast cancer", "authors": [], "pubdate": "2021"},
+        "ESR1 mutations were measured.",
+        records,
+        "Estrogen Receptor",
+        _er_concept(),
+        body,
+    )
+    assert article is None
+
+
+def test_esrp1_phgdh_article_requires_esrp1_to_be_surfaced() -> None:
+    title = (
+        "The Role of ESRP1 in the Regulation of PHGDH in "
+        "Estrogen Receptor-Positive Breast Cancer"
+    )
+    assert _article_from_title(title) is None
+    retained = _article_from_title(title, response_genes=["ESRP1"])
+    assert retained is not None
+    assert retained.displayed_relationship == "PHGDH ↔ estrogen receptor"
 
 
 @pytest.mark.parametrize(

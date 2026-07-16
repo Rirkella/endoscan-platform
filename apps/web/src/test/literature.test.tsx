@@ -59,8 +59,13 @@ describe("Supporting literature", () => {
               abstract_excerpt: "Measured expression evidence.",
               matched_genes: ["ESR1"],
               matched_pathways: [],
-              evidence_category: "gene_endpoint",
-              relevance_reason: "Matched by the recorded query; not evidence of causality.",
+              evidence_category: "Direct gene–endpoint evidence",
+              displayed_relationship: "ESR1 ↔ Estrogen Receptor",
+              matched_title_terms: ["ESR1", "estrogen receptor"],
+              matched_abstract_terms: [],
+              endpoint_concept_used: "estrogen receptor",
+              ranking_reason: "100: relationship matched in title",
+              relevance_reason: "Uses only entities already shown in this analysis.",
               pubmed_url: "https://pubmed.ncbi.nlm.nih.gov/12345/",
             },
           ],
@@ -68,10 +73,13 @@ describe("Supporting literature", () => {
       },
     });
     renderPanel();
-    const link = await screen.findByRole("link", { name: /Estrogen receptor transcription/i });
+    await screen.findByRole("heading", { name: /Estrogen receptor transcription/i });
+    const link = screen.getByRole("link", { name: /View in PubMed/i });
     expect(link).toHaveAttribute("href", "https://pubmed.ncbi.nlm.nih.gov/12345/");
     expect(link).toHaveAttribute("target", "_blank");
-    expect(screen.getAllByText(/not proof of causality|not evidence of causality/i)).toHaveLength(2);
+    expect(screen.getByText(/do not establish.*causal/i)).toBeInTheDocument();
+    expect(screen.getByText(/ESR1 ↔ Estrogen Receptor/i)).toBeInTheDocument();
+    expect(screen.getByText(/Direct gene–endpoint evidence/i)).toBeInTheDocument();
     expect(screen.getByTestId("literature-technical")).toHaveTextContent(/ESR1.*Estrogen receptor/i);
   });
 

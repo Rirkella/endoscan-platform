@@ -1,6 +1,7 @@
 {
   "ready": true,
   "format": "json",
+  "input_value_type": "differential_zscore",
   "preview": {
     "n_detected": 978,
     "samples": null,

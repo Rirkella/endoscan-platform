@@ -13,6 +13,7 @@ import json
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -61,7 +62,16 @@ def test_umap_serves_points_counts_and_manifest(fixture_client: TestClient) -> N
     assert body["manifest"]["source_sha256"] == manifest["source"]["sha256"]
     # Every point is a real training compound with coords (never fabricated).
     pt = body["points"][0]
-    assert set(pt) == {"compound_id", "x", "y", "label"}
+    assert set(pt) >= {
+        "compound_id",
+        "x",
+        "y",
+        "label",
+        "preferred_name",
+        "source_dataset",
+        "full_signature_id",
+    }
+    assert pt["preferred_name"] is None  # fixture has no versioned identity catalogue
 
 
 def test_missing_map_is_honest_404(client: TestClient) -> None:
@@ -93,7 +103,16 @@ def test_locate_returns_neighbors_distances_and_defined_domain_metric(
     # Real nearest neighbours with distances (computed in the original gene space) + map coords.
     assert len(body["neighbors"]) >= 1
     n0 = body["neighbors"][0]
-    assert set(n0) == {"compound_id", "distance", "x", "y", "label"}
+    assert set(n0) >= {
+        "compound_id",
+        "distance",
+        "x",
+        "y",
+        "label",
+        "similarity_category",
+        "similarity_rank",
+        "similarity_percentile",
+    }
     dists = [n["distance"] for n in body["neighbors"]]
     assert dists == sorted(dists)  # ascending == genuinely nearest-first
 
@@ -103,6 +122,25 @@ def test_locate_returns_neighbors_distances_and_defined_domain_metric(
     assert dom["query_kth_distance"] >= 0.0
     assert 0.0 <= dom["percentile"] <= 1.0
     assert set(dom["training_reference_quantiles"]) >= {"min", "median", "max"}
+
+
+def test_exact_reference_self_match_is_identified_and_removed(fixture_client: TestClient) -> None:
+    manifest = json.loads((FIXTURES / "manifest.json").read_text())
+    support = np.load(FIXTURES / "support.npy")
+    signature = dict(zip(manifest["feature_names"], support[0].tolist(), strict=True))
+    response = fixture_client.post(
+        "/explore/locate", json={"context": "FIX", "signature": signature}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["placement"] == "exact_existing_reference"
+    assert body["exact_match"]["compound_id"] == "CID_00"
+    assert body["exact_match"]["similarity_category"] == "exact match"
+    assert all(item["compound_id"] != "CID_00" for item in body["neighbors"])
+    assert body["approx_xy"] == {
+        "x": body["exact_match"]["x"],
+        "y": body["exact_match"]["y"],
+    }
 
 
 def test_locate_asserts_no_in_domain_verdict_anywhere(fixture_client: TestClient) -> None:

@@ -106,6 +106,11 @@ export interface ExplanationResult {
 }
 
 export type Signature = Record<string, number>;
+export type InputValueType =
+  | "differential_zscore"
+  | "log2_fold_change"
+  | "ranked_statistic"
+  | "raw_expression";
 
 // --- signature upload / parse (POST /signatures/parse) ---
 export interface ParsePreview {
@@ -132,6 +137,7 @@ export interface EndpointCompatibility {
 export interface ParseResult {
   ready: boolean;
   format: string;
+  input_value_type: InputValueType;
   preview: ParsePreview;
   compatibility: EndpointCompatibility[];
   compatible_endpoint_ids: string[];
@@ -234,15 +240,20 @@ export function predictionScore(result: PredictionResult): number {
 }
 
 // --- Explore: the data-space (UMAP) view (GET /explore/{ctx}/umap, POST /explore/locate) ---
-// UMAP is a VISUALIZATION of the real training data, not a boundary/proof. A submitted
-// signature is placed APPROXIMATELY by nearest neighbours (no exact projection), and there is
-// no in-/out-of-domain flag — only a defined distance metric vs the training reference.
+// UMAP is a visualization of real training data, not a boundary/proof. A new signature uses an
+// approximate neighbour centroid; an exact stored record uses its committed coordinates. There
+// is no in-/out-of-domain flag, only a defined isolation metric against the reference set.
 
 export interface ExplorePoint {
   compound_id: string;
   x: number;
   y: number;
   label: string | null; // "active" | "inactive" | null (never fabricated)
+  preferred_name: string | null;
+  pubchem_cid: number | null;
+  source_dataset: string | null;
+  experimental_contexts: string[];
+  full_signature_id: string | null;
 }
 
 export interface ExploreCounts {
@@ -278,6 +289,14 @@ export interface ExploreNeighbor {
   x: number;
   y: number;
   label: string | null;
+  preferred_name: string | null;
+  pubchem_cid: number | null;
+  source_dataset: string | null;
+  experimental_contexts: string[];
+  full_signature_id: string | null;
+  similarity_category: string;
+  similarity_rank: number;
+  similarity_percentile: number;
 }
 
 export interface ExploreDomain {
@@ -290,9 +309,10 @@ export interface ExploreDomain {
 
 export interface ExploreLocateResult {
   context: string;
-  placement: string; // always "approximate_nearest_neighbor"
+  placement: "exact_existing_reference" | "approximate_nearest_neighbor";
   approx_xy: { x: number; y: number };
   neighbors: ExploreNeighbor[];
+  exact_match: ExploreNeighbor | null;
   domain: ExploreDomain;
 }
 
@@ -334,7 +354,43 @@ export interface PathwaysResponse {
   status: "ok" | "unavailable" | "too_few_genes";
   reason: string | null;
   pathways: PathwayCard[];
+  exploratory_pathways: PathwayCard[];
   method_block: PathwayMethodBlock | null;
+}
+
+// --- Endpoint-independent full-signature biological response ---
+export interface BiologicalPathwayCard {
+  pathway_id: string;
+  name: string;
+  direction: "increased" | "decreased";
+  enrichment_statistic: number;
+  p_value: number;
+  q_value: number;
+  leading_edge_genes: string[];
+  pathway_size_in_universe: number;
+  statistically_supported: boolean;
+}
+
+export interface BiologicalResponse {
+  status: "ok" | "empty" | "unavailable" | "unsupported_input";
+  reason: string | null;
+  input_value_type: InputValueType;
+  increased_pathways: BiologicalPathwayCard[];
+  decreased_pathways: BiologicalPathwayCard[];
+  tested_gene_universe: string[];
+  method_block: {
+    method: string;
+    method_version: string;
+    ranking_statistic: string;
+    input_value_type: InputValueType;
+    universe_size: number;
+    pathways_tested: number;
+    correction: string;
+    min_gene_set_size: number;
+    max_gene_set_size: number;
+    leading_edge_rule: string;
+    reactome: Record<string, unknown> | null;
+  } | null;
 }
 
 // --- Supporting literature (POST /interpret/literature) ---
@@ -365,6 +421,11 @@ export interface LiteratureArticle {
   matched_genes: string[];
   matched_pathways: string[];
   evidence_category: string;
+  displayed_relationship: string;
+  matched_title_terms: string[];
+  matched_abstract_terms: string[];
+  endpoint_concept_used: string;
+  ranking_reason: string;
   relevance_reason: string;
   pubmed_url: string;
 }

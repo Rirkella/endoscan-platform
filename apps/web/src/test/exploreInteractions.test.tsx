@@ -68,7 +68,7 @@ describe("interactive real reference explorer", () => {
     const signatureId = catalogueSearch.results[0].signatures[0].signature_id;
     renderApp(`/analyze?catalogue_signature=${encodeURIComponent(signatureId)}`);
     const runButton = await screen.findByRole("button", {
-      name: /Run \d+ compatible endpoint model/i,
+      name: /^Analyze signature$/i,
     });
     expect(runButton).not.toBeDisabled();
     expect(screen.getByText(/^PUBLIC$/i)).toBeInTheDocument();
@@ -78,7 +78,7 @@ describe("interactive real reference explorer", () => {
     renderApp("/explore");
     await screen.findByTestId("explore-scatter");
     fireEvent.click(document.querySelector("circle[data-compound='CID_00']") as SVGCircleElement);
-    expect(await screen.findByText(/no full measured vector/i)).toBeInTheDocument();
+    expect(await screen.findByText(/full gene-expression vector is not available/i)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Analyze this measured signature/i }),
     ).not.toBeInTheDocument();

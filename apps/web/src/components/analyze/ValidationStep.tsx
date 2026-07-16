@@ -22,6 +22,10 @@ export function ValidationStep({
   const compatibility = input.parse.compatibility;
   const compatible = compatibility.filter((item) => item.compatible);
   const provided = Object.keys(input.signature).length;
+  const endpointIds = compatible.map((item) => item.endpoint_id);
+  const includedEndpoints = endpointIds.length < 2
+    ? endpointIds.join("")
+    : `${endpointIds.slice(0, -1).join(", ")} and ${endpointIds[endpointIds.length - 1]}`;
 
   return (
     <section className="validation-layout">
@@ -93,11 +97,7 @@ export function ValidationStep({
             </label>
             <label>
               <span>Value scale</span>
-              <select defaultValue="log2 fold change">
-                <option>log2 fold change</option>
-                <option>z-score</option>
-                <option>Normalized expression</option>
-              </select>
+              <input value={input.inputValueType.replace(/_/g, " ")} readOnly />
             </label>
           </div>
         </div>
@@ -141,8 +141,14 @@ export function ValidationStep({
           disabled={compatible.length === 0}
           onClick={onRun}
         >
-          Run {compatible.length} compatible endpoint model{compatible.length === 1 ? "" : "s"}
+          Analyze signature
         </button>
+        {compatible.length > 0 && (
+          <p className="analysis-inclusion-note">
+            {compatible.length} compatible endpoint model{compatible.length === 1 ? "" : "s"} will
+            be included: {includedEndpoints}.
+          </p>
+        )}
         <button className="button quiet full-button" onClick={onBack}>
           Back
         </button>

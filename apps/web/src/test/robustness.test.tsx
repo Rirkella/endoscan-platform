@@ -61,7 +61,7 @@ async function runAnalyze() {
   fireEvent.click(await screen.findByRole("button", { name: /Advanced: paste JSON/i }));
   fireEvent.change(screen.getByLabelText(/Signature \(JSON/i), { target: { value: '{"A1BG":0.1}' } });
   fireEvent.click(screen.getByRole("button", { name: /^Load signature$/i }));
-  const runBtn = await screen.findByRole("button", { name: /Run \d+ compatible endpoint model/i });
+  const runBtn = await screen.findByRole("button", { name: /^Analyze signature$/i });
   await waitFor(() => expect(runBtn).not.toBeDisabled());
   fireEvent.click(runBtn);
   await screen.findAllByRole("article");
@@ -124,9 +124,9 @@ describe("missing / sparse per-endpoint data does not crash the UI", () => {
     });
     renderApp("/analyze");
     await runAnalyze();
-    fireEvent.click(screen.getByRole("button", { name: /^Evidence$/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     expect(
-      await screen.findByText(/No pathways met the evidence threshold for this result/i),
+      await screen.findByText(/No endpoint-specific pathway reached the current evidence threshold/i),
     ).toBeInTheDocument();
   });
 
@@ -139,7 +139,7 @@ describe("missing / sparse per-endpoint data does not crash the UI", () => {
     });
     renderApp("/analyze");
     await runAnalyze();
-    fireEvent.click(screen.getByRole("button", { name: /^Evidence$/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     expect(
       await screen.findByText(/aren.t available for this endpoint.s model type/i),
     ).toBeInTheDocument();
@@ -151,7 +151,7 @@ describe("missing / sparse per-endpoint data does not crash the UI", () => {
     });
     renderApp("/analyze");
     await runAnalyze();
-    fireEvent.click(screen.getByRole("button", { name: /^Reference context$/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Similar signatures$/i }));
     expect(await screen.findByText(/No reference map for SOLO yet/i)).toBeInTheDocument();
   });
 

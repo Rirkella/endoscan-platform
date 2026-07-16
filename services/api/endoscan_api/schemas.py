@@ -10,6 +10,8 @@ NOT changed.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Re-exported so routes can reference a single response contract (no duplication).
@@ -26,6 +28,10 @@ __all__ = [
     "AnalyzeRequest",
     "AnalyzeResponse",
     "AnalyzeSummary",
+    "BiologicalPathwayCard",
+    "BiologicalResponseMethodBlock",
+    "BiologicalResponseRequest",
+    "BiologicalResponseResponse",
     "CatalogueCompound",
     "CatalogueSearchResponse",
     "CatalogueSignatureDetail",
@@ -64,6 +70,14 @@ __all__ = [
     "PathwaysResponse",
     "PredictRequest",
     "PredictionResult",
+]
+
+
+InputValueType = Literal[
+    "differential_zscore",
+    "log2_fold_change",
+    "ranked_statistic",
+    "raw_expression",
 ]
 
 
@@ -224,6 +238,7 @@ class ParseResult(BaseModel):
 
     ready: bool
     format: str
+    input_value_type: InputValueType
     preview: ParsePreview
     compatibility: list[EndpointCompatibility]
     compatible_endpoint_ids: list[str]
@@ -243,6 +258,7 @@ class AnalyzeRequest(BaseModel):
         max_length=MAX_GENES,
         description="A transcriptomic signature (gene->value).",
     )
+    input_value_type: InputValueType = "ranked_statistic"
     allow_extra: bool = Field(False, description="Drop genes not in an endpoint's schema.")
     endpoint_ids: list[str] | None = Field(
         None,
@@ -370,6 +386,11 @@ class ExplorePoint(BaseModel):
     x: float
     y: float
     label: str | None = None  # "active" | "inactive" | null (never fabricated)
+    preferred_name: str | None = None
+    pubchem_cid: int | None = None
+    source_dataset: str | None = None
+    experimental_contexts: list[str] = Field(default_factory=list)
+    full_signature_id: str | None = None
 
 
 class ExploreCounts(BaseModel):
@@ -430,6 +451,14 @@ class ExploreNeighbor(BaseModel):
     x: float
     y: float
     label: str | None = None
+    preferred_name: str | None = None
+    pubchem_cid: int | None = None
+    source_dataset: str | None = None
+    experimental_contexts: list[str] = Field(default_factory=list)
+    full_signature_id: str | None = None
+    similarity_category: str
+    similarity_rank: int
+    similarity_percentile: float
 
 
 class ExploreDomain(BaseModel):
@@ -454,10 +483,11 @@ class ExploreLocateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     context: str
-    placement: str  # always "approximate_nearest_neighbor" — never an exact projection
-    approx_xy: dict[str, float]  # centroid of the neighbours' precomputed map coords
+    placement: str  # exact_existing_reference or approximate_nearest_neighbor
+    approx_xy: dict[str, float]  # stored exact coords, or centroid of neighbours' map coords
     neighbors: list[ExploreNeighbor]
     domain: ExploreDomain
+    exact_match: ExploreNeighbor | None = None
 
 
 # --- Biological pathways (Reactome over-representation for an /explain result) --------
@@ -527,7 +557,60 @@ class PathwaysResponse(BaseModel):
     status: str
     reason: str | None = None
     pathways: list[PathwayCard]
+    exploratory_pathways: list[PathwayCard] = Field(default_factory=list)
     method_block: PathwayMethodBlock | None = None
+
+
+# --- Global biological response (full signed signature; endpoint independent) --------
+
+
+class BiologicalResponseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signature: dict[str, float] = Field(..., min_length=1, max_length=MAX_GENES)
+    input_value_type: InputValueType
+
+
+class BiologicalPathwayCard(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pathway_id: str
+    name: str
+    direction: Literal["increased", "decreased"]
+    enrichment_statistic: float
+    p_value: float
+    q_value: float
+    leading_edge_genes: list[str]
+    pathway_size_in_universe: int
+    statistically_supported: bool
+
+
+class BiologicalResponseMethodBlock(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    method: str
+    method_version: str
+    ranking_statistic: str
+    input_value_type: InputValueType
+    universe_size: int
+    pathways_tested: int
+    correction: str
+    min_gene_set_size: int
+    max_gene_set_size: int
+    leading_edge_rule: str
+    reactome: dict | None = None
+
+
+class BiologicalResponseResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ok", "empty", "unavailable", "unsupported_input"]
+    reason: str | None = None
+    input_value_type: InputValueType
+    increased_pathways: list[BiologicalPathwayCard]
+    decreased_pathways: list[BiologicalPathwayCard]
+    tested_gene_universe: list[str]
+    method_block: BiologicalResponseMethodBlock | None = None
 
 
 # --- Supporting literature (official NCBI PubMed E-utilities) ------------------------
@@ -545,14 +628,15 @@ class LiteratureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     endpoint_id: str = Field(..., min_length=1, max_length=64)
-    genes: list[str] = Field(..., min_length=1, max_length=20)
+    genes: list[str] = Field(default_factory=list, max_length=30)
+    response_genes: list[str] = Field(default_factory=list, max_length=30)
     pathways: list[LiteraturePathwayInput] = Field(default_factory=list, max_length=10)
     compound: str | None = Field(default=None, max_length=240)
     context: str | None = Field(default=None, max_length=240)
     species: str = Field(default="Homo sapiens", min_length=2, max_length=120)
     result_limit: int = Field(default=8, ge=1, le=20)
 
-    @field_validator("genes")
+    @field_validator("genes", "response_genes")
     @classmethod
     def _clean_genes(cls, genes: list[str]) -> list[str]:
         cleaned: list[str] = []
@@ -562,8 +646,6 @@ class LiteratureRequest(BaseModel):
                 raise ValueError("gene symbols must contain 1 to 40 characters")
             if value not in cleaned:
                 cleaned.append(value)
-        if not cleaned:
-            raise ValueError("at least one contributing gene is required")
         return cleaned
 
 
@@ -589,6 +671,11 @@ class LiteratureArticle(BaseModel):
     matched_genes: list[str]
     matched_pathways: list[str]
     evidence_category: str
+    displayed_relationship: str
+    matched_title_terms: list[str]
+    matched_abstract_terms: list[str]
+    endpoint_concept_used: str
+    ranking_reason: str
     relevance_reason: str
     pubmed_url: str
 

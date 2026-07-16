@@ -10,7 +10,7 @@
 import { type FormEvent, useState } from "react";
 
 import { api } from "../../api/client";
-import type { CatalogueCompound, ParseResult } from "../../api/types";
+import type { CatalogueCompound, InputValueType, ParseResult } from "../../api/types";
 import { demoSignatures } from "../../demo-signatures";
 import { demoDisplay } from "../../demo-signatures/display";
 import { exampleSignatureFiles, type ExampleSignatureFile } from "../../example-files";
@@ -104,6 +104,7 @@ function UploadPanel({
   const [result, setResult] = useState<ParseResult | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [allowExtra, setAllowExtra] = useState(false);
+  const [valueType, setValueType] = useState<InputValueType>("raw_expression");
   const [exampleLoading, setExampleLoading] = useState<string | null>(null);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -113,13 +114,22 @@ function UploadPanel({
   async function doParse(
     f: File,
     fmt: InputFormat,
-    opts: { allow_extra?: boolean; sample?: string } = {},
+    opts: {
+      allow_extra?: boolean;
+      sample?: string;
+      input_value_type?: InputValueType;
+    } = {},
   ) {
     setParsing(true);
     setError(null);
     setResult(null);
     try {
-      const r = await api.parseSignature({ file: f, format: fmt, ...opts });
+      const r = await api.parseSignature({
+        file: f,
+        format: fmt,
+        input_value_type: opts.input_value_type ?? valueType,
+        ...opts,
+      });
       setResult(r);
     } catch (e) {
       setError(e);
@@ -157,7 +167,8 @@ function UploadPanel({
       });
       setFile(exampleFile);
       setFormat(example.format);
-      await doParse(exampleFile, example.format);
+      setValueType("differential_zscore");
+      await doParse(exampleFile, example.format, { input_value_type: "differential_zscore" });
     } catch (e) {
       setError(e);
     } finally {
@@ -174,12 +185,17 @@ function UploadPanel({
       signature: r.signature,
       parse: r,
       allowExtra,
+      inputValueType: r.input_value_type,
     });
   }
 
   async function loadPaste() {
     try {
-      const parsed = await api.parseSignature({ content: pasteText, format: "json" });
+      const parsed = await api.parseSignature({
+        content: pasteText,
+        format: "json",
+        input_value_type: valueType,
+      });
       if (!parsed.signature) throw new Error("Select a sample before continuing.");
       setPasteError(null);
       onPrepared({
@@ -189,6 +205,7 @@ function UploadPanel({
         signature: parsed.signature,
         parse: parsed,
         allowExtra: false,
+        inputValueType: parsed.input_value_type,
       });
     } catch (e) {
       setPasteError(e instanceof Error ? e.message : "Invalid JSON.");
@@ -197,6 +214,23 @@ function UploadPanel({
 
   return (
     <div className="upload-panel-wrap">
+      <label className="signature-value-type">
+        <span>What do the values represent?</span>
+        <select
+          value={valueType}
+          onChange={(event) => {
+            const next = event.target.value as InputValueType;
+            setValueType(next);
+            if (file && format) void doParse(file, format, { input_value_type: next });
+          }}
+        >
+          <option value="differential_zscore">Differential z-score</option>
+          <option value="log2_fold_change">Log2 fold change</option>
+          <option value="ranked_statistic">Signed ranked statistic</option>
+          <option value="raw_expression">Raw expression (no matched reference)</option>
+        </select>
+        <small>This determines whether increased and decreased pathway response can be interpreted.</small>
+      </label>
       <label className="upload-panel">
         <input
           type="file"
@@ -358,6 +392,7 @@ function DemoPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void 
       const parsed = await api.parseSignature({
         content: JSON.stringify(demo.signature),
         format: "json",
+        input_value_type: "differential_zscore",
       });
       if (!parsed.signature) throw new Error("The demo signature could not be prepared.");
       onPrepared({
@@ -367,6 +402,7 @@ function DemoPanel({ onPrepared }: { onPrepared: (input: PreparedInput) => void 
         signature: parsed.signature,
         parse: parsed,
         allowExtra: false,
+        inputValueType: parsed.input_value_type,
       });
     } catch (e) {
       setError(e);
@@ -461,6 +497,7 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
       const parsed = await api.parseSignature({
         content: JSON.stringify(detail.signature),
         format: "json",
+        input_value_type: "differential_zscore",
       });
       if (!parsed.signature) throw new Error("The measured signature could not be prepared.");
       onPrepared({
@@ -470,6 +507,7 @@ function CataloguePanel({ onPrepared }: { onPrepared: (input: PreparedInput) => 
         signature: parsed.signature,
         parse: parsed,
         allowExtra: false,
+        inputValueType: parsed.input_value_type,
       });
     } catch (e) {
       setError(e);

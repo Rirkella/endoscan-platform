@@ -789,3 +789,107 @@ h1 .planned-badge, h1 .mock-badge, h2 .planned-badge, h2 .mock-badge, h3 .planne
 .reference-drawer-action { margin-top: 16px; padding-top: 16px; border-top: 1px solid #dce4e1; }
 .reference-drawer-action p { color: #607378; font-size: 10px; line-height: 1.5; }
 @media (max-width: 780px) { .reference-explorer-controls, .reference-search-form { align-items: stretch; flex-direction: column; } .reference-filter { min-width: 0; } .explore-scatter-svg { min-height: 280px; } }
+
+/* --- Results refinement: clear biological layers, compact evidence, collapsed internals. --- */
+.result-tabs { grid-template-columns: repeat(5, minmax(118px, 1fr)); overflow-x: auto; }
+.result-tabs button:focus-visible, .detail-link:focus-visible, summary:focus-visible,
+.contribution-group summary:focus-visible { outline: 3px solid #76bfa8; outline-offset: 2px; }
+.endpoint-result { color: #243b40; box-shadow: 0 8px 22px rgb(25 55 47 / 5%); }
+.endpoint-result .endpoint-status-label { display: inline-flex; margin-top: 8px; padding: 3px 7px; color: #416159; border-radius: 999px; background: #eaf3ef; font-size: 9px; font-weight: 750; text-transform: capitalize; }
+.endpoint-result > .endpoint-interpretation { margin: 14px 0 4px; color: #263f44; font-size: 12px; font-weight: 700; line-height: 1.45; text-transform: none; }
+.endpoint-result > .score-disclaimer { margin: 0 0 14px; color: #67787b; font-size: 10px; line-height: 1.45; text-transform: none; }
+.endpoint-clues { display: grid; gap: 8px; margin: 12px 0; }
+.endpoint-clues > div { display: grid; gap: 3px; padding: 9px 10px; border-left: 3px solid #6cae96; background: #f6f9f8; }
+.endpoint-clues span { color: #6b7d7f; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.endpoint-clues strong { color: #29464a; font-size: 10px; line-height: 1.4; }
+.technical-disclosure { margin-top: 12px; padding: 10px 12px; border: 1px solid #d9e2df; border-radius: 6px; background: #f8faf9; color: #536b6d; font-size: 10px; line-height: 1.5; }
+.technical-disclosure > summary { cursor: pointer; color: #315d52; font-weight: 750; }
+.technical-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; }
+.technical-grid > div { padding: 8px; background: #fff; }
+.technical-grid dt { color: #728083; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.technical-grid dd { margin: 3px 0 0; color: #33494e; font-size: 10px; overflow-wrap: anywhere; }
+.endpoint-result .endpoint-technical dl { display: grid; margin: 10px 0 0; }
+.analysis-inclusion-note { margin: 8px 0 0; color: #506b68; font-size: 10px; line-height: 1.5; text-align: center; }
+.signature-value-type { display: grid; gap: 6px; margin-bottom: 14px; padding: 14px; border: 1px solid #cbd9d4; border-radius: 6px; background: #f7faf9; }
+.signature-value-type > span { color: #29484a; font-size: 11px; font-weight: 800; }
+.signature-value-type select { min-height: 38px; padding: 0 10px; border: 1px solid #acbdb8; border-radius: 5px; background: #fff; }
+.signature-value-type small { color: #6a7b7d; font-size: 9px; }
+
+.biological-response { color: #263e43; }
+.biological-response-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 24px; border-left: 5px solid #28735e; background: #edf6f2; }
+.biological-response-header h2 { margin: 4px 0 8px; font-size: 22px; }
+.biological-response-header p { max-width: 720px; margin: 0; color: #50696b; line-height: 1.55; }
+.layer-badge { display: inline-flex; padding: 5px 8px; color: #275e50; border-radius: 999px; background: #dceee7; font-size: 9px; font-weight: 800; white-space: nowrap; }
+.response-directions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 20px; }
+.response-direction { padding: 18px; border: 1px solid #d3ddda; border-radius: 8px; background: #fff; }
+.response-direction h3 { margin: 0 0 14px; font-size: 16px; }
+.response-increased h3 { color: #276a55; }
+.response-decreased h3 { color: #405f79; }
+.response-pathway-list { display: grid; gap: 10px; }
+.response-pathway-card { padding: 13px; border: 1px solid #e0e6e4; border-radius: 6px; background: #fbfcfc; }
+.response-pathway-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.response-pathway-title h4 { margin: 0; font-size: 12px; line-height: 1.35; }
+.response-pathway-title span { color: #627577; font-size: 8px; white-space: nowrap; }
+.pathway-strength { height: 6px; margin: 10px 0 6px; overflow: hidden; border-radius: 6px; background: #e8eeec; }
+.pathway-strength span { display: block; height: 100%; border-radius: inherit; background: #4d9d82; }
+.response-decreased .pathway-strength span { background: #6084a0; }
+.pathway-stats { display: flex; justify-content: space-between; color: #5f7275; font-size: 9px; }
+.gene-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 9px; }
+.gene-chips span { padding: 3px 5px; color: #36524f; border-radius: 3px; background: #eaf1ef; font-family: ui-monospace, monospace; font-size: 8px; }
+.biological-empty { margin-top: 18px; padding: 18px; border: 1px solid #d7e0dd; background: #fff; }
+
+.gene-contributions { color: #294247; }
+.gene-contribution-heading { display: flex; justify-content: space-between; gap: 16px; }
+.gene-contribution-heading h3 { margin: 0; font-size: 16px; }
+.gene-contribution-heading p { margin: 5px 0 0; color: #65777a; font-size: 10px; }
+.gene-contribution-heading > span { color: #58716d; font-size: 9px; }
+.contribution-directions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.contribution-group { padding: 14px; border: 1px solid #d8e1de; border-radius: 6px; background: #fff; }
+.contribution-group h4 { margin: 0 0 10px; font-size: 12px; }
+.contribution-group ol { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.contribution-group li { display: grid; grid-template-columns: 20px 70px minmax(80px, 1fr) 58px; align-items: center; gap: 7px; padding: 8px 0; border-top: 1px solid #edf1ef; }
+.contribution-group li:first-child { border-top: 0; }
+.contribution-rank { display: grid; width: 18px; height: 18px; place-items: center; color: #607473; border-radius: 50%; background: #eef3f1; font-size: 8px; }
+.contribution-group strong { font-family: ui-monospace, monospace; font-size: 10px; }
+.contribution-bar { height: 8px; overflow: hidden; border-radius: 6px; background: #e8eeec; }
+.contribution-bar span { display: block; height: 100%; background: #3d987a; }
+.contribution-decrease .contribution-bar span { background: #66839a; }
+.contribution-direction { color: #5f7174; font-size: 8px; }
+.contribution-group li > details { grid-column: 2 / -1; font-size: 9px; }
+.contribution-group summary { cursor: pointer; color: #35695b; }
+
+.literature-bibliography { color: #293f44; }
+.literature-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.literature-heading h3 { margin: 0; font-size: 16px; }
+.literature-heading p, .literature-disclaimer { color: #617477; font-size: 10px; line-height: 1.5; }
+.literature-disclaimer { padding: 10px 12px; border-left: 3px solid #6a9e8d; background: #f3f7f5; }
+.bibliography-list { display: grid; gap: 0; margin: 14px 0; padding: 0; list-style: none; }
+.bibliography-list > li { padding: 15px 0; border-top: 1px solid #dce4e1; }
+.bibliography-list h4 { margin: 0; font-size: 13px; line-height: 1.4; }
+.bibliography-citation { margin: 5px 0; color: #687a7d; font-size: 9px; }
+.literature-relationship { display: block; margin: 7px 0; color: #315e52; font-size: 10px; }
+.evidence-category { display: inline-flex; padding: 3px 6px; color: #495f72; border-radius: 4px; background: #edf2f6; font-size: 8px; font-weight: 800; }
+.bibliography-actions { display: flex; align-items: flex-start; gap: 14px; margin-top: 8px; font-size: 9px; }
+.bibliography-actions a, .bibliography-actions summary, .literature-trace summary { color: #246b57; cursor: pointer; font-weight: 750; }
+.bibliography-actions details { max-width: 100%; }
+.bibliography-actions details p, .literature-trace p { color: #546b6e; font-size: 10px; line-height: 1.55; }
+.literature-trace { margin-top: 8px; font-size: 9px; }
+.exact-reference-match { margin: 10px 0; padding: 12px; border-left: 3px solid #2f8068; background: #edf6f2; }
+.exact-reference-match p { margin: 5px 0 0; color: #5b706e; font-size: 9px; line-height: 1.45; }
+.reference-neighbors li { align-items: flex-start; flex-direction: column; }
+.reference-neighbors li > strong { color: #263f44; font-size: 11px; }
+.reference-neighbors li > span { color: #647679; font-size: 9px; }
+.reference-neighbors .similarity-label { color: #276a55; font-weight: 800; text-transform: capitalize; }
+.reference-neighbors details { width: 100%; color: #5c7071; font-size: 9px; }
+.reference-neighbors details span { display: block; margin-top: 3px; }
+
+@media (max-width: 900px) {
+  .result-tabs { grid-template-columns: repeat(5, minmax(145px, 1fr)); }
+  .response-directions, .contribution-directions { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .biological-response-header, .gene-contribution-heading, .literature-heading { flex-direction: column; }
+  .technical-grid { grid-template-columns: 1fr; }
+  .contribution-group li { grid-template-columns: 20px 62px minmax(60px, 1fr); }
+  .contribution-direction { display: none; }
+}

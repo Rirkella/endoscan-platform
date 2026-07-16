@@ -3,10 +3,11 @@
   "placement": "approximate_nearest_neighbor",
   "approx_xy": { "x": -3.1, "y": 1.23 },
   "neighbors": [
-    { "compound_id": "CID_00", "distance": 0.42, "x": -3.1, "y": 1.2, "label": "active" },
-    { "compound_id": "CID_01", "distance": 0.55, "x": -2.8, "y": 1.6, "label": "active" },
-    { "compound_id": "CID_02", "distance": 0.61, "x": -3.4, "y": 0.9, "label": "active" }
+    { "compound_id": "CID_00", "distance": 0.42, "x": -3.1, "y": 1.2, "label": "active", "preferred_name": "Caffeic Acid", "pubchem_cid": 689043, "source_dataset": "LINCS L1000", "experimental_contexts": ["MCF7 + A549"], "full_signature_id": "lincs-gse92742-caffeic-acid-mcf7-a549", "similarity_category": "very similar response", "similarity_rank": 1, "similarity_percentile": 0.001 },
+    { "compound_id": "CID_01", "distance": 0.55, "x": -2.8, "y": 1.6, "label": "active", "preferred_name": null, "pubchem_cid": null, "source_dataset": "LINCS L1000", "experimental_contexts": [], "full_signature_id": null, "similarity_category": "similar response", "similarity_rank": 2, "similarity_percentile": 0.02 },
+    { "compound_id": "CID_02", "distance": 0.61, "x": -3.4, "y": 0.9, "label": "active", "preferred_name": null, "pubchem_cid": null, "source_dataset": "LINCS L1000", "experimental_contexts": [], "full_signature_id": null, "similarity_category": "moderately similar response", "similarity_rank": 3, "similarity_percentile": 0.1 }
   ],
+  "exact_match": null,
   "domain": {
     "metric": "distance_to_kth_training_neighbor",
     "k": 3,

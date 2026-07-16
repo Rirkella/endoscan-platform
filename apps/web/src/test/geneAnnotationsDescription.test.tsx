@@ -33,9 +33,9 @@ describe("sourced description path (Tier 2)", () => {
     expect(screen.getByRole("link", { name: "GeneCards" })).toBeInTheDocument();
   });
 
-  it("a gene with NO entry shows only 'annotation unavailable' (no generated text)", () => {
+  it("a gene with NO entry omits generated annotation text", () => {
     render(<GeneAnnotation gene="ZZZ_NOT_A_GENE" />);
-    expect(screen.getByText("annotation unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("annotation unavailable")).not.toBeInTheDocument();
     expect(screen.queryByText(/source:/i)).not.toBeInTheDocument();
   });
 });

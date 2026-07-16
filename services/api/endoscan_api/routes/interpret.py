@@ -26,6 +26,12 @@ from endoscan_core.inference import (
 )
 from endoscan_core.registry import get_endpoint
 
+from ..biological_response import (
+    MAX_GENE_SET_SIZE,
+    MIN_GENE_SET_SIZE,
+    SUPPORTED_DIFFERENTIAL_TYPES,
+    run_preranked_enrichment,
+)
 from ..deps import get_repo_root
 from ..errors import error_payload
 from ..literature import (
@@ -35,6 +41,7 @@ from ..literature import (
     LiteratureUnavailableError,
     get_literature_service,
 )
+from ..literature_concepts import load_endpoint_concept
 from ..pathways import (
     EVIDENCE_MAPPING,
     MIN_PATHWAY_OVERLAP,
@@ -45,6 +52,10 @@ from ..pathways import (
 )
 from ..reactome_store import ReactomeUnavailableError, load_reactome
 from ..schemas import (
+    BiologicalPathwayCard,
+    BiologicalResponseMethodBlock,
+    BiologicalResponseRequest,
+    BiologicalResponseResponse,
     LiteratureRequest,
     LiteratureResponse,
     PathwayCard,
@@ -63,6 +74,76 @@ _TEST = "Fisher exact, one-sided (over-representation)"
 _CORRECTION = "Benjamini-Hochberg FDR (across the tested pathway family)"
 
 
+@router.post("/biological-response", response_model=BiologicalResponseResponse)
+def interpret_biological_response(
+    body: BiologicalResponseRequest, repo_root: Path = Depends(get_repo_root)
+) -> BiologicalResponseResponse:
+    """Analyze the complete signed response independently of any endpoint model."""
+    if body.input_value_type not in SUPPORTED_DIFFERENTIAL_TYPES:
+        return BiologicalResponseResponse(
+            status="unsupported_input",
+            reason=(
+                "Biological-response pathway analysis requires a differential or ranked "
+                "signature. Raw expression values without a matched reference cannot be "
+                "interpreted as increased or decreased pathway response."
+            ),
+            input_value_type=body.input_value_type,
+            increased_pathways=[],
+            decreased_pathways=[],
+            tested_gene_universe=[],
+        )
+    try:
+        reactome = load_reactome(repo_root)
+    except ReactomeUnavailableError:
+        return BiologicalResponseResponse(
+            status="unavailable",
+            reason="Reactome pathway data is not available for this deployment.",
+            input_value_type=body.input_value_type,
+            increased_pathways=[],
+            decreased_pathways=[],
+            tested_gene_universe=[],
+        )
+
+    outcome = run_preranked_enrichment(body.signature, reactome.pathways)
+    method = BiologicalResponseMethodBlock(
+        method="Competitive preranked Wilcoxon rank-sum enrichment",
+        method_version="endoscan-preranked-wilcoxon-1.0.0",
+        ranking_statistic=(
+            "supplied signed transcriptomic value, ranked ascending with average ties"
+        ),
+        input_value_type=body.input_value_type,
+        universe_size=len(outcome.universe),
+        pathways_tested=outcome.pathways_tested,
+        correction="Benjamini-Hochberg FDR across all tested Reactome pathways",
+        min_gene_set_size=MIN_GENE_SET_SIZE,
+        max_gene_set_size=MAX_GENE_SET_SIZE,
+        leading_edge_rule=(
+            "up to 10 pathway genes from the enriched signed tail; falls back to the extreme "
+            "ranked pathway genes when the tail contains no non-zero value"
+        ),
+        reactome=dict(reactome.provenance),
+    )
+
+    def card(item) -> BiologicalPathwayCard:
+        return BiologicalPathwayCard(**item.__dict__)
+
+    increased = [card(item) for item in outcome.increased]
+    decreased = [card(item) for item in outcome.decreased]
+    return BiologicalResponseResponse(
+        status="ok" if increased or decreased else "empty",
+        reason=(
+            None
+            if increased or decreased
+            else "No Reactome gene set met the configured size bounds."
+        ),
+        input_value_type=body.input_value_type,
+        increased_pathways=increased,
+        decreased_pathways=decreased,
+        tested_gene_universe=outcome.universe,
+        method_block=method,
+    )
+
+
 @router.post("/literature", response_model=LiteratureResponse)
 def interpret_literature(
     body: LiteratureRequest,
@@ -72,14 +153,16 @@ def interpret_literature(
     """Retrieve transparent supporting PubMed records; never make causal claims."""
     entry = get_endpoint(body.endpoint_id, repo_root=repo_root)
     endpoint_name = entry.biological_target
+    concept = load_endpoint_concept(repo_root.resolve(), body.endpoint_id, endpoint_name)
     try:
-        return service.lookup(body, endpoint_name)
+        return service.lookup(body, endpoint_name, concept)
     except LiteratureRateLimitError:
         return service.failure_response(
             body,
             endpoint_name,
             status="rate_limited",
             reason="PubMed's request limit was reached. Please try again later.",
+            concept=concept,
         )
     except LiteratureTimeoutError:
         return service.failure_response(
@@ -87,6 +170,7 @@ def interpret_literature(
             endpoint_name,
             status="timeout",
             reason="PubMed did not respond before the request deadline.",
+            concept=concept,
         )
     except LiteratureUnavailableError as exc:
         reason = (
@@ -95,7 +179,7 @@ def interpret_literature(
             else "PubMed is temporarily unavailable."
         )
         return service.failure_response(
-            body, endpoint_name, status="unavailable", reason=reason
+            body, endpoint_name, status="unavailable", reason=reason, concept=concept
         )
 
 
@@ -198,12 +282,28 @@ def interpret_pathways(
         )
         for r in outcome.results
     ]
+    exploratory_cards = [
+        PathwayCard(
+            pathway_id=r.pathway_id,
+            name=r.name,
+            description=r.description,
+            genes_influencing_result=r.genes_influencing_result,
+            overlap_count=r.overlap_count,
+            pathway_size_in_universe=r.pathway_size_in_universe,
+            input_size_in_universe=r.input_size_in_universe,
+            p_value=r.p_value,
+            q_value=r.q_value,
+            evidence=r.evidence,
+        )
+        for r in outcome.exploratory
+    ]
     return PathwaysResponse(
         endpoint_id=explanation.endpoint_id,
         method=explanation.method,
         status="ok",
         reason=None if cards else "no pathways met the evidence threshold for this result",
         pathways=cards,
+        exploratory_pathways=exploratory_cards,
         method_block=_method_block(
             outcome.n_input_genes, outcome.universe_size, outcome.family_size
         ),

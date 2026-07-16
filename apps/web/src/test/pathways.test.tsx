@@ -24,14 +24,10 @@ function visibleText(): string {
 }
 
 const BANNED_TECHNICAL = [
-  "ora",
   "fisher",
-  "fdr",
   "p-value",
   "adjusted p",
-  "enrichment",
   "over-representation",
-  "universe",
   "hypergeometric",
 ];
 const BANNED_CAUSAL = ["activates", "causes", "perturbed", "affected gene"];
@@ -63,12 +59,13 @@ describe("Biological pathways panel", () => {
     expect(screen.getAllByText(/Source: Reactome/i).length).toBeGreaterThan(0);
   });
 
-  it("keeps statistical jargon OUT of the visible layer; Technical details HAS p/q/test/universe/version", async () => {
+  it("shows honest q-values while keeping exact statistical method collapsed", async () => {
     installFetchMock({ "POST /api/interpret/pathways": { body: pathwaysOk } });
     render(<PathwaysPanel endpointId="ER" signature={SIG} />);
     await screen.findByText(/Signaling by Nuclear Receptors/i);
 
     const visible = visibleText();
+    expect(visible).toContain("q-value");
     for (const banned of BANNED_TECHNICAL) {
       expect(visible).not.toContain(banned);
     }
@@ -99,22 +96,22 @@ describe("Biological pathways panel", () => {
   it("too-few contributing genes -> honest refusal", async () => {
     installFetchMock({
       "POST /api/interpret/pathways": {
-        body: { endpoint_id: "ER", method: "tree_shap", status: "too_few_genes", reason: "x", pathways: [], method_block: null },
+        body: { endpoint_id: "ER", method: "tree_shap", status: "too_few_genes", reason: "x", pathways: [], exploratory_pathways: [], method_block: null },
       },
     });
     render(<PathwaysPanel endpointId="ER" signature={SIG} />);
     await screen.findByText(/Too few contributing genes for reliable pathway analysis/i);
   });
 
-  it("ran but nothing cleared the threshold -> 'No pathways met the evidence threshold'", async () => {
+  it("ran but nothing cleared the threshold -> endpoint-specific empty state", async () => {
     installFetchMock({
       "POST /api/interpret/pathways": {
-        body: { endpoint_id: "ER", method: "tree_shap", status: "ok", reason: null, pathways: [], method_block: null },
+        body: { endpoint_id: "ER", method: "tree_shap", status: "ok", reason: null, pathways: [], exploratory_pathways: [], method_block: null },
       },
     });
     render(<PathwaysPanel endpointId="ER" signature={SIG} />);
     await waitFor(() =>
-      expect(screen.getByText(/No pathways met the evidence threshold for this result/i)).toBeInTheDocument(),
+      expect(screen.getByText(/No endpoint-specific pathway reached the current evidence threshold/i)).toBeInTheDocument(),
     );
   });
 });

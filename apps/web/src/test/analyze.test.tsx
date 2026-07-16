@@ -4,13 +4,63 @@
 // model-call (Active/Inactive) with below-threshold NEUTRAL, evidence shows the correct per-endpoint
 // method label, limitations are present, and no risk/toxic/safe language appears.
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { installFetchMock, predictAR } from "./mockApi";
 import { renderApp } from "./renderApp";
+import { ValidationStep } from "../components/analyze/ValidationStep";
+import type { PreparedInput } from "../pages/Analyze";
 
 const SIG_JSON = '{"A1BG":0.1}'; // shape-valid; the mocked API doesn't gene-validate
+
+function validationInput(count: number, compatible = true): PreparedInput {
+  const compatibility = Array.from({ length: count }, (_, index) => ({
+    endpoint_id: `E${index + 1}`,
+    biological_target: `Arbitrary long endpoint target ${index + 1}`,
+    compatible,
+    n_schema_genes: 978,
+    n_detected: 978,
+    n_matched: compatible ? 978 : 0,
+    n_missing: compatible ? 0 : 978,
+    n_extra: 0,
+    missing_genes: [],
+    extra_genes: [],
+    reason: compatible ? null : "missing genes",
+  }));
+  return {
+    title: "Synthetic input",
+    subtitle: "Dynamic endpoint test",
+    kind: "paste",
+    signature: { A1BG: 0.1 },
+    allowExtra: false,
+    inputValueType: "ranked_statistic",
+    parse: {
+      ready: compatible,
+      format: "json",
+      input_value_type: "ranked_statistic",
+      preview: { n_detected: 978, samples: null, selected_sample: null, needs_sample: false },
+      compatibility,
+      compatible_endpoint_ids: compatible ? compatibility.map((item) => item.endpoint_id) : [],
+      signature: { A1BG: 0.1 },
+    },
+  };
+}
+
+describe("Analyze signature action", () => {
+  it.each([1, 3, 6, 10])("summarizes %s compatible arbitrary endpoints", (count) => {
+    render(<ValidationStep input={validationInput(count)} onBack={() => undefined} onRun={() => undefined} />);
+    expect(screen.getByRole("button", { name: "Analyze signature" })).toBeEnabled();
+    expect(screen.getByText(new RegExp(`${count} compatible endpoint model`))).toHaveTextContent("E1");
+    expect(screen.getByText(new RegExp(`${count} compatible endpoint model`))).toHaveTextContent(`E${count}`);
+  });
+
+  it("keeps the action disabled when every endpoint is incompatible", () => {
+    render(<ValidationStep input={validationInput(3, false)} onBack={() => undefined} onRun={() => undefined} />);
+    expect(screen.getByRole("button", { name: "Analyze signature" })).toBeDisabled();
+    expect(screen.getByText(/No registered endpoint can use this signature/i)).toBeInTheDocument();
+  });
+});
 
 // Drive source (advanced JSON paste) → validate → run → result overview.
 async function analyze() {
@@ -18,10 +68,10 @@ async function analyze() {
   fireEvent.change(screen.getByLabelText(/Signature \(JSON/i), { target: { value: SIG_JSON } });
   fireEvent.click(screen.getByRole("button", { name: /^Load signature$/i }));
   // Validate step — the Run button enables once /endpoints has loaded.
-  const runBtn = await screen.findByRole("button", { name: /Run \d+ compatible endpoint model/i });
+  const runBtn = await screen.findByRole("button", { name: /^Analyze signature$/i });
   await waitFor(() => expect(runBtn).not.toBeDisabled());
   fireEvent.click(runBtn);
-  await screen.findAllByRole("article"); // result overview cards
+  await waitFor(() => expect(document.querySelectorAll(".endpoint-result").length).toBeGreaterThan(0));
 }
 
 describe("Analyze stepped flow + result overview", () => {
@@ -43,25 +93,26 @@ describe("Analyze stepped flow + result overview", () => {
   it("overview cards render from the mocked API (ER + AR), not hardcoded", async () => {
     renderApp("/analyze");
     await analyze();
-    const cards = await screen.findAllByRole("article");
-    expect(cards).toHaveLength(2);
+    expect(document.querySelectorAll(".endpoint-result")).toHaveLength(2);
     expect(screen.getAllByText("Estrogen Receptor").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Androgen Receptor").length).toBeGreaterThanOrEqual(1);
     // Honest wording — endpoint signal score / model call, never risk/toxic/safe.
     expect(screen.getAllByText(/Endpoint signal score/i).length).toBe(2);
-    expect(screen.getAllByText(/Model call/i).length).toBe(2);
     expect(screen.getAllByText(/^(Above threshold|Below threshold)$/).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText(/Model version/i)).toHaveLength(2);
-    expect(screen.getByText(/lincs_gse92742, toxcast_er/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/978 \/ 978 required genes/i).length).toBeGreaterThanOrEqual(1);
+    const technical = screen.getAllByText(/Model and provenance details/i);
+    expect(technical).toHaveLength(2);
+    technical.forEach((summary) => expect(summary.closest("details")).not.toHaveAttribute("open"));
+    // One section-level reminder plus one on each endpoint card.
+    expect(screen.getAllByText(/not a calibrated probability/i)).toHaveLength(3);
   });
 
   it("shows reference distances and map provenance for the submitted signature", async () => {
     renderApp("/analyze");
     await analyze();
-    fireEvent.click(screen.getByRole("button", { name: /^Reference context$/i }));
-    expect(await screen.findByText(/Distance 0\.420/i)).toBeInTheDocument();
-    expect(screen.getByText(/Reference data provenance/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /^Similar signatures$/i }));
+    expect(await screen.findByText(/Caffeic Acid/i)).toBeInTheDocument();
+    expect(screen.getByText(/Technical provenance/i)).toBeInTheDocument();
+    expect(screen.getByText(/very similar response/i)).toBeInTheDocument();
   });
 
   it("below-threshold is NEUTRAL, not green/safe (fixture: both endpoints below threshold)", async () => {
@@ -85,10 +136,10 @@ describe("Analyze stepped flow + result overview", () => {
     expect(demoButtons.length).toBeGreaterThan(0); // real demos are bundled
     fireEvent.click(demoButtons[0]);
     // Straight into validate → run → results, no raw JSON required.
-    const runBtn = await screen.findByRole("button", { name: /Run \d+ compatible endpoint model/i });
+    const runBtn = await screen.findByRole("button", { name: /^Analyze signature$/i });
     await waitFor(() => expect(runBtn).not.toBeDisabled());
     fireEvent.click(runBtn);
-    expect((await screen.findAllByRole("article")).length).toBe(2);
+    await waitFor(() => expect(document.querySelectorAll(".endpoint-result")).toHaveLength(2));
   });
 
   it("renders one card per API result — scales to 10 endpoints without a fixed layout", async () => {
@@ -113,7 +164,7 @@ describe("Analyze stepped flow + result overview", () => {
     });
     renderApp("/analyze");
     await analyze();
-    expect(await screen.findAllByRole("article")).toHaveLength(10); // one per API result
+    await waitFor(() => expect(document.querySelectorAll(".endpoint-result")).toHaveLength(10));
   });
 
   it("shows a dedicated all-failed state with isolated endpoint cards", async () => {
@@ -152,9 +203,9 @@ describe("evidence tab — correct method label per endpoint", () => {
   it("ER evidence shows TreeSHAP + real limitations", async () => {
     renderApp("/analyze");
     await analyze();
-    fireEvent.click(screen.getByRole("button", { name: /^Evidence$/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     // ER is the first scored endpoint → its explanation auto-loads.
-    expect(await screen.findByText(/Method:/i)).toHaveTextContent("TreeSHAP");
+    expect(await screen.findByText(/^TreeSHAP$/i)).toBeInTheDocument();
     // Integrated limitations remain visible with the evidence.
     expect(screen.getByText(/NOT regulatory-grade validation/i)).toBeInTheDocument();
   });
@@ -162,15 +213,11 @@ describe("evidence tab — correct method label per endpoint", () => {
   it("AR evidence shows the linear-coefficient label (never SHAP)", async () => {
     renderApp("/analyze");
     await analyze();
-    fireEvent.click(screen.getByRole("button", { name: /^Evidence$/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     // Select AR in the endpoint selector.
     const selector = screen.getByText("Endpoints").closest("aside") as HTMLElement;
     fireEvent.click(within(selector).getByText("Androgen Receptor"));
-    expect(
-      await screen.findByText(
-        /Linear coefficient attribution \(coefficient × value — not a SHAP value\)/i,
-      ),
-    ).toBeInTheDocument();
+    expect((await screen.findAllByText(/Linear coefficient × input value/i)).length).toBeGreaterThan(0);
   });
 
   it("explain 501 renders a clean, non-scary state (live API drives availability)", async () => {
@@ -186,7 +233,7 @@ describe("evidence tab — correct method label per endpoint", () => {
     });
     renderApp("/analyze");
     await analyze();
-    fireEvent.click(screen.getByRole("button", { name: /^Evidence$/i }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
     expect(
       await screen.findByText(/aren.t available for this endpoint.s model type/i),
     ).toBeInTheDocument();
@@ -213,8 +260,8 @@ describe("integrated honesty framing", () => {
   it("limitations (status + CI reason + scope + disclaimer) are readable in the evidence tab", async () => {
     renderApp("/analyze");
     await analyze();
-    fireEvent.click(screen.getByRole("button", { name: /^Evidence$/i }));
-    await screen.findByText(/Method:/i); // ER evidence loaded
+    fireEvent.click(screen.getByRole("tab", { name: /^Endpoint evidence$/i }));
+    await screen.findByText(/^TreeSHAP$/i); // ER evidence loaded
     expect(screen.getAllByTitle(/Model status: experimental/i).length).toBeGreaterThan(0);
     expect(
       screen.getByText(/auroc 95% CI lower bound 0.675 < 0.75 floor/i),

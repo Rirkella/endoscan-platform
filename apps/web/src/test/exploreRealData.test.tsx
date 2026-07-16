@@ -49,7 +49,16 @@ const locateResponse = {
     x: p.x,
     y: p.y,
     label: p.label,
+    preferred_name: null,
+    pubchem_cid: null,
+    source_dataset: "LINCS L1000",
+    experimental_contexts: [],
+    full_signature_id: null,
+    similarity_category: i === 0 ? "very similar response" : i < 3 ? "similar response" : "moderately similar response",
+    similarity_rank: i + 1,
+    similarity_percentile: (i + 1) / realUmap.counts.n_total,
   })),
+  exact_match: null,
   domain: {
     metric: "distance_to_kth_training_neighbor",
     k: realManifest.domain_metric.k,
@@ -97,8 +106,9 @@ describe("Explore against REAL committed ER artifacts", () => {
     await screen.findByTestId("similarity-readout");
 
     // Visible layer: biological, and free of the banned technical strings.
-    expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/close to/i);
+    expect(screen.getByTestId("similarity-readout")).toHaveTextContent(/Approximate position/i);
     expect(screen.getByText(/Nearest reference signatures/i)).toBeInTheDocument();
+    expect(screen.getByText(/very similar response/i)).toBeInTheDocument();
     const visible = visibleText();
     for (const banned of ["978-d", "nearest neighbor", "k-th", "percentile", "in-domain", "out-of-domain"]) {
       expect(visible).not.toContain(banned);

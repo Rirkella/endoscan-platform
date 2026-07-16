@@ -4,5 +4,6 @@
   "status": "unavailable",
   "reason": "pathway data not available",
   "pathways": [],
+  "exploratory_pathways": [],
   "method_block": null
 }

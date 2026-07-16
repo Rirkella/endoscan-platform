@@ -179,7 +179,7 @@ export function ExploreScatter({
         })}
 
         {locate && (
-          <g data-testid="explore-approx-marker">
+          <g data-testid={locate.exact_match ? "explore-exact-marker" : "explore-approx-marker"}>
             <circle
               cx={sx(locate.approx_xy.x)}
               cy={sy(locate.approx_xy.y)}
@@ -204,7 +204,11 @@ export function ExploreScatter({
               stroke="#7c3aed"
               strokeWidth={1.5}
             />
-            <title>Approximate position based on the most similar known signatures</title>
+            <title>
+              {locate.exact_match
+                ? "Exact existing reference record at its stored map coordinates"
+                : "Approximate position based on the most similar known signatures"}
+            </title>
           </g>
         )}
       </svg>

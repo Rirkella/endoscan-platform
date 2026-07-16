@@ -3,9 +3,9 @@
 ``GET  /explore/{context}/umap``   serve the committed map (points + counts + provenance);
                                    404 "not yet computed" when no artifact is committed.
 ``POST /explore/locate``           place a submitted signature by exact k-NN in the ORIGINAL
-                                   978-gene space (never ``UMAP.transform``); return the
-                                   nearest real neighbours, an APPROXIMATE centroid position,
-                                   and a DEFINED domain metric — never an in-/out-of-domain flag.
+                                   978-gene space (never ``UMAP.transform``); use stored map
+                                   coordinates for an exact existing record, otherwise return an
+                                   approximate neighbour centroid and a defined isolation metric.
 
 The one authoritative validator (``align_signature``) checks the query; its
 ``SignatureValidationError`` maps to 422 via the existing handler.
@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends
 from endoscan_core.features.landmark_features import FeatureSchema
 from endoscan_core.inference import align_signature
 
+from ..catalogue_store import identity_index
 from ..deps import get_repo_root
 from ..explore_store import load_map, load_support
 from ..schemas import (
@@ -36,6 +37,44 @@ from ..schemas import (
 )
 
 router = APIRouter(tags=["explore"])
+
+_EXACT_TOLERANCE = 1e-9
+
+
+def _identity_fields(compound_id: str, identities: dict, source_key: str) -> dict:
+    compound = identities.get(compound_id)
+    if compound is None:
+        return {
+            "preferred_name": None,
+            "pubchem_cid": None,
+            "source_dataset": source_key or None,
+            "experimental_contexts": [],
+            "full_signature_id": None,
+        }
+    signature = compound.signatures[0] if compound.signatures else None
+    contexts = []
+    if signature is not None:
+        context = " + ".join(signature.cell_lines)
+        qualifiers = [value for value in (signature.dose, signature.timepoint) if value]
+        contexts = [" · ".join([context, *qualifiers]) if qualifiers else context]
+    return {
+        "preferred_name": compound.preferred_name,
+        "pubchem_cid": compound.pubchem_cid,
+        "source_dataset": signature.dataset if signature else source_key or None,
+        "experimental_contexts": contexts,
+        "full_signature_id": signature.signature_id if signature else None,
+    }
+
+
+def _similarity_category(rank: int, n_reference: int) -> str:
+    percentile = rank / max(1, n_reference)
+    if percentile <= 0.01:
+        return "very similar response"
+    if percentile <= 0.05:
+        return "similar response"
+    if percentile <= 0.20:
+        return "moderately similar response"
+    return "distant response"
 
 
 def _manifest_summary(context: str, manifest: dict) -> ExploreManifestSummary:
@@ -60,7 +99,15 @@ def _manifest_summary(context: str, manifest: dict) -> ExploreManifestSummary:
 def explore_umap(context: str, repo_root: Path = Depends(get_repo_root)) -> ExploreMapResponse:
     """Serve the committed data-space map for ``context`` (missing artifact -> 404)."""
     umap_doc, manifest = load_map(repo_root, context)
-    points = [ExplorePoint(**p) for p in umap_doc.get("points", [])]
+    identities = identity_index(repo_root)
+    source_key = manifest.get("source", {}).get("key", "")
+    points = [
+        ExplorePoint(
+            **p,
+            **_identity_fields(str(p["compound_id"]), identities, source_key),
+        )
+        for p in umap_doc.get("points", [])
+    ]
     counts = ExploreCounts(**umap_doc["counts"])
     return ExploreMapResponse(
         context=context,
@@ -94,41 +141,58 @@ def explore_locate(
     order = np.argsort(distances, kind="stable")
     domain = manifest["domain_metric"]
     k = int(domain["k"])
-    k = min(k, len(order))
+    exact_idx = int(order[0]) if len(order) and distances[order[0]] <= _EXACT_TOLERANCE else None
+    distinct_order = [int(idx) for idx in order if int(idx) != exact_idx]
+    k = min(k, len(distinct_order))
 
     compound_ids = manifest["compound_ids"]
     coord = {p["compound_id"]: p for p in umap_doc.get("points", [])}
-    neighbors: list[ExploreNeighbor] = []
-    for idx in order[:k]:
+    identities = identity_index(repo_root)
+    source_key = manifest.get("source", {}).get("key", "")
+
+    def neighbor(idx: int, rank: int, category: str | None = None) -> ExploreNeighbor:
         cid = compound_ids[idx]
         pt = coord.get(cid, {})
-        neighbors.append(
-            ExploreNeighbor(
-                compound_id=cid,
-                distance=float(distances[idx]),
-                x=float(pt.get("x", 0.0)),
-                y=float(pt.get("y", 0.0)),
-                label=pt.get("label"),
-            )
+        return ExploreNeighbor(
+            compound_id=cid,
+            distance=float(distances[idx]),
+            x=float(pt.get("x", 0.0)),
+            y=float(pt.get("y", 0.0)),
+            label=pt.get("label"),
+            **_identity_fields(cid, identities, source_key),
+            similarity_category=category or _similarity_category(rank, len(distinct_order)),
+            similarity_rank=rank,
+            similarity_percentile=rank / max(1, len(distinct_order)),
         )
+
+    neighbors: list[ExploreNeighbor] = []
+    for rank, idx in enumerate(distinct_order[:k], start=1):
+        neighbors.append(neighbor(idx, rank))
+
+    exact_match = neighbor(exact_idx, 0, "exact match") if exact_idx is not None else None
     # Approximate placement = centroid of the neighbours' PRECOMPUTED map coords (honest;
     # never a claimed exact 2-D projection of the query).
-    approx_xy = {
-        "x": float(np.mean([n.x for n in neighbors])),
-        "y": float(np.mean([n.y for n in neighbors])),
-    }
+    approx_xy = (
+        {"x": exact_match.x, "y": exact_match.y}
+        if exact_match is not None
+        else {
+            "x": float(np.mean([n.x for n in neighbors])),
+            "y": float(np.mean([n.y for n in neighbors])),
+        }
+    )
 
     # DEFINED domain metric: the query's distance to its k-th nearest training neighbour,
     # read against the training reference distribution. No in-/out-of-domain boolean.
-    query_kth = float(distances[order[k - 1]])
+    query_kth = float(distances[distinct_order[k - 1]])
     reference = domain.get("training_kth_nn_distances", [])
     percentile = bisect.bisect_right(reference, query_kth) / len(reference) if reference else 0.0
 
     return ExploreLocateResponse(
         context=body.context,
-        placement="approximate_nearest_neighbor",
+        placement="exact_existing_reference" if exact_match else "approximate_nearest_neighbor",
         approx_xy=approx_xy,
         neighbors=neighbors,
+        exact_match=exact_match,
         domain=ExploreDomain(
             metric=domain["metric"],
             k=k,

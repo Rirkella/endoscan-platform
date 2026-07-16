@@ -23,15 +23,13 @@ export function GeneAnnotation({ gene }: { gene: string }) {
           </a>
         ))}
       </div>
-      {desc ? (
+      {desc && (
         <p className="text-xs text-muted">
           {desc.description}{" "}
           <span className="italic">
             (source: {desc.source} · {desc.source_version})
           </span>
         </p>
-      ) : (
-        <p className="text-xs text-muted/70">annotation unavailable</p>
       )}
     </div>
   );

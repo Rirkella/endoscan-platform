@@ -26,19 +26,12 @@ import { ExploreScatter } from "../components/ExploreScatter";
 import { useAsync } from "../hooks/useAsync";
 import { useExplore } from "../hooks/useExplore";
 
-type SimilarityBand = "close" | "moderately close" | "far";
 type LabelFilter = "all" | "active" | "inactive" | "unlabeled";
 
 interface SearchMatch {
   compoundId: string;
   name: string | null;
 }
-function similarityBand(percentile: number): SimilarityBand {
-  if (percentile <= 0.5) return "close";
-  if (percentile <= 0.9) return "moderately close";
-  return "far";
-}
-
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
     <span className="legend-item">
@@ -321,11 +314,16 @@ export function Explore() {
 
           {explore.result && (
             <div className="reference-result-block">
-              <p className="check-plain" data-testid="similarity-readout">
-                Approximate position based on the most similar reference signatures. This signature
-                is <strong>{similarityBand(explore.result.domain.percentile)}</strong> to
-                EndoScan&rsquo;s reference data — a graded comparison, not a pass or fail.
-              </p>
+              {explore.result.exact_match ? (
+                <p className="check-plain" data-testid="similarity-readout">
+                  <strong>This measured signature is already present in the reference dataset.</strong>{" "}
+                  Its stored coordinates are used and the self-match is excluded below.
+                </p>
+              ) : (
+                <p className="check-plain" data-testid="similarity-readout">
+                  Approximate position based on nearest measured signatures in the full feature space.
+                </p>
+              )}
 
               <p className="aside-label" style={{ marginTop: "16px" }}>
                 Nearest reference signatures
@@ -336,8 +334,15 @@ export function Explore() {
               <ul className="reference-neighbors" data-testid="similar-compounds">
                 {explore.result.neighbors.map((n) => (
                   <li key={n.compound_id}>
-                    <span className="mono">{n.compound_id}</span>
-                    {n.label && <span>labelled {n.label}</span>}
+                    <strong>{n.preferred_name ?? "Compound name unavailable"}</strong>
+                    <span>{n.similarity_category} · rank {n.similarity_rank} of {map.data?.counts.n_total}</span>
+                    {n.source_dataset && <span>{n.source_dataset}</span>}
+                    {n.label && <span>endpoint label: {n.label}</span>}
+                    <details>
+                      <summary>Technical details</summary>
+                      <span className="mono">InChIKey {n.compound_id}</span>
+                      <span>Raw distance {n.distance.toFixed(3)}</span>
+                    </details>
                   </li>
                 ))}
               </ul>
@@ -361,10 +366,10 @@ export function Explore() {
                   <div>
                     <dt>Percentile → band</dt>
                     <dd>
-                      percentile ={" "}
-                      <strong>{(explore.result.domain.percentile * 100).toFixed(1)}%</strong> of
-                      training compounds are at least this isolated. Bands: ≤50% → close, 50–90% →
-                      moderately close, &gt;90% → far. There is no in-domain / out-of-domain boolean.
+                      isolation percentile ={" "}
+                      <strong>{(explore.result.domain.percentile * 100).toFixed(1)}%</strong>. This
+                      diagnostic is separate from neighbour similarity ranks and does not assert
+                      in-domain or out-of-domain status.
                     </dd>
                   </div>
                   <div>
@@ -464,7 +469,8 @@ function ReferenceDetailsDrawer({
       <div className="reference-drawer-head">
         <div>
           <p className="eyebrow">Selected measured signature</p>
-          <h2>{compound?.preferred_name ?? "Reference signature"}</h2>
+          <h2>{compound?.preferred_name ?? point.preferred_name ?? "Compound name unavailable"}</h2>
+          <p>Condition-aggregated measured signature</p>
         </div>
         <button
           type="button"
@@ -475,22 +481,28 @@ function ReferenceDetailsDrawer({
           Close
         </button>
       </div>
-      <p className="mono reference-drawer-id">{point.compound_id}</p>
       <dl className="reference-drawer-list">
+        {(compound?.pubchem_cid ?? point.pubchem_cid) && (
+          <div><dt>PubChem CID</dt><dd>{compound?.pubchem_cid ?? point.pubchem_cid}</dd></div>
+        )}
         <div>
           <dt>Endpoint dataset label</dt>
           <dd>{point.label ? `${point.label} for ${context}` : "No label in this endpoint dataset"}</dd>
         </div>
-        <div><dt>Point</dt><dd>{pointDefinition}</dd></div>
-        <div>
-          <dt>UMAP coordinates</dt>
-          <dd>{point.x.toFixed(3)}, {point.y.toFixed(3)} (visualization only)</dd>
-        </div>
-        <div>
-          <dt>Source</dt>
-          <dd>{sourceKey || "Curated endpoint signatures"}; SHA-256 {sourceHash}</dd>
-        </div>
+        <div><dt>Source dataset</dt><dd>{point.source_dataset || sourceKey || "Curated endpoint signatures"}</dd></div>
+        {(point.experimental_contexts ?? []).length > 0 && (
+          <div><dt>Experimental context</dt><dd>{(point.experimental_contexts ?? []).join("; ")}</dd></div>
+        )}
       </dl>
+      <details className="technical-disclosure">
+        <summary>Technical provenance</summary>
+        <dl className="reference-drawer-list">
+          <div><dt>InChIKey</dt><dd className="mono">{point.compound_id}</dd></div>
+          <div><dt>Point definition</dt><dd>{pointDefinition}</dd></div>
+          <div><dt>UMAP coordinates</dt><dd>{point.x.toFixed(3)}, {point.y.toFixed(3)}</dd></div>
+          <div><dt>Artifact</dt><dd>{sourceKey}; SHA-256 {sourceHash}</dd></div>
+        </dl>
+      </details>
       <p className="reference-label-note">
         Proximity does not prove a shared mechanism, toxicity, or safety profile. A submitted query
         is placed approximately; this selected reference point is part of the precomputed map.
@@ -510,8 +522,9 @@ function ReferenceDetailsDrawer({
         </div>
       ) : (
         <p className="check-plain">
-          This real map point has no full measured vector in the small public demonstrator catalogue,
-          so analysis is unavailable rather than reconstructed from its coordinates.
+          This compound is included in the reference map, but its full gene-expression vector is
+          not available in the current public catalogue. It can be explored here but cannot yet be
+          re-analysed. A transcriptomic signature is never reconstructed from 2D UMAP coordinates.
         </p>
       )}
     </aside>
