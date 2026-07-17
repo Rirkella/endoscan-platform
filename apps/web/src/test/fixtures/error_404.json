@@ -1,5 +1,6 @@
 {
   "error": "endpoint_not_found",
   "detail": "No endpoint with id 'NOPE' in registry",
-  "endpoint_id": null
+  "endpoint_id": null,
+  "request_id": "test-request-404"
 }

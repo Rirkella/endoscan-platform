@@ -1,0 +1,18 @@
+{
+  "signature_id": "lincs-gse92742-caffeic-acid-mcf7-a549",
+  "compound_id": "QAIPRVGONGVQAS-DUXPYHPUSA-N",
+  "compound_name": "Caffeic Acid",
+  "dataset": "LINCS L1000",
+  "accession": "GSE92742",
+  "processing_level": "Level 5 COMPZ.MODZ",
+  "cell_lines": ["MCF7", "A549"],
+  "dose": null,
+  "timepoint": null,
+  "aggregation": "condition-averaged across MCF7 and A549",
+  "n_genes": 978,
+  "schema_version": "1.0.0",
+  "catalogue_version": "2026-07-15",
+  "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ.",
+  "source_url": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE92742",
+  "signature": {"A1BG": 0.1}
+}

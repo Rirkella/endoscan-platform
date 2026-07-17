@@ -117,6 +117,7 @@ class PathwayResult:
 @dataclass(frozen=True)
 class EnrichmentOutcome:
     results: list[PathwayResult]
+    exploratory: list[PathwayResult]
     universe_size: int
     family_size: int  # number of pathways actually tested (K >= MIN_PATHWAY_OVERLAP)
     n_input_genes: int  # toward genes intersected with the universe
@@ -162,27 +163,30 @@ def run_enrichment(
 
     qvals = benjamini_hochberg([t[3] for t in tested])
     results: list[PathwayResult] = []
+    exploratory: list[PathwayResult] = []
     for (p, overlap, k_size, pval), q in zip(tested, qvals, strict=True):
         label = evidence_label(q, len(overlap))
-        if label is None:
-            continue  # q >= 0.10 -> not shown; NEVER relaxed to surface something
-        results.append(
-            PathwayResult(
-                pathway_id=p.id,
-                name=p.name,
-                description=p.description,
-                genes_influencing_result=sorted(overlap),
-                overlap_count=len(overlap),
-                pathway_size_in_universe=k_size,
-                input_size_in_universe=n_sample,
-                p_value=pval,
-                q_value=q,
-                evidence=label,
-            )
+        record = PathwayResult(
+            pathway_id=p.id,
+            name=p.name,
+            description=p.description,
+            genes_influencing_result=sorted(overlap),
+            overlap_count=len(overlap),
+            pathway_size_in_universe=k_size,
+            input_size_in_universe=n_sample,
+            p_value=pval,
+            q_value=q,
+            evidence=label or "Exploratory — not statistically supported",
         )
+        if label is None:
+            exploratory.append(record)
+        else:
+            results.append(record)
     results.sort(key=lambda r: (r.q_value, r.p_value, r.pathway_id))
+    exploratory.sort(key=lambda r: (r.q_value, -r.overlap_count, r.pathway_id))
     return EnrichmentOutcome(
         results=results,
+        exploratory=exploratory[:5],
         universe_size=n_universe,
         family_size=len(tested),
         n_input_genes=n_sample,

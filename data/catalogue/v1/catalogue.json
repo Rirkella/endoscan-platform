@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0.0",
+  "catalogue_version": "2026-07-15",
+  "sources": {
+    "identity": {
+      "name": "PubChem PUG REST",
+      "retrieved_at": "2026-07-15",
+      "url": "https://pubchem.ncbi.nlm.nih.gov/docs/pug-rest"
+    },
+    "signatures": {
+      "name": "LINCS L1000 Level 5 COMPZ.MODZ",
+      "accession": "GSE92742",
+      "url": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE92742"
+    }
+  },
+  "compounds": [
+    {
+      "compound_id": "QAIPRVGONGVQAS-DUXPYHPUSA-N",
+      "preferred_name": "Caffeic Acid",
+      "aliases": ["Caffeic acid", "(E)-Caffeic acid", "PubChem CID 689043"],
+      "pubchem_cid": 689043,
+      "iupac_name": "(E)-3-(3,4-dihydroxyphenyl)prop-2-enoic acid",
+      "canonical_smiles": "C1=CC(=C(C=C1C=CC(=O)O)O)O",
+      "isomeric_smiles": "C1=CC(=C(C=C1/C=C/C(=O)O)O)O",
+      "signatures": [
+        {
+          "signature_id": "lincs-gse92742-caffeic-acid-mcf7-a549",
+          "signature_path": "apps/web/src/demo-signatures/demo_low_low.json",
+          "dataset": "LINCS L1000",
+          "accession": "GSE92742",
+          "processing_level": "Level 5 COMPZ.MODZ",
+          "cell_lines": ["MCF7", "A549"],
+          "dose": null,
+          "timepoint": null,
+          "aggregation": "condition-averaged across MCF7 and A549",
+          "n_genes": 978
+        }
+      ]
+    },
+    {
+      "compound_id": "VOXZDWNPVJITMN-UHFFFAOYSA-N",
+      "preferred_name": "13-Methyl-6,7,8,9,11,12,14,15,16,17-decahydrocyclopenta(a)phenanthrene-3,17-diol",
+      "aliases": ["PubChem CID 450"],
+      "pubchem_cid": 450,
+      "iupac_name": "13-methyl-6,7,8,9,11,12,14,15,16,17-decahydrocyclopenta[a]phenanthrene-3,17-diol",
+      "canonical_smiles": "CC12CCC3C(C1CCC2O)CCC4=C3C=CC(=C4)O",
+      "isomeric_smiles": "CC12CCC3C(C1CCC2O)CCC4=C3C=CC(=C4)O",
+      "signatures": [
+        {
+          "signature_id": "lincs-gse92742-cid-450-mcf7-a549",
+          "signature_path": "apps/web/src/demo-signatures/demo_er_high.json",
+          "dataset": "LINCS L1000",
+          "accession": "GSE92742",
+          "processing_level": "Level 5 COMPZ.MODZ",
+          "cell_lines": ["MCF7", "A549"],
+          "dose": null,
+          "timepoint": null,
+          "aggregation": "condition-averaged across MCF7 and A549",
+          "n_genes": 978
+        }
+      ]
+    },
+    {
+      "compound_id": "JMPFSEBWVLAJKM-UHFFFAOYSA-N",
+      "preferred_name": "Closantel",
+      "aliases": ["Closantel", "PubChem CID 42574"],
+      "pubchem_cid": 42574,
+      "iupac_name": "N-[5-chloro-4-[(4-chlorophenyl)-cyanomethyl]-2-methylphenyl]-2-hydroxy-3,5-diiodobenzamide",
+      "canonical_smiles": "CC1=CC(=C(C=C1NC(=O)C2=C(C(=CC(=C2)I)I)O)Cl)C(C#N)C3=CC=C(C=C3)Cl",
+      "isomeric_smiles": "CC1=CC(=C(C=C1NC(=O)C2=C(C(=CC(=C2)I)I)O)Cl)C(C#N)C3=CC=C(C=C3)Cl",
+      "signatures": [
+        {
+          "signature_id": "lincs-gse92742-closantel-mcf7-a549",
+          "signature_path": "apps/web/src/demo-signatures/demo_ar_high.json",
+          "dataset": "LINCS L1000",
+          "accession": "GSE92742",
+          "processing_level": "Level 5 COMPZ.MODZ",
+          "cell_lines": ["MCF7", "A549"],
+          "dose": null,
+          "timepoint": null,
+          "aggregation": "condition-averaged across MCF7 and A549",
+          "n_genes": 978
+        }
+      ]
+    },
+    {
+      "compound_id": "SIYLLGKDQZGJHK-UHFFFAOYSA-N",
+      "preferred_name": "Benzethonium",
+      "aliases": ["Benzethonium", "PubChem CID 2335"],
+      "pubchem_cid": 2335,
+      "iupac_name": "benzyl-dimethyl-[2-[2-[4-(2,4,4-trimethylpentan-2-yl)phenoxy]ethoxy]ethyl]azanium",
+      "canonical_smiles": "CC(C)(C)CC(C)(C)C1=CC=C(C=C1)OCCOCC[N+](C)(C)CC2=CC=CC=C2",
+      "isomeric_smiles": "CC(C)(C)CC(C)(C)C1=CC=C(C=C1)OCCOCC[N+](C)(C)CC2=CC=CC=C2",
+      "signatures": [
+        {
+          "signature_id": "lincs-gse92742-benzethonium-mcf7-a549",
+          "signature_path": "apps/web/src/demo-signatures/demo_both_high.json",
+          "dataset": "LINCS L1000",
+          "accession": "GSE92742",
+          "processing_level": "Level 5 COMPZ.MODZ",
+          "cell_lines": ["MCF7", "A549"],
+          "dose": null,
+          "timepoint": null,
+          "aggregation": "condition-averaged across MCF7 and A549",
+          "n_genes": 978
+        }
+      ]
+    }
+  ]
+}

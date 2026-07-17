@@ -44,6 +44,10 @@ venv/
 # via operator checksum after extraction, since reactome.org is network-blocked here). Small JSON.
 !/data/reactome/
 !/data/reactome/**
+# Small, curated metadata that maps verified PubChem identities to committed measured
+# signatures. This is application reference data, not a raw transcriptomics dump.
+!/data/catalogue/
+!/data/catalogue/**
 *.h5
 *.h5ad
 *.parquet

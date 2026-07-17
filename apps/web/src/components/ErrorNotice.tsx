@@ -26,6 +26,9 @@ export function ErrorNotice({ error }: { error: unknown }) {
     >
       <p className="font-medium">{FRIENDLY[code] ?? "Something went wrong."}</p>
       {detail && <p className="mt-1 text-xs break-words">{detail}</p>}
+      {isApi && error.request_id !== "unavailable" && (
+        <p className="mt-1 text-xs break-words">Request ID: <span className="font-mono">{error.request_id}</span></p>
+      )}
     </div>
   );
 }

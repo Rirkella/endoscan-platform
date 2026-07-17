@@ -1,0 +1,99 @@
+{
+  "schema_version": "2.0.0",
+  "generated_from": "data/catalogue/v1/catalogue.json",
+  "description": "Named real measured LINCS Level 5 examples; numeric values are unchanged.",
+  "examples": [
+    {
+      "id": "lincs-gse92742-caffeic-acid-mcf7-a549",
+      "name": "Caffeic Acid",
+      "filename": "lincs-caffeic-acid-mcf7-a549.csv",
+      "format": "csv",
+      "url": "/examples/lincs-caffeic-acid-mcf7-a549.csv",
+      "pubchem_cid": 689043,
+      "inchikey": "QAIPRVGONGVQAS-DUXPYHPUSA-N",
+      "dataset": "LINCS L1000",
+      "accession": "GSE92742",
+      "processing_level": "Level 5 COMPZ.MODZ",
+      "cell_lines": [
+        "MCF7",
+        "A549"
+      ],
+      "dose": null,
+      "timepoint": null,
+      "aggregation": "condition-averaged across MCF7 and A549",
+      "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=QAIPRVGONGVQAS-DUXPYHPUSA-N; staged from GSE92742 gctx; CERAPP label=0.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
+      "file_sha256": "0967117a654aaacf78c64d2aa4b3f2af0d941ac4dc653d0302ffce4d31564e5b",
+      "source_signature_sha256": "48f457bd269c8f754999218b66547a422fb5cd7d1cb9dc93c88a4900222c0507",
+      "expected_result": "Expected example result: ER and AR below threshold"
+    },
+    {
+      "id": "lincs-gse92742-cid-450-mcf7-a549",
+      "name": "13-Methyl-6,7,8,9,11,12,14,15,16,17-decahydrocyclopenta(a)phenanthrene-3,17-diol",
+      "filename": "lincs-cid-450-mcf7-a549.tsv",
+      "format": "tsv",
+      "url": "/examples/lincs-cid-450-mcf7-a549.tsv",
+      "pubchem_cid": 450,
+      "inchikey": "VOXZDWNPVJITMN-UHFFFAOYSA-N",
+      "dataset": "LINCS L1000",
+      "accession": "GSE92742",
+      "processing_level": "Level 5 COMPZ.MODZ",
+      "cell_lines": [
+        "MCF7",
+        "A549"
+      ],
+      "dose": null,
+      "timepoint": null,
+      "aggregation": "condition-averaged across MCF7 and A549",
+      "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=VOXZDWNPVJITMN-UHFFFAOYSA-N; staged from GSE92742 gctx; CERAPP label=1.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
+      "file_sha256": "0410c867820457b92e54cce16ed44f660a1ee74d72149379f323f80fc7d0170f",
+      "source_signature_sha256": "4d362cdd5e61934a11e10c4640d282ca298d34cdae07583d3943a9521bec17e6",
+      "expected_result": "Expected example result: ER above threshold · AR below threshold"
+    },
+    {
+      "id": "lincs-gse92742-closantel-mcf7-a549",
+      "name": "Closantel",
+      "filename": "lincs-closantel-mcf7-a549.csv",
+      "format": "csv",
+      "url": "/examples/lincs-closantel-mcf7-a549.csv",
+      "pubchem_cid": 42574,
+      "inchikey": "JMPFSEBWVLAJKM-UHFFFAOYSA-N",
+      "dataset": "LINCS L1000",
+      "accession": "GSE92742",
+      "processing_level": "Level 5 COMPZ.MODZ",
+      "cell_lines": [
+        "MCF7",
+        "A549"
+      ],
+      "dose": null,
+      "timepoint": null,
+      "aggregation": "condition-averaged across MCF7 and A549",
+      "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=JMPFSEBWVLAJKM-UHFFFAOYSA-N; staged from GSE92742 gctx; CERAPP label=0.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
+      "file_sha256": "0fda8b3287c4a48df24d4b79c7b8660cac58cc2ee49a152416d4d0160d944fb2",
+      "source_signature_sha256": "3636e7a42821cc15439d70e5949bbf672e3c514e6e748dcaf9d98cf599e63208",
+      "expected_result": "Expected example result: ER below threshold · AR above threshold"
+    },
+    {
+      "id": "lincs-gse92742-benzethonium-mcf7-a549",
+      "name": "Benzethonium",
+      "filename": "lincs-benzethonium-mcf7-a549.tsv",
+      "format": "tsv",
+      "url": "/examples/lincs-benzethonium-mcf7-a549.tsv",
+      "pubchem_cid": 2335,
+      "inchikey": "SIYLLGKDQZGJHK-UHFFFAOYSA-N",
+      "dataset": "LINCS L1000",
+      "accession": "GSE92742",
+      "processing_level": "Level 5 COMPZ.MODZ",
+      "cell_lines": [
+        "MCF7",
+        "A549"
+      ],
+      "dose": null,
+      "timepoint": null,
+      "aggregation": "condition-averaged across MCF7 and A549",
+      "provenance": "REAL measured demo example (NOT fabricated). LINCS Level 5 COMPZ.MODZ MCF7+A549 condition-averaged; InChIKey=SIYLLGKDQZGJHK-UHFFFAOYSA-N; staged from GSE92742 gctx; CERAPP label=1.0. Source file: data/staged/er/lincs.parquet. Measured 2026-07-01 via endoscan_core.inference.predict (same code path as the M7 API).",
+      "file_sha256": "344ea966d02ff1f8ffa1cb09fdb99d98607082069ccefcf8c2ab6efe419cb4d7",
+      "source_signature_sha256": "842069d20df52a39bf5394445726fb167a81c3293f31301fb1198a821f546236",
+      "expected_result": "Expected example result: ER and AR above threshold"
+    }
+  ]
+}

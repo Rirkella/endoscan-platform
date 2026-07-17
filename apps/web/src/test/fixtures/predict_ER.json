@@ -1,6 +1,6 @@
 {
   "endpoint_id": "ER",
-  "probability": 0.095,
+  "score": 0.095,
   "call": false,
   "threshold": 0.5,
   "standardized_input": true,

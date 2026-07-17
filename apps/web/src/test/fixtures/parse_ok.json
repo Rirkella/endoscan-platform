@@ -1,19 +1,42 @@
 {
-  "aligned": true,
+  "ready": true,
   "format": "json",
-  "schema_endpoint_id": "ER",
-  "n_schema_genes": 978,
+  "input_value_type": "differential_zscore",
   "preview": {
     "n_detected": 978,
-    "n_matched": 978,
-    "n_missing": 0,
-    "n_extra": 0,
-    "missing_genes": [],
-    "extra_genes": [],
     "samples": null,
     "selected_sample": null,
     "needs_sample": false
   },
+  "compatibility": [
+    {
+      "endpoint_id": "ER",
+      "biological_target": "Estrogen Receptor",
+      "compatible": true,
+      "n_schema_genes": 978,
+      "n_detected": 978,
+      "n_matched": 978,
+      "n_missing": 0,
+      "n_extra": 0,
+      "missing_genes": [],
+      "extra_genes": [],
+      "reason": null
+    },
+    {
+      "endpoint_id": "AR",
+      "biological_target": "Androgen Receptor",
+      "compatible": true,
+      "n_schema_genes": 978,
+      "n_detected": 978,
+      "n_matched": 978,
+      "n_missing": 0,
+      "n_extra": 0,
+      "missing_genes": [],
+      "extra_genes": [],
+      "reason": null
+    }
+  ],
+  "compatible_endpoint_ids": ["ER", "AR"],
   "signature": {
     "A1BG": 0.0
   }

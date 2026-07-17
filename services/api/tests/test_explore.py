@@ -9,10 +9,12 @@ Two clients:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -61,7 +63,66 @@ def test_umap_serves_points_counts_and_manifest(fixture_client: TestClient) -> N
     assert body["manifest"]["source_sha256"] == manifest["source"]["sha256"]
     # Every point is a real training compound with coords (never fabricated).
     pt = body["points"][0]
-    assert set(pt) == {"compound_id", "x", "y", "label"}
+    assert set(pt) >= {
+        "compound_id",
+        "x",
+        "y",
+        "label",
+        "preferred_name",
+        "source_dataset",
+        "full_signature_id",
+    }
+    assert pt["preferred_name"] is None  # fixture has no versioned identity catalogue
+    assert pt["full_vector_available"] is True
+    assert pt["profile_type"] == "Aggregated reference profile"
+
+
+def test_reference_signature_is_exact_manifest_aligned_support_row(
+    fixture_client: TestClient,
+) -> None:
+    manifest = json.loads((FIXTURES / "manifest.json").read_text())
+    support = np.load(FIXTURES / "support.npy")
+    compound_id = manifest["compound_ids"][1]
+    response = fixture_client.get(f"/explore/FIX/signatures/{compound_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["support_row_index"] == 1
+    assert body["feature_names"] == manifest["feature_names"]
+    assert list(body["signature"]) == manifest["feature_names"]
+    assert list(body["signature"].values()) == support[1].tolist()
+    expected_support_sha = hashlib.sha256((FIXTURES / "support.npy").read_bytes()).hexdigest()
+    assert body["support_sha256"] == expected_support_sha
+    assert body["full_vector_available"] is True
+    assert body["underlying_condition_available"] is False
+    assert "x" not in body and "y" not in body
+    assert "never reconstructed from UMAP" in body["provenance"]["vector_origin"]
+
+
+def test_real_reference_vector_survives_multipart_parse_and_analyze(
+    client: TestClient, repo_root: Path
+) -> None:
+    manifest = json.loads((repo_root / "models/ER/explore/manifest.json").read_text())
+    support = np.load(repo_root / "models/ER/explore/support.npy")
+    compound_id = manifest["compound_ids"][0]
+    retrieved = client.get(f"/explore/ER/signatures/{compound_id}").json()
+    assert list(retrieved["signature"].values()) == support[0].tolist()
+    parsed = client.post(
+        "/signatures/parse",
+        files={"file": ("reference.json", json.dumps(retrieved["signature"]), "application/json")},
+        data={"format": "json", "input_value_type": "differential_zscore"},
+    )
+    assert parsed.status_code == 200
+    assert parsed.json()["signature"] == retrieved["signature"]
+    analyzed = client.post(
+        "/analyze",
+        json={
+            "signature": parsed.json()["signature"],
+            "endpoint_ids": ["ER"],
+            "input_value_type": "differential_zscore",
+        },
+    )
+    assert analyzed.status_code == 200
+    assert analyzed.json()["summary"]["succeeded"] == 1
 
 
 def test_missing_map_is_honest_404(client: TestClient) -> None:
@@ -93,7 +154,16 @@ def test_locate_returns_neighbors_distances_and_defined_domain_metric(
     # Real nearest neighbours with distances (computed in the original gene space) + map coords.
     assert len(body["neighbors"]) >= 1
     n0 = body["neighbors"][0]
-    assert set(n0) == {"compound_id", "distance", "x", "y", "label"}
+    assert set(n0) >= {
+        "compound_id",
+        "distance",
+        "x",
+        "y",
+        "label",
+        "similarity_category",
+        "similarity_rank",
+        "similarity_percentile",
+    }
     dists = [n["distance"] for n in body["neighbors"]]
     assert dists == sorted(dists)  # ascending == genuinely nearest-first
 
@@ -103,6 +173,25 @@ def test_locate_returns_neighbors_distances_and_defined_domain_metric(
     assert dom["query_kth_distance"] >= 0.0
     assert 0.0 <= dom["percentile"] <= 1.0
     assert set(dom["training_reference_quantiles"]) >= {"min", "median", "max"}
+
+
+def test_exact_reference_self_match_is_identified_and_removed(fixture_client: TestClient) -> None:
+    manifest = json.loads((FIXTURES / "manifest.json").read_text())
+    support = np.load(FIXTURES / "support.npy")
+    signature = dict(zip(manifest["feature_names"], support[0].tolist(), strict=True))
+    response = fixture_client.post(
+        "/explore/locate", json={"context": "FIX", "signature": signature}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["placement"] == "exact_existing_reference"
+    assert body["exact_match"]["compound_id"] == "CID_00"
+    assert body["exact_match"]["similarity_category"] == "exact match"
+    assert all(item["compound_id"] != "CID_00" for item in body["neighbors"])
+    assert body["approx_xy"] == {
+        "x": body["exact_match"]["x"],
+        "y": body["exact_match"]["y"],
+    }
 
 
 def test_locate_asserts_no_in_domain_verdict_anywhere(fixture_client: TestClient) -> None:
@@ -133,3 +222,12 @@ def test_locate_missing_map_is_404(fixture_client: TestClient) -> None:
     )
     assert r.status_code == 404
     assert r.json()["error"] == "explore_map_unavailable"
+
+
+def test_locate_rejects_traversal_context(fixture_client: TestClient) -> None:
+    r = fixture_client.post(
+        "/explore/locate", json={"context": "../FIX", "signature": _fixture_signature()}
+    )
+    assert r.status_code == 422
+    assert r.json()["error"] == "invalid_reference_context"
+    assert r.json()["request_id"]

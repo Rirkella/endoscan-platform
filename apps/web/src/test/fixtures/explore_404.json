@@ -1,5 +1,6 @@
 {
   "error": "explore_map_unavailable",
   "detail": "data-space map not yet computed for 'ER'",
-  "endpoint_id": null
+  "endpoint_id": null,
+  "request_id": "test-request-explore"
 }

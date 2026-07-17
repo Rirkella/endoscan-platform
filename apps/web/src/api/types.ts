@@ -5,6 +5,15 @@ export interface Health {
   status: string;
   endpoints_loaded: string[];
   explain_available: boolean;
+  explanation_capabilities: Record<string, ExplanationCapabilityStatus>;
+  pubmed: { configured: boolean; available: boolean; reason: string | null };
+}
+
+export interface ExplanationCapabilityStatus {
+  declared_method: string | null;
+  available: boolean;
+  missing_dependencies: string[];
+  reason: string | null;
 }
 
 export type EndpointStatus = string; // e.g. "experimental" — rendered as returned, never assumed
@@ -15,6 +24,7 @@ export interface EndpointSummary {
   status: EndpointStatus;
   input_type: string;
   frozen: boolean;
+  explanation: ExplanationCapabilityStatus;
 }
 
 export interface LimitationsBlock {
@@ -71,12 +81,15 @@ export interface EndpointDetail {
   status: EndpointStatus;
   frozen: boolean;
   source_refs: string[];
+  explanation: ExplanationCapabilityStatus;
   variants: ContextVariant[];
 }
 
 export interface PredictionResult {
   endpoint_id: string;
-  probability: number;
+  score: number;
+  /** Accepted only while older deployments migrate to `score`. */
+  probability?: number;
   call: boolean;
   threshold: number;
   standardized_input: boolean;
@@ -104,26 +117,41 @@ export interface ExplanationResult {
 }
 
 export type Signature = Record<string, number>;
+export type InputValueType =
+  | "differential_zscore"
+  | "log2_fold_change"
+  | "ranked_statistic"
+  | "raw_expression";
 
 // --- signature upload / parse (POST /signatures/parse) ---
 export interface ParsePreview {
+  n_detected: number;
+  samples: string[] | null;
+  selected_sample: string | null;
+  needs_sample: boolean;
+}
+
+export interface EndpointCompatibility {
+  endpoint_id: string;
+  biological_target: string;
+  compatible: boolean;
+  n_schema_genes: number;
   n_detected: number;
   n_matched: number;
   n_missing: number;
   n_extra: number;
   missing_genes: string[];
   extra_genes: string[];
-  samples: string[] | null;
-  selected_sample: string | null;
-  needs_sample: boolean;
+  reason: string | null;
 }
 
 export interface ParseResult {
-  aligned: boolean;
+  ready: boolean;
   format: string;
-  schema_endpoint_id: string;
-  n_schema_genes: number;
+  input_value_type: InputValueType;
   preview: ParsePreview;
+  compatibility: EndpointCompatibility[];
+  compatible_endpoint_ids: string[];
   signature: Signature | null;
 }
 
@@ -133,11 +161,14 @@ export interface ErrorBody {
   error: string;
   detail: string;
   endpoint_id: string | null;
+  request_id: string;
 }
 
 export interface AnalyzeEndpointResult {
   endpoint_id: string;
   biological_target: string;
+  model_version?: string;
+  source_refs?: string[];
   ok: boolean;
   result: PredictionResult | null;
   error: ErrorBody | null;
@@ -145,6 +176,12 @@ export interface AnalyzeEndpointResult {
 
 export interface AnalyzeResponse {
   results: AnalyzeEndpointResult[];
+  summary: {
+    requested: number;
+    succeeded: number;
+    failed: number;
+    status: "ok" | "partial" | "all_failed";
+  };
 }
 
 // A structured API error (the ErrorResponse shape) surfaced to the UI. `status` is the HTTP
@@ -154,18 +191,88 @@ export interface ApiError {
   error: string;
   detail: string;
   endpoint_id: string | null;
+  request_id: string;
+}
+
+// --- verified public measured-signature catalogue (GET /catalogue/v1/*) ---
+export interface CatalogueSourceBlock {
+  name: string;
+  accession: string | null;
+  retrieved_at: string | null;
+  url: string;
+}
+
+export interface CatalogueSignatureSummary {
+  signature_id: string;
+  compound_id: string;
+  compound_name: string;
+  dataset: string;
+  accession: string;
+  processing_level: string;
+  cell_lines: string[];
+  dose: string | null;
+  timepoint: string | null;
+  aggregation: string;
+  n_genes: number;
+}
+
+export interface CatalogueCompound {
+  compound_id: string;
+  preferred_name: string;
+  aliases: string[];
+  pubchem_cid: number | null;
+  iupac_name: string | null;
+  canonical_smiles: string | null;
+  isomeric_smiles: string | null;
+  signatures: CatalogueSignatureSummary[];
+  availability_status: string;
+  availability_reason: string | null;
+  reference_contexts: string[];
+  source_compound_ids: string[];
+  lincs_perturbagen_ids: string[];
+}
+
+export interface CatalogueSearchResponse {
+  schema_version: string;
+  catalogue_version: string;
+  query: string;
+  sources: Record<string, CatalogueSourceBlock>;
+  results: CatalogueCompound[];
+}
+
+export interface CatalogueSignatureDetail extends CatalogueSignatureSummary {
+  schema_version: string;
+  catalogue_version: string;
+  provenance: string;
+  source_url: string;
+  signature: Signature;
+}
+
+/** Read the current score while tolerating one release of the legacy response key. */
+export function predictionScore(result: PredictionResult): number {
+  if (Number.isFinite(result.score)) return result.score;
+  if (Number.isFinite(result.probability)) return result.probability as number;
+  throw new Error("Prediction response did not contain a numeric score.");
 }
 
 // --- Explore: the data-space (UMAP) view (GET /explore/{ctx}/umap, POST /explore/locate) ---
-// UMAP is a VISUALIZATION of the real training data, not a boundary/proof. A submitted
-// signature is placed APPROXIMATELY by nearest neighbours (no exact projection), and there is
-// no in-/out-of-domain flag — only a defined distance metric vs the training reference.
+// UMAP is a visualization of real training data, not a boundary/proof. A new signature uses an
+// approximate neighbour centroid; an exact stored record uses its committed coordinates. There
+// is no in-/out-of-domain flag, only a defined isolation metric against the reference set.
 
 export interface ExplorePoint {
   compound_id: string;
   x: number;
   y: number;
   label: string | null; // "active" | "inactive" | null (never fabricated)
+  preferred_name: string | null;
+  pubchem_cid: number | null;
+  source_dataset: string | null;
+  experimental_contexts: string[];
+  full_signature_id: string | null;
+  full_vector_available?: boolean;
+  underlying_condition_available?: boolean;
+  profile_type?: "Aggregated reference profile" | string;
 }
 
 export interface ExploreCounts {
@@ -182,6 +289,9 @@ export interface ExploreManifestSummary {
   domain_metric_k: number;
   label_status: string;
   source_sha256: string;
+  source_key: string;
+  point_definition: string;
+  aggregation: Record<string, string>;
   built_at: string | null;
 }
 
@@ -198,6 +308,17 @@ export interface ExploreNeighbor {
   x: number;
   y: number;
   label: string | null;
+  preferred_name: string | null;
+  pubchem_cid: number | null;
+  source_dataset: string | null;
+  experimental_contexts: string[];
+  full_signature_id: string | null;
+  full_vector_available?: boolean;
+  underlying_condition_available?: boolean;
+  profile_type?: "Aggregated reference profile" | string;
+  similarity_category: string;
+  similarity_rank: number;
+  similarity_percentile: number;
 }
 
 export interface ExploreDomain {
@@ -210,9 +331,10 @@ export interface ExploreDomain {
 
 export interface ExploreLocateResult {
   context: string;
-  placement: string; // always "approximate_nearest_neighbor"
+  placement: "exact_existing_reference" | "approximate_nearest_neighbor";
   approx_xy: { x: number; y: number };
   neighbors: ExploreNeighbor[];
+  exact_match: ExploreNeighbor | null;
   domain: ExploreDomain;
 }
 
@@ -254,5 +376,125 @@ export interface PathwaysResponse {
   status: "ok" | "unavailable" | "too_few_genes";
   reason: string | null;
   pathways: PathwayCard[];
+  exploratory_pathways: PathwayCard[];
   method_block: PathwayMethodBlock | null;
+}
+
+export interface ExploreReferenceSignature {
+  context: string;
+  compound_id: string;
+  preferred_name: string | null;
+  pubchem_cid: number | null;
+  endpoint_label: string | null;
+  profile_type: "Aggregated reference profile";
+  full_vector_available: true;
+  underlying_condition_available: boolean;
+  underlying_conditions: Array<Record<string, unknown>>;
+  value_type: "differential_zscore";
+  value_type_label: string;
+  reference_comparison: string;
+  source_dataset: string;
+  cell_models: string[];
+  aggregation_description: string;
+  aggregate_pathway_warning: string;
+  feature_names: string[];
+  signature: Signature;
+  n_genes: number;
+  support_row_index: number;
+  support_sha256: string;
+  source_key: string;
+  source_sha256: string;
+  provenance: Record<string, unknown>;
+}
+
+// --- Endpoint-independent full-signature biological response ---
+export interface BiologicalPathwayCard {
+  pathway_id: string;
+  name: string;
+  direction: "increased" | "decreased";
+  enrichment_statistic: number;
+  p_value: number;
+  q_value: number;
+  leading_edge_genes: string[];
+  pathway_size_in_universe: number;
+  statistically_supported: boolean;
+}
+
+export interface BiologicalResponse {
+  status: "ok" | "empty" | "unavailable" | "unsupported_input";
+  reason: string | null;
+  input_value_type: InputValueType;
+  increased_pathways: BiologicalPathwayCard[];
+  decreased_pathways: BiologicalPathwayCard[];
+  tested_gene_universe: string[];
+  method_block: {
+    method: string;
+    method_version: string;
+    ranking_statistic: string;
+    input_value_type: InputValueType;
+    universe_size: number;
+    pathways_tested: number;
+    correction: string;
+    min_gene_set_size: number;
+    max_gene_set_size: number;
+    leading_edge_rule: string;
+    reactome: Record<string, unknown> | null;
+  } | null;
+}
+
+// --- Supporting literature (POST /interpret/literature) ---
+// PubMed records matched by explicit, recorded query templates. This is contextual evidence,
+// never proof that the submitted signature causes or uses a pathway.
+
+export interface LiteraturePathwayInput {
+  pathway_id: string;
+  name: string;
+  genes: string[];
+}
+
+export interface LiteratureQueryRecord {
+  category: string;
+  query: string;
+  matched_genes: string[];
+  matched_pathways: string[];
+  pmids: string[];
+}
+
+export interface LiteratureArticle {
+  pmid: string;
+  title: string;
+  authors: string[];
+  journal: string | null;
+  year: string | null;
+  abstract_excerpt: string | null;
+  matched_genes: string[];
+  matched_pathways: string[];
+  evidence_category: string;
+  displayed_relationship: string;
+  matched_title_terms: string[];
+  matched_abstract_terms: string[];
+  endpoint_concept_used: string;
+  ranking_reason: string;
+  relevance_reason: string;
+  pubmed_url: string;
+}
+
+export interface LiteratureResponse {
+  endpoint_id: string;
+  endpoint_name: string;
+  status: "ok" | "empty" | "unavailable" | "rate_limited" | "timeout";
+  reason: string | null;
+  articles: LiteratureArticle[];
+  queries: LiteratureQueryRecord[];
+  provenance: {
+    provider: string;
+    database: string;
+    eutils_base_url: string;
+    retrieved_at: string;
+    tool: string;
+    email_configured: boolean;
+    api_key_used: boolean;
+    rate_limit_per_second: number;
+    cache_hit: boolean;
+  };
 }

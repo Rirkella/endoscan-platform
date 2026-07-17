@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "configuration_version": "2026-07-16",
+  "endpoints": {
+    "ER": {
+      "preferred_name": "Estrogen Receptor",
+      "search_terms": [
+        "estrogen receptor",
+        "estrogen receptor alpha",
+        "ESR1",
+        "estrogen receptor signaling",
+        "estrogen-dependent"
+      ],
+      "excluded_ambiguous_terms": ["ER"]
+    },
+    "AR": {
+      "preferred_name": "Androgen Receptor",
+      "search_terms": [
+        "androgen receptor",
+        "androgen receptor signaling",
+        "androgen-responsive",
+        "androgenic activity"
+      ],
+      "excluded_ambiguous_terms": ["AR"]
+    }
+  }
+}

@@ -29,6 +29,7 @@
       "evidence": "Low"
     }
   ],
+  "exploratory_pathways": [],
   "method_block": {
     "input_gene_rule": "toward-signal contributors: all direction='toward' genes among the pinned top 50 /explain contributors",
     "pinned_top_n": 50,

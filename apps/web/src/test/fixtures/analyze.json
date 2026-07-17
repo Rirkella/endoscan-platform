@@ -3,10 +3,12 @@
     {
       "endpoint_id": "ER",
       "biological_target": "Estrogen Receptor",
+      "model_version": "1.0.0",
+      "source_refs": ["lincs_gse92742", "toxcast_er"],
       "ok": true,
       "result": {
         "endpoint_id": "ER",
-        "probability": 0.095,
+        "score": 0.095,
         "call": false,
         "threshold": 0.5,
         "standardized_input": true,
@@ -33,10 +35,12 @@
     {
       "endpoint_id": "AR",
       "biological_target": "Androgen Receptor",
+      "model_version": "1.0.0",
+      "source_refs": ["lincs_gse92742", "toxcast_ar"],
       "ok": true,
       "result": {
         "endpoint_id": "AR",
-        "probability": 0.24041191158691053,
+        "score": 0.24041191158691053,
         "call": false,
         "threshold": 0.5,
         "standardized_input": true,
@@ -61,5 +65,11 @@
       },
       "error": null
     }
-  ]
+  ],
+  "summary": {
+    "requested": 2,
+    "succeeded": 2,
+    "failed": 0,
+    "status": "ok"
+  }
 }

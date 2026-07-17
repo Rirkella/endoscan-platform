@@ -10,6 +10,7 @@
     "lincs",
     "pubchem"
   ],
+  "explanation": { "declared_method": "linear_coefficient", "available": true, "missing_dependencies": [], "reason": null },
   "variants": [
     {
       "variant_id": "AR",

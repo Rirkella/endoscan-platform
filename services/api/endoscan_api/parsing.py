@@ -10,8 +10,8 @@ route). The 400/422 boundary is crisp:
 - A value that IS parseable but non-finite (NaN/inf) passes through here and is caught downstream
   by ``align_signature`` -> HTTP 422 (invalid_signature).
 
-Format dispatch is a registry ({json, csv}); an ``xlsx`` handler is an additive later entry — the
-validated-signature output is format-independent. Unknown format -> ``MalformedUploadError``.
+Format dispatch is a registry ({json, csv, tsv}); an ``xlsx`` handler is an additive later entry.
+The validated-signature output is format-independent. Unknown format -> ``MalformedUploadError``.
 
 Stateless: callers pass decoded text; nothing is persisted.
 """
@@ -22,6 +22,8 @@ import csv
 import io
 import json
 from dataclasses import dataclass
+
+from .limits import MAX_GENES, MAX_ROWS
 
 GENE_COLUMN_ALIASES = {"gene", "gene_symbol", "symbol", "genes"}
 
@@ -57,6 +59,8 @@ def parse_json(text: str) -> ParsedTable:
         raise MalformedUploadError("JSON signature must be an object of gene -> number.")
     if not obj:
         raise MalformedUploadError("signature is empty.")
+    if len(obj) > MAX_GENES:
+        raise MalformedUploadError(f"signature exceeds the {MAX_GENES} gene limit.")
     mapping: dict[str, float] = {}
     for gene, value in obj.items():
         if isinstance(value, bool) or not isinstance(value, int | float):
@@ -65,11 +69,18 @@ def parse_json(text: str) -> ParsedTable:
     return ParsedTable(mapping=mapping)
 
 
-def parse_csv(text: str, *, sample: str | None = None) -> ParsedTable:
-    rows = list(csv.reader(io.StringIO(text)))
-    rows = [r for r in rows if any(cell.strip() for cell in r)]  # drop blank lines
+def _parse_delimited(
+    text: str, *, delimiter: str, format_name: str, sample: str | None = None
+) -> ParsedTable:
+    rows: list[list[str]] = []
+    for row in csv.reader(io.StringIO(text), delimiter=delimiter):
+        if not any(cell.strip() for cell in row):
+            continue
+        rows.append(row)
+        if len(rows) > MAX_ROWS + 1:  # header + bounded data rows
+            raise MalformedUploadError(f"{format_name} exceeds the {MAX_ROWS} data-row limit.")
     if len(rows) < 2:
-        raise MalformedUploadError("CSV is empty or has no data rows.")
+        raise MalformedUploadError(f"{format_name} is empty or has no data rows.")
     header = [h.strip() for h in rows[0]]
     lower = [h.lower() for h in header]
 
@@ -104,11 +115,21 @@ def parse_csv(text: str, *, sample: str | None = None) -> ParsedTable:
         mapping[gene] = _to_number(row[col].strip(), f"row {n}")
     if not mapping:
         raise MalformedUploadError("no gene rows found.")
+    if len(mapping) > MAX_GENES:
+        raise MalformedUploadError(f"signature exceeds the {MAX_GENES} gene limit.")
     samples = [header[i] for i in value_cols] if len(value_cols) > 1 else None
     return ParsedTable(mapping=mapping, samples=samples)
 
 
-_PARSERS = {"json": parse_json, "csv": parse_csv}
+def parse_csv(text: str, *, sample: str | None = None) -> ParsedTable:
+    return _parse_delimited(text, delimiter=",", format_name="CSV", sample=sample)
+
+
+def parse_tsv(text: str, *, sample: str | None = None) -> ParsedTable:
+    return _parse_delimited(text, delimiter="\t", format_name="TSV", sample=sample)
+
+
+_PARSERS = {"json": parse_json, "csv": parse_csv, "tsv": parse_tsv}
 
 
 def parse_upload(fmt: str, text: str, *, sample: str | None = None) -> ParsedTable:
@@ -120,6 +141,6 @@ def parse_upload(fmt: str, text: str, *, sample: str | None = None) -> ParsedTab
         raise MalformedUploadError(
             f"unsupported format {fmt!r}; expected one of {sorted(_PARSERS)}."
         )
-    if fmt == "csv":
-        return parse_csv(text, sample=sample)
+    if fmt in {"csv", "tsv"}:
+        return _PARSERS[fmt](text, sample=sample)
     return parser(text)

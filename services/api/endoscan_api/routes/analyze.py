@@ -1,4 +1,4 @@
-"""POST /analyze — run one signature across ALL registered endpoints in a single call.
+"""POST /analyze — run one signature across selected or all registered endpoints.
 
 Thin: loops the tested ``predict`` over ``list_endpoints()`` — NO new science. Per-endpoint
 isolation: one endpoint erroring yields ``ok:false`` + its structured error while the others
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from endoscan_core.inference import (
     ModelArtifactUnavailableError,
@@ -18,10 +18,16 @@ from endoscan_core.inference import (
     SignatureValidationError,
     predict,
 )
-from endoscan_core.registry import EndpointNotFoundError, list_endpoints
+from endoscan_core.registry import EndpointNotFoundError, get_endpoint, list_endpoints
 
 from ..deps import get_repo_root
-from ..schemas import AnalyzeEndpointResult, AnalyzeRequest, AnalyzeResponse, ErrorResponse
+from ..schemas import (
+    AnalyzeEndpointResult,
+    AnalyzeRequest,
+    AnalyzeResponse,
+    AnalyzeSummary,
+    ErrorResponse,
+)
 
 router = APIRouter(tags=["analyze"])
 
@@ -34,10 +40,27 @@ _ERROR_CODE = {
 }
 
 
+def _public_failure_detail(exc: Exception) -> str:
+    if isinstance(exc, SignatureValidationError):
+        return str(exc)
+    if isinstance(exc, ModelArtifactUnavailableError):
+        return "The registered model is temporarily unavailable."
+    return "The requested endpoint is not available."
+
+
 @router.post("/analyze", response_model=AnalyzeResponse)
-def analyze(body: AnalyzeRequest, repo_root: Path = Depends(get_repo_root)) -> AnalyzeResponse:
+def analyze(
+    body: AnalyzeRequest,
+    request: Request,
+    repo_root: Path = Depends(get_repo_root),
+) -> AnalyzeResponse:
     results: list[AnalyzeEndpointResult] = []
-    for entry in list_endpoints(repo_root=repo_root):
+    entries = (
+        [get_endpoint(endpoint_id, repo_root=repo_root) for endpoint_id in body.endpoint_ids]
+        if body.endpoint_ids is not None
+        else list_endpoints(repo_root=repo_root)
+    )
+    for entry in entries:
         try:
             out = predict(
                 entry.endpoint_id, body.signature, repo_root=repo_root, allow_extra=body.allow_extra
@@ -47,6 +70,8 @@ def analyze(body: AnalyzeRequest, repo_root: Path = Depends(get_repo_root)) -> A
                 AnalyzeEndpointResult(
                     endpoint_id=entry.endpoint_id,
                     biological_target=entry.biological_target,
+                    model_version=entry.version,
+                    source_refs=entry.source_refs,
                     ok=True,
                     result=result,
                 )
@@ -56,12 +81,23 @@ def analyze(body: AnalyzeRequest, repo_root: Path = Depends(get_repo_root)) -> A
                 AnalyzeEndpointResult(
                     endpoint_id=entry.endpoint_id,
                     biological_target=entry.biological_target,
+                    model_version=entry.version,
+                    source_refs=entry.source_refs,
                     ok=False,
                     error=ErrorResponse(
                         error=_ERROR_CODE[type(exc)],
-                        detail=str(exc),
+                        detail=_public_failure_detail(exc),
                         endpoint_id=entry.endpoint_id,
+                        request_id=request.state.request_id,
                     ),
                 )
             )
-    return AnalyzeResponse(results=results)
+    succeeded = sum(item.ok for item in results)
+    failed = len(results) - succeeded
+    status = "ok" if failed == 0 else "all_failed" if succeeded == 0 else "partial"
+    return AnalyzeResponse(
+        results=results,
+        summary=AnalyzeSummary(
+            requested=len(results), succeeded=succeeded, failed=failed, status=status
+        ),
+    )

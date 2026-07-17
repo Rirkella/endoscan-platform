@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 
-import { EndoscanApiError, api } from "../api/client";
+import { api } from "../api/client";
 import type { ParseResult, Signature } from "../api/types";
 import { ErrorNotice } from "./ErrorNotice";
 
@@ -13,22 +13,24 @@ interface Props {
   disabled?: boolean;
 }
 
-function formatOf(name: string): "json" | "csv" | null {
+type InputFormat = "json" | "csv" | "tsv";
+
+function formatOf(name: string): InputFormat | null {
   const n = name.toLowerCase();
   if (n.endsWith(".json")) return "json";
-  if (n.endsWith(".csv") || n.endsWith(".tsv")) return "csv";
+  if (n.endsWith(".csv")) return "csv";
+  if (n.endsWith(".tsv")) return "tsv";
   return null;
 }
 
 export function UploadZone({ onSignature, disabled }: Props) {
   const [file, setFile] = useState<File | null>(null);
-  const [format, setFormat] = useState<"json" | "csv" | null>(null);
+  const [format, setFormat] = useState<InputFormat | null>(null);
   const [parsing, setParsing] = useState(false);
   const [result, setResult] = useState<ParseResult | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const [allowExtra, setAllowExtra] = useState(false);
 
-  async function doParse(f: File, fmt: "json" | "csv", opts: { allow_extra?: boolean; sample?: string } = {}) {
+  async function doParse(f: File, fmt: InputFormat, opts: { sample?: string } = {}) {
     setParsing(true);
     setError(null);
     setResult(null);
@@ -45,20 +47,16 @@ export function UploadZone({ onSignature, disabled }: Props) {
   function onPick(f: File | null) {
     setResult(null);
     setError(null);
-    setAllowExtra(false);
     setFile(f);
     if (!f) return;
     const fmt = formatOf(f.name);
     setFormat(fmt);
     if (!fmt) {
-      setError(new Error("Please upload a .json or .csv file."));
+      setError(new Error("Please upload a .json, .csv or .tsv file."));
       return;
     }
     void doParse(f, fmt);
   }
-
-  const extrasError =
-    error instanceof EndoscanApiError && /not in the schema/i.test(error.detail);
 
   return (
     <div className="space-y-2">
@@ -78,27 +76,13 @@ export function UploadZone({ onSignature, disabled }: Props) {
           {file ? file.name : "Upload a signature file (CSV / JSON)"}
         </span>
         <span className="mt-1 block text-xs text-muted">
-          The server validates the gene set against the model schema.
+          The server validates the gene set independently against every endpoint schema.
         </span>
       </label>
 
       {parsing && <p className="text-sm text-muted">Parsing…</p>}
 
       {error != null && <ErrorNotice error={error} />}
-      {extrasError && file && format && (
-        <label className="flex items-center gap-2 text-xs text-muted">
-          <input
-            type="checkbox"
-            checked={allowExtra}
-            onChange={(e) => {
-              setAllowExtra(e.target.checked);
-              if (e.target.checked) void doParse(file, format, { allow_extra: true });
-            }}
-          />
-          Ignore extra genes not in the schema and re-check
-        </label>
-      )}
-
       {result?.preview.needs_sample && file && format && (
         <div className="rounded-md border border-line bg-white p-3 text-sm">
           <p className="text-ink">
@@ -119,17 +103,16 @@ export function UploadZone({ onSignature, disabled }: Props) {
         </div>
       )}
 
-      {result?.aligned && result.signature && (
+      {result?.ready && result.signature && (
         <div className="rounded-md border border-line bg-white p-3">
           <p className="text-sm text-ink">
-            Aligned to {result.n_schema_genes} schema genes (endpoint{" "}
-            <span className="font-mono">{result.schema_endpoint_id}</span>):{" "}
-            {result.preview.n_matched} matched, {result.preview.n_missing} missing,{" "}
-            {result.preview.n_extra} extra.
+            Parsed {result.preview.n_detected} genes; {result.compatible_endpoint_ids.length} of{" "}
+            {result.compatibility.length} endpoint models are compatible.
           </p>
           <button
             type="button"
             className="mt-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-white"
+            disabled={result.compatible_endpoint_ids.length === 0}
             onClick={() => result.signature && onSignature(result.signature)}
           >
             Use this signature

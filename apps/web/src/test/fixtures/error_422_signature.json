@@ -1,5 +1,6 @@
 {
   "error": "invalid_signature",
   "detail": "signature missing 1 of 978 schema genes (first few: ['DDR1'])",
-  "endpoint_id": null
+  "endpoint_id": null,
+  "request_id": "test-request-422"
 }

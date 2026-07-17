@@ -4,21 +4,26 @@ import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import App from "../App";
 import { Analyze } from "../pages/Analyze";
 import { Explore } from "../pages/Explore";
+import { Landing } from "../pages/Landing";
 import { ModelEvidence } from "../pages/ModelEvidence";
 import { ModelLibrary } from "../pages/ModelLibrary";
+import { Projects } from "../pages/Projects";
 
-// Render the real App shell (so the honesty banner/footer are present) at a given route.
+// Mirror main.tsx: the landing renders full-bleed at "/", and the workspace screens render inside
+// the App shell (sidebar + topbar) via a pathless layout route.
 export function renderApp(initialPath: string) {
   const router = createMemoryRouter(
     [
+      { path: "/", element: <Landing /> },
       {
-        path: "/",
         element: <App />,
         children: [
-          { index: true, element: <Analyze /> },
-          { path: "library", element: <ModelLibrary /> },
-          { path: "library/:id", element: <ModelEvidence /> },
-          { path: "explore", element: <Explore /> },
+          { path: "/analyze", element: <Analyze /> },
+          { path: "/analyze/:analysisId", element: <Analyze /> },
+          { path: "/projects", element: <Projects /> },
+          { path: "/library", element: <ModelLibrary /> },
+          { path: "/library/:id", element: <ModelEvidence /> },
+          { path: "/explore", element: <Explore /> },
         ],
       },
     ],

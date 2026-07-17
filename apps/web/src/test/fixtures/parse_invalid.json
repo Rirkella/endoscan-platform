@@ -1,5 +1,6 @@
 {
   "error": "invalid_signature",
   "detail": "signature missing 3 of 978 schema genes (first few: ['WDTC1', 'PLSCR3', 'NPEPL1'])",
-  "endpoint_id": null
+  "endpoint_id": null,
+  "request_id": "test-request-parse"
 }

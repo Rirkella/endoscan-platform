@@ -20,7 +20,8 @@ from endoscan_core.registry import find_repo_root, list_endpoints
 
 from .deps import get_cached_model
 from .errors import register_exception_handlers
-from .routes import analyze, endpoints, explore, health, inference, interpret, signatures
+from .middleware import RequestContextMiddleware
+from .routes import analyze, catalogue, endpoints, explore, health, inference, interpret, signatures
 
 API_TITLE = "EndoScan Serving API"
 API_DESCRIPTION = (
@@ -58,17 +59,59 @@ def _cors_origins() -> list[str]:
     return list(DEFAULT_CORS_ORIGINS)
 
 
-def _warm_models(repo_root: Path) -> list[str]:
-    """Load each registered endpoint's committed binary; return the ids that loaded."""
+def _estimator(model):
+    return model.steps[-1][1] if hasattr(model, "steps") and model.steps else model
+
+
+def _capability(entry, model) -> dict:
+    declared = entry.explanation
+    if declared is None:
+        return {
+            "declared_method": None,
+            "available": False,
+            "missing_dependencies": [],
+            "reason": "No explanation capability is declared for this endpoint.",
+        }
+    missing = [
+        name for name in declared.required_dependencies if importlib.util.find_spec(name) is None
+    ]
+    estimator = _estimator(model)
+    method_supported = (
+        hasattr(estimator, "feature_importances_")
+        if declared.method == "tree_shap"
+        else hasattr(estimator, "coef_")
+    )
+    reason = None
+    if missing:
+        reason = f"Missing runtime dependencies: {', '.join(missing)}."
+    elif not method_supported:
+        reason = f"The loaded model does not support declared method {declared.method}."
+    return {
+        "declared_method": declared.method,
+        "available": not missing and method_supported,
+        "missing_dependencies": missing,
+        "reason": reason,
+    }
+
+
+def _warm_models(repo_root: Path) -> tuple[list[str], dict[str, dict]]:
+    """Load models and validate each declared explanation capability at startup."""
     loaded: list[str] = []
+    capabilities: dict[str, dict] = {}
     for entry in list_endpoints(repo_root=repo_root):
         try:
-            get_cached_model(entry.endpoint_id, repo_root)
+            model = get_cached_model(entry.endpoint_id, repo_root)
             loaded.append(entry.endpoint_id)
+            capabilities[entry.endpoint_id] = _capability(entry, model)
         except ModelArtifactUnavailableError:
-            # Defensive: binaries are committed, so this is not expected. Skip, don't crash.
+            capabilities[entry.endpoint_id] = {
+                "declared_method": entry.explanation.method if entry.explanation else None,
+                "available": False,
+                "missing_dependencies": [],
+                "reason": "The registered model artifact could not be loaded.",
+            }
             continue
-    return loaded
+    return loaded, capabilities
 
 
 def create_app(repo_root: Path | None = None) -> FastAPI:
@@ -77,9 +120,19 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
 
     app = FastAPI(title=API_TITLE, description=API_DESCRIPTION, version="0.0.0")
     app.state.repo_root = root
-    app.state.explain_available = importlib.util.find_spec("shap") is not None
-    app.state.endpoints_loaded = _warm_models(root)
+    loaded, capabilities = _warm_models(root)
+    app.state.explanation_capabilities = capabilities
+    app.state.explain_available = any(item["available"] for item in capabilities.values())
+    app.state.endpoints_loaded = loaded
     app.state.cors_origins = _cors_origins()
+    ncbi_email = (os.environ.get("NCBI_EMAIL") or "").strip()
+    app.state.pubmed_capability = {
+        "configured": bool(ncbi_email),
+        "available": bool(ncbi_email),
+        "reason": (
+            None if ncbi_email else "NCBI_EMAIL is not configured; PubMed integration is disabled."
+        ),
+    }
 
     # CORS: explicit allow-list only (browser cross-origin fetch fix for the local demo /
     # deployment). Minimal surface — the GET/POST routes + OPTIONS preflight, Content-Type only,
@@ -88,9 +141,11 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=app.state.cors_origins,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "X-Request-ID"],
+        expose_headers=["X-Request-ID"],
         allow_credentials=False,
     )
+    app.add_middleware(RequestContextMiddleware)
 
     register_exception_handlers(app)
     app.include_router(health.router)
@@ -98,6 +153,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.include_router(inference.router)
     app.include_router(signatures.router)
     app.include_router(analyze.router)
+    app.include_router(catalogue.router)
     app.include_router(explore.router)
     app.include_router(interpret.router)
     return app

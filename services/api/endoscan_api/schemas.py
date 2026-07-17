@@ -10,7 +10,9 @@ NOT changed.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Re-exported so routes can reference a single response contract (no duplication).
 from endoscan_core.inference import (
@@ -19,13 +21,27 @@ from endoscan_core.inference import (
     PredictionResult,
 )
 
+from .limits import MAX_ENDPOINT_SELECTION, MAX_GENES
+
 __all__ = [
     "AnalyzeEndpointResult",
     "AnalyzeRequest",
     "AnalyzeResponse",
+    "AnalyzeSummary",
+    "BiologicalPathwayCard",
+    "BiologicalResponseMethodBlock",
+    "BiologicalResponseRequest",
+    "BiologicalResponseResponse",
+    "CatalogueCompound",
+    "CatalogueSearchResponse",
+    "CatalogueSignatureDetail",
+    "CatalogueSignatureSummary",
+    "CatalogueSourceBlock",
     "ContextBlock",
     "ContextVariant",
     "EndpointDetail",
+    "ExplanationCapabilityStatus",
+    "EndpointCompatibility",
     "EndpointSummary",
     "ErrorResponse",
     "ExplainRequest",
@@ -38,8 +54,15 @@ __all__ = [
     "ExploreMapResponse",
     "ExploreNeighbor",
     "ExplorePoint",
+    "ExploreReferenceSignature",
     "HealthResponse",
     "LimitationsBlock",
+    "LiteratureArticle",
+    "LiteraturePathwayInput",
+    "LiteratureProvenance",
+    "LiteratureQueryRecord",
+    "LiteratureRequest",
+    "LiteratureResponse",
     "MetricsSummary",
     "ParsePreview",
     "ParseResult",
@@ -47,8 +70,17 @@ __all__ = [
     "PathwayMethodBlock",
     "PathwaysRequest",
     "PathwaysResponse",
+    "PubMedCapabilityStatus",
     "PredictRequest",
     "PredictionResult",
+]
+
+
+InputValueType = Literal[
+    "differential_zscore",
+    "log2_fold_change",
+    "ranked_statistic",
+    "raw_expression",
 ]
 
 
@@ -63,7 +95,9 @@ class PredictRequest(BaseModel):
     endpoint_id: str = Field(..., description="Registered endpoint id, e.g. 'ER' or 'AR'.")
     signature: dict[str, float] = Field(
         ...,
-        description="Landmark-gene SYMBOL -> value (the 978-gene signature for this endpoint).",
+        min_length=1,
+        max_length=MAX_GENES,
+        description="Gene SYMBOL -> value; requirements come from the selected endpoint schema.",
     )
     allow_extra: bool = Field(
         False, description="Drop genes not in the schema instead of rejecting them."
@@ -73,7 +107,7 @@ class PredictRequest(BaseModel):
 class ExplainRequest(PredictRequest):
     """Same input as predict, plus how many top contributors to return."""
 
-    top_n: int = Field(10, ge=1, le=978, description="Number of top signed gene contributors.")
+    top_n: int = Field(10, ge=1, le=MAX_GENES, description="Number of top contributors.")
 
 
 # --- responses -----------------------------------------------------------------------
@@ -85,6 +119,25 @@ class HealthResponse(BaseModel):
     status: str
     endpoints_loaded: list[str]
     explain_available: bool
+    explanation_capabilities: dict[str, ExplanationCapabilityStatus]
+    pubmed: PubMedCapabilityStatus
+
+
+class PubMedCapabilityStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    configured: bool
+    available: bool
+    reason: str | None = None
+
+
+class ExplanationCapabilityStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    declared_method: str | None
+    available: bool
+    missing_dependencies: list[str] = Field(default_factory=list)
+    reason: str | None = None
 
 
 class EndpointSummary(BaseModel):
@@ -97,6 +150,7 @@ class EndpointSummary(BaseModel):
     status: str
     input_type: str
     frozen: bool
+    explanation: ExplanationCapabilityStatus
 
 
 class MetricsSummary(BaseModel):
@@ -156,6 +210,7 @@ class EndpointDetail(BaseModel):
     status: str
     frozen: bool
     source_refs: list[str]
+    explanation: ExplanationCapabilityStatus
     variants: list[ContextVariant]
 
 
@@ -165,39 +220,53 @@ class ErrorResponse(BaseModel):
     error: str
     detail: str
     endpoint_id: str | None = None
+    request_id: str
 
 
 # --- signature upload / parse --------------------------------------------------------
 
 
 class ParsePreview(BaseModel):
-    """Real (never fabricated) summary of how the uploaded signature aligns to the schema."""
+    """Format-level facts from parsing once, before endpoint-specific compatibility."""
 
     model_config = ConfigDict(extra="forbid")
 
     n_detected: int  # genes found in the upload
-    n_matched: int  # of the schema's genes, how many the upload supplied
-    n_missing: int
-    n_extra: int
-    missing_genes: list[str]  # truncated
-    extra_genes: list[str]  # truncated
     samples: list[str] | None = None  # multi-column CSV: the sample column names
     selected_sample: str | None = None
     needs_sample: bool = False  # multi-column + no sample chosen -> the UI must pick one
 
 
-class ParseResult(BaseModel):
-    """Result of parsing + validating an uploaded signature against an endpoint's schema."""
+class EndpointCompatibility(BaseModel):
+    """Compatibility of one parsed signature with one registered endpoint schema."""
 
     model_config = ConfigDict(extra="forbid")
 
-    aligned: bool
-    format: str
-    schema_endpoint_id: str  # which endpoint's schema it was validated against
+    endpoint_id: str
+    biological_target: str
+    compatible: bool
     n_schema_genes: int
+    n_detected: int
+    n_matched: int
+    n_missing: int
+    n_extra: int
+    missing_genes: list[str]
+    extra_genes: list[str]
+    reason: str | None = None
+
+
+class ParseResult(BaseModel):
+    """Parse once, then report compatibility against every registered endpoint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool
+    format: str
+    input_value_type: InputValueType
     preview: ParsePreview
-    # The aligned {gene: value} in schema order, ready to POST to /analyze. None when the upload
-    # needs a sample choice first (multi-column CSV) — never a fabricated signature.
+    compatibility: list[EndpointCompatibility]
+    compatible_endpoint_ids: list[str]
+    # Parsed mapping, unchanged, so each endpoint can align it to its own feature order.
     signature: dict[str, float] | None = None
 
 
@@ -208,9 +277,26 @@ class AnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     signature: dict[str, float] = Field(
-        ..., description="A transcriptomic signature (gene->value)."
+        ...,
+        min_length=1,
+        max_length=MAX_GENES,
+        description="A transcriptomic signature (gene->value).",
     )
+    input_value_type: InputValueType = "ranked_statistic"
     allow_extra: bool = Field(False, description="Drop genes not in an endpoint's schema.")
+    endpoint_ids: list[str] | None = Field(
+        None,
+        min_length=1,
+        max_length=MAX_ENDPOINT_SELECTION,
+        description="Registered endpoints to run. Omit to run all registered endpoints.",
+    )
+
+    @field_validator("endpoint_ids")
+    @classmethod
+    def _unique_endpoint_ids(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("endpoint_ids must not contain duplicates")
+        return value
 
 
 class AnalyzeEndpointResult(BaseModel):
@@ -221,15 +307,93 @@ class AnalyzeEndpointResult(BaseModel):
 
     endpoint_id: str
     biological_target: str
+    model_version: str
+    source_refs: list[str]
     ok: bool
     result: PredictionResult | None = None
     error: ErrorResponse | None = None
+
+
+class AnalyzeSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requested: int
+    succeeded: int
+    failed: int
+    status: str  # ok | partial | all_failed
 
 
 class AnalyzeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     results: list[AnalyzeEndpointResult]
+    summary: AnalyzeSummary
+
+
+# --- versioned real measured-signature catalogue -------------------------------------
+
+
+class CatalogueSourceBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    accession: str | None = None
+    retrieved_at: str | None = None
+    url: str
+
+
+class CatalogueSignatureSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signature_id: str
+    compound_id: str
+    compound_name: str
+    dataset: str
+    accession: str
+    processing_level: str
+    cell_lines: list[str]
+    dose: str | None = None
+    timepoint: str | None = None
+    aggregation: str
+    n_genes: int
+
+
+class CatalogueCompound(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    compound_id: str
+    preferred_name: str
+    aliases: list[str]
+    pubchem_cid: int | None
+    iupac_name: str | None = None
+    canonical_smiles: str | None = None
+    isomeric_smiles: str | None = None
+    signatures: list[CatalogueSignatureSummary]
+    availability_status: str = "Condition-specific signatures available"
+    availability_reason: str | None = None
+    reference_contexts: list[str] = Field(default_factory=list)
+    source_compound_ids: list[str] = Field(default_factory=list)
+    lincs_perturbagen_ids: list[str] = Field(default_factory=list)
+
+
+class CatalogueSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str
+    catalogue_version: str
+    query: str
+    sources: dict[str, CatalogueSourceBlock]
+    results: list[CatalogueCompound]
+
+
+class CatalogueSignatureDetail(CatalogueSignatureSummary):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str
+    catalogue_version: str
+    provenance: str
+    source_url: str
+    signature: dict[str, float]
 
 
 # --- Explore: the data-space (UMAP) view ---------------------------------------------
@@ -251,6 +415,14 @@ class ExplorePoint(BaseModel):
     x: float
     y: float
     label: str | None = None  # "active" | "inactive" | null (never fabricated)
+    preferred_name: str | None = None
+    pubchem_cid: int | None = None
+    source_dataset: str | None = None
+    experimental_contexts: list[str] = Field(default_factory=list)
+    full_signature_id: str | None = None
+    full_vector_available: bool = True
+    underlying_condition_available: bool = False
+    profile_type: str = "Aggregated reference profile"
 
 
 class ExploreCounts(BaseModel):
@@ -273,6 +445,9 @@ class ExploreManifestSummary(BaseModel):
     domain_metric_k: int
     label_status: str
     source_sha256: str
+    source_key: str = ""
+    point_definition: str = "one measured compound-level signature per canonical InChIKey"
+    aggregation: dict[str, str] = Field(default_factory=dict)
     built_at: str | None = None
 
 
@@ -290,7 +465,10 @@ class ExploreLocateRequest(BaseModel):
 
     context: str = Field(..., description="Endpoint id whose map to place against, e.g. 'ER'.")
     signature: dict[str, float] = Field(
-        ..., description="A transcriptomic signature (gene->value)."
+        ...,
+        min_length=1,
+        max_length=MAX_GENES,
+        description="A transcriptomic signature (gene->value).",
     )
     allow_extra: bool = Field(False, description="Drop genes not in the map's feature set.")
 
@@ -305,6 +483,17 @@ class ExploreNeighbor(BaseModel):
     x: float
     y: float
     label: str | None = None
+    preferred_name: str | None = None
+    pubchem_cid: int | None = None
+    source_dataset: str | None = None
+    experimental_contexts: list[str] = Field(default_factory=list)
+    full_signature_id: str | None = None
+    full_vector_available: bool = True
+    underlying_condition_available: bool = False
+    profile_type: str = "Aggregated reference profile"
+    similarity_category: str
+    similarity_rank: int
+    similarity_percentile: float
 
 
 class ExploreDomain(BaseModel):
@@ -329,10 +518,42 @@ class ExploreLocateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     context: str
-    placement: str  # always "approximate_nearest_neighbor" — never an exact projection
-    approx_xy: dict[str, float]  # centroid of the neighbours' precomputed map coords
+    placement: str  # exact_existing_reference or approximate_nearest_neighbor
+    approx_xy: dict[str, float]  # stored exact coords, or centroid of neighbours' map coords
     neighbors: list[ExploreNeighbor]
     domain: ExploreDomain
+    exact_match: ExploreNeighbor | None = None
+
+
+class ExploreReferenceSignature(BaseModel):
+    """Exact support-matrix row and its explicit aggregate provenance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    context: str
+    compound_id: str
+    preferred_name: str | None = None
+    pubchem_cid: int | None = None
+    endpoint_label: str | None = None
+    profile_type: Literal["Aggregated reference profile"] = "Aggregated reference profile"
+    full_vector_available: Literal[True] = True
+    underlying_condition_available: bool = False
+    underlying_conditions: list[dict] = Field(default_factory=list)
+    value_type: Literal["differential_zscore"] = "differential_zscore"
+    value_type_label: str = "LINCS Level 5 differential z-score"
+    reference_comparison: str
+    source_dataset: str = "LINCS L1000, Level 5"
+    cell_models: list[str] = Field(default_factory=list)
+    aggregation_description: str
+    aggregate_pathway_warning: str
+    feature_names: list[str]
+    signature: dict[str, float]
+    n_genes: int
+    support_row_index: int
+    support_sha256: str
+    source_key: str
+    source_sha256: str
+    provenance: dict
 
 
 # --- Biological pathways (Reactome over-representation for an /explain result) --------
@@ -348,7 +569,10 @@ class PathwaysRequest(BaseModel):
 
     endpoint_id: str = Field(..., description="Registered endpoint id, e.g. 'ER' or 'AR'.")
     signature: dict[str, float] = Field(
-        ..., description="A transcriptomic signature (gene->value)."
+        ...,
+        min_length=1,
+        max_length=MAX_GENES,
+        description="A transcriptomic signature (gene->value).",
     )
     allow_extra: bool = Field(False, description="Drop genes not in the endpoint's schema.")
 
@@ -399,4 +623,150 @@ class PathwaysResponse(BaseModel):
     status: str
     reason: str | None = None
     pathways: list[PathwayCard]
+    exploratory_pathways: list[PathwayCard] = Field(default_factory=list)
     method_block: PathwayMethodBlock | None = None
+
+
+# --- Global biological response (full signed signature; endpoint independent) --------
+
+
+class BiologicalResponseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signature: dict[str, float] = Field(..., min_length=1, max_length=MAX_GENES)
+    input_value_type: InputValueType
+
+
+class BiologicalPathwayCard(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pathway_id: str
+    name: str
+    direction: Literal["increased", "decreased"]
+    enrichment_statistic: float
+    p_value: float
+    q_value: float
+    leading_edge_genes: list[str]
+    pathway_size_in_universe: int
+    statistically_supported: bool
+
+
+class BiologicalResponseMethodBlock(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    method: str
+    method_version: str
+    ranking_statistic: str
+    input_value_type: InputValueType
+    universe_size: int
+    pathways_tested: int
+    correction: str
+    min_gene_set_size: int
+    max_gene_set_size: int
+    leading_edge_rule: str
+    reactome: dict | None = None
+
+
+class BiologicalResponseResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ok", "empty", "unavailable", "unsupported_input"]
+    reason: str | None = None
+    input_value_type: InputValueType
+    increased_pathways: list[BiologicalPathwayCard]
+    decreased_pathways: list[BiologicalPathwayCard]
+    tested_gene_universe: list[str]
+    method_block: BiologicalResponseMethodBlock | None = None
+
+
+# --- Supporting literature (official NCBI PubMed E-utilities) ------------------------
+
+
+class LiteraturePathwayInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pathway_id: str = Field(..., min_length=1, max_length=80)
+    name: str = Field(..., min_length=1, max_length=240)
+    genes: list[str] = Field(default_factory=list, max_length=20)
+
+
+class LiteratureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: str = Field(..., min_length=1, max_length=64)
+    genes: list[str] = Field(default_factory=list, max_length=30)
+    response_genes: list[str] = Field(default_factory=list, max_length=30)
+    pathways: list[LiteraturePathwayInput] = Field(default_factory=list, max_length=10)
+    compound: str | None = Field(default=None, max_length=240)
+    context: str | None = Field(default=None, max_length=240)
+    species: str = Field(default="Homo sapiens", min_length=2, max_length=120)
+    result_limit: int = Field(default=8, ge=1, le=20)
+
+    @field_validator("genes", "response_genes")
+    @classmethod
+    def _clean_genes(cls, genes: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for gene in genes:
+            value = gene.strip()
+            if not value or len(value) > 40:
+                raise ValueError("gene symbols must contain 1 to 40 characters")
+            if value not in cleaned:
+                cleaned.append(value)
+        return cleaned
+
+
+class LiteratureQueryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: str
+    query: str
+    matched_genes: list[str]
+    matched_pathways: list[str]
+    pmids: list[str]
+
+
+class LiteratureArticle(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pmid: str
+    title: str
+    authors: list[str]
+    journal: str | None = None
+    year: str | None = None
+    abstract_excerpt: str | None = None
+    matched_genes: list[str]
+    matched_pathways: list[str]
+    evidence_category: str
+    displayed_relationship: str
+    matched_title_terms: list[str]
+    matched_abstract_terms: list[str]
+    endpoint_concept_used: str
+    ranking_reason: str
+    relevance_reason: str
+    pubmed_url: str
+
+
+class LiteratureProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    database: str
+    eutils_base_url: str
+    retrieved_at: str
+    tool: str
+    email_configured: bool
+    api_key_used: bool
+    rate_limit_per_second: int
+    cache_hit: bool
+
+
+class LiteratureResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    endpoint_id: str
+    endpoint_name: str
+    status: str  # ok | empty | unavailable | rate_limited | timeout
+    reason: str | None = None
+    articles: list[LiteratureArticle]
+    queries: list[LiteratureQueryRecord]
+    provenance: LiteratureProvenance

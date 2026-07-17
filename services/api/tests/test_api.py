@@ -8,8 +8,6 @@ clean error mapping.
 
 from __future__ import annotations
 
-import pytest
-
 from endoscan_api.schemas import EndpointDetail
 
 # AR's four CI-demotion reasons and ER's three — the honest evidence-based rule output.
@@ -93,7 +91,7 @@ def test_predict_returns_real_prediction_from_committed_model(
     r = client.post("/predict", json={"endpoint_id": "AR", "signature": full_signature("AR")})
     assert r.status_code == 200
     body = r.json()
-    assert 0.0 <= body["probability"] <= 1.0
+    assert 0.0 <= body["score"] <= 1.0
     assert isinstance(body["call"], bool)
     assert body["threshold"] is not None
     assert body["limitations"]["is_experimental"] is True  # honesty rides on every prediction
@@ -124,8 +122,7 @@ def test_malformed_body_returns_422(client) -> None:
 
 # 9 -----------------------------------------------------------------------------------
 def test_explain_tree_endpoint_uses_tree_shap(client, full_signature) -> None:
-    # ER is random_forest -> TreeSHAP. (/explain is a clean 503 if shap is absent.)
-    pytest.importorskip("shap")
+    # ER is random_forest -> TreeSHAP. shap is a serving-runtime dependency.
     r = client.post(
         "/explain", json={"endpoint_id": "ER", "signature": full_signature("ER"), "top_n": 5}
     )
@@ -180,3 +177,45 @@ def test_health_lists_warmed_endpoints(client) -> None:
     assert body["status"] == "ok"
     assert {"ER", "AR"} <= set(body["endpoints_loaded"])
     assert isinstance(body["explain_available"], bool)
+    assert body["explanation_capabilities"]["ER"]["declared_method"] == "tree_shap"
+    assert body["explanation_capabilities"]["AR"]["declared_method"] == "linear_coefficient"
+    assert body["explanation_capabilities"]["ER"]["available"] is True
+    assert body["explanation_capabilities"]["AR"]["available"] is True
+    assert body["pubmed"]["configured"] is False
+    assert body["pubmed"]["available"] is False
+
+
+def test_startup_reports_configured_pubmed_capability(repo_root, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from endoscan_api import app as app_module
+
+    monkeypatch.setenv("NCBI_EMAIL", "research-contact@example.org")
+    isolated = TestClient(app_module.create_app(repo_root=repo_root))
+    assert isolated.get("/health").json()["pubmed"] == {
+        "configured": True,
+        "available": True,
+        "reason": None,
+    }
+
+
+def test_startup_marks_missing_declared_dependency_before_analysis(repo_root, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from endoscan_api import app as app_module
+
+    real_find_spec = app_module.importlib.util.find_spec
+    monkeypatch.setattr(
+        app_module.importlib.util,
+        "find_spec",
+        lambda name: None if name == "shap" else real_find_spec(name),
+    )
+    isolated = TestClient(app_module.create_app(repo_root=repo_root))
+    health = isolated.get("/health").json()
+    assert health["explanation_capabilities"]["ER"] == {
+        "declared_method": "tree_shap",
+        "available": False,
+        "missing_dependencies": ["shap"],
+        "reason": "Missing runtime dependencies: shap.",
+    }
+    assert health["explanation_capabilities"]["AR"]["available"] is True

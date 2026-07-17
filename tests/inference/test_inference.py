@@ -108,9 +108,9 @@ def test_prediction_is_deterministic_and_carries_limitations() -> None:
     r1 = predict("FIXTURE_ER", SIG, repo_root=FIXTURE_ROOT)
     r2 = predict("FIXTURE_ER", SIG, repo_root=FIXTURE_ROOT)
     assert isinstance(r1, PredictionResult)
-    assert r1.probability == r2.probability  # deterministic
-    assert 0.0 <= r1.probability <= 1.0
-    assert r1.call == (r1.probability >= r1.threshold)
+    assert r1.score == r2.score  # deterministic
+    assert 0.0 <= r1.score <= 1.0
+    assert r1.call == (r1.score >= r1.threshold)
     assert r1.threshold == 0.5  # metrics.json threshold
     assert r1.limitations.status == "experimental"  # never a bare score
 
@@ -177,7 +177,7 @@ def test_limitations_required_on_every_result_type() -> None:
     # The field is required (no default): constructing without it raises.
     with pytest.raises(ValidationError, match="limitations"):
         PredictionResult(
-            endpoint_id="X", probability=0.5, call=True, threshold=0.5, standardized_input=True
+            endpoint_id="X", score=0.5, call=True, threshold=0.5, standardized_input=True
         )
     with pytest.raises(ValidationError, match="limitations"):
         ExplanationResult(endpoint_id="X", base_value=0.0, n_features=1, top_contributors=[])
@@ -191,6 +191,16 @@ def test_limitations_carry_status_missed_floor_and_scope() -> None:
     assert any("balanced accuracy" in m and "floor" in m for m in lim.missed_criteria)
     assert "ER functional modulation" in lim.claim_scope
     assert lim.prevalence is not None and lim.disclaimer
+
+
+def test_prediction_contract_accepts_legacy_probability_but_serializes_score() -> None:
+    current = predict("FIXTURE_ER", SIG, repo_root=FIXTURE_ROOT)
+    payload = current.model_dump()
+    payload["probability"] = payload.pop("score")
+    migrated = PredictionResult.model_validate(payload)
+    dumped = migrated.model_dump()
+    assert dumped["score"] == current.score
+    assert "probability" not in dumped
 
 
 def test_limitations_degrade_when_fields_absent() -> None:

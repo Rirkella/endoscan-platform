@@ -2,8 +2,8 @@
 
 Read-only: the endpoint is loaded via the M1 registry store and never fitted. The
 input is a transcriptomic signature (validated + aligned to the endpoint's feature
-schema); the output carries the probability, the thresholded call, and the endpoint's
-limitations block — no bare score is ever returned.
+schema); the output carries an uncalibrated model score, the thresholded call, and the
+endpoint's limitations block — no bare score is ever returned.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from ..registry.schema import EndpointEntry
 from ..registry.store import RegistryError, find_repo_root, get_endpoint, load_model
@@ -25,10 +25,17 @@ class ModelArtifactUnavailableError(RegistryError):
 
 
 class PredictionResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     endpoint_id: str
-    probability: float
+    score: float = Field(
+        ...,
+        validation_alias=AliasChoices("score", "probability"),
+        description=(
+            "Uncalibrated endpoint model signal score. This is not a real-world probability. "
+            "The legacy input alias 'probability' is accepted during contract migration."
+        ),
+    )
     call: bool
     threshold: float
     standardized_input: bool
@@ -81,7 +88,7 @@ def predict(
     repo_root: Path | None = None,
     allow_extra: bool = False,
 ) -> PredictionResult | list[PredictionResult]:
-    """Predict P(ER functional modulation) for one signature (or a batch).
+    """Calculate an endpoint model signal score for one signature (or a batch).
 
     Returns a single ``PredictionResult`` for a dict/Series input, or a list for a
     DataFrame batch. Every result carries the endpoint's limitations block.
@@ -96,7 +103,7 @@ def predict(
     results = [
         PredictionResult(
             endpoint_id=entry.endpoint_id,
-            probability=float(p),
+            score=float(p),
             call=bool(p >= threshold),
             threshold=threshold,
             standardized_input=bool(schema.standardized),
