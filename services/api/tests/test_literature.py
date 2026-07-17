@@ -24,9 +24,7 @@ def _request(**updates) -> LiteratureRequest:
     values = {
         "endpoint_id": "ER",
         "genes": ["ESR1", "GREB1"],
-        "pathways": [
-            {"pathway_id": "R-HSA-1", "name": "Estrogen signaling", "genes": ["ESR1"]}
-        ],
+        "pathways": [{"pathway_id": "R-HSA-1", "name": "Estrogen signaling", "genes": ["ESR1"]}],
         "compound": "caffeic acid",
         "context": "MCF7 10 uM 24 h",
         "result_limit": 4,
@@ -113,12 +111,11 @@ def test_query_builder_sanitizes_fields_and_is_bounded() -> None:
     body = _request(
         genes=[f"G{i}" for i in range(20)],
         pathways=[
-            {"pathway_id": f"P{i}", "name": f"Path {i}", "genes": [f"G{i}"]}
-            for i in range(10)
+            {"pathway_id": f"P{i}", "name": f"Path {i}", "genes": [f"G{i}"]} for i in range(10)
         ],
         context='MCF7 [unsafe] "quoted"',
     )
-    specs = build_query_specs(body, 'Estrogen receptor [unsafe]')
+    specs = build_query_specs(body, "Estrogen receptor [unsafe]")
     assert len(specs) <= 10
     assert all("[unsafe]" not in spec.query and '"quoted"' not in spec.query for spec in specs)
 
@@ -205,8 +202,7 @@ def test_gene_endpoint_relationship_cannot_be_tautological() -> None:
 
 def test_esrp1_phgdh_article_requires_esrp1_to_be_surfaced() -> None:
     title = (
-        "The Role of ESRP1 in the Regulation of PHGDH in "
-        "Estrogen Receptor-Positive Breast Cancer"
+        "The Role of ESRP1 in the Regulation of PHGDH in Estrogen Receptor-Positive Breast Cancer"
     )
     assert _article_from_title(title) is None
     retained = _article_from_title(title, response_genes=["ESRP1"])

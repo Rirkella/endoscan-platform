@@ -189,9 +189,7 @@ def test_parse_malformed_inputs_are_safe_400_with_request_id(client, data) -> No
 def test_parse_multicolumn_requires_explicit_sample(client) -> None:
     rows = "\n".join(f"{gene},0.0,1.0" for gene in SCHEMA_GENES)
     content = "gene,ctrl_24h,dose_24h\n" + rows
-    pending = client.post(
-        "/signatures/parse", data={"format": "csv", "content": content}
-    ).json()
+    pending = client.post("/signatures/parse", data={"format": "csv", "content": content}).json()
     assert pending["ready"] is False
     assert pending["preview"]["needs_sample"] is True
     assert pending["compatibility"] == [] and pending["signature"] is None
@@ -215,9 +213,7 @@ def test_request_body_limit_returns_413_with_request_id(client) -> None:
 
 def test_gene_count_limit_is_enforced_before_endpoint_work(client) -> None:
     content = json.dumps({f"GENE_{index}": 0.0 for index in range(10_001)})
-    response = client.post(
-        "/signatures/parse", data={"format": "json", "content": content}
-    )
+    response = client.post("/signatures/parse", data={"format": "json", "content": content})
     assert response.status_code == 400
     assert "10000 gene limit" in response.json()["detail"]
 
@@ -256,9 +252,7 @@ def test_analyze_per_endpoint_isolation_and_partial_summary(client, monkeypatch)
         return real_predict(endpoint_id, signature, **kwargs)
 
     monkeypatch.setattr(route, "predict", flaky)
-    response = client.post(
-        "/analyze", json={"signature": {gene: 0.0 for gene in SCHEMA_GENES}}
-    )
+    response = client.post("/analyze", json={"signature": {gene: 0.0 for gene in SCHEMA_GENES}})
     body = response.json()
     by_id = {item["endpoint_id"]: item for item in body["results"]}
     assert by_id["ER"]["ok"] is True

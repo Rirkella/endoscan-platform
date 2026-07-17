@@ -74,8 +74,7 @@ def collect_map_inchikeys(repo_root: Path) -> list[str]:
     for path in sorted((repo_root / "models").glob("*/explore/umap.json")):
         document = json.loads(path.read_text(encoding="utf-8"))
         keys.update(
-            str(point["compound_id"]).strip().upper()
-            for point in document.get("points", [])
+            str(point["compound_id"]).strip().upper() for point in document.get("points", [])
         )
     return sorted(keys)
 

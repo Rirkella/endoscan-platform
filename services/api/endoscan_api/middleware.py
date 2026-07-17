@@ -67,16 +67,13 @@ class RequestContextMiddleware:
             await self._too_large(request_id, scope, receive, send_with_id)
 
     @staticmethod
-    async def _too_large(
-        request_id: str, scope: Scope, receive: Receive, send: Send
-    ) -> None:
+    async def _too_large(request_id: str, scope: Scope, receive: Receive, send: Send) -> None:
         response = JSONResponse(
             status_code=413,
             content={
                 "error": "request_too_large",
                 "detail": (
-                    f"Request body exceeds the "
-                    f"{MAX_REQUEST_BYTES // (1024 * 1024)} MB limit."
+                    f"Request body exceeds the {MAX_REQUEST_BYTES // (1024 * 1024)} MB limit."
                 ),
                 "endpoint_id": None,
                 "request_id": request_id,

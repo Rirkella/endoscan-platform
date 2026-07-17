@@ -89,9 +89,7 @@ def test_versioned_reference_identity_artifact_is_verified_and_high_coverage(
 def test_signature_detail_is_exact_committed_measured_payload(
     client: TestClient, repo_root: Path
 ) -> None:
-    response = client.get(
-        "/catalogue/v1/signatures/lincs-gse92742-caffeic-acid-mcf7-a549"
-    )
+    response = client.get("/catalogue/v1/signatures/lincs-gse92742-caffeic-acid-mcf7-a549")
     assert response.status_code == 200
     body = response.json()
     source = json.loads(
@@ -120,9 +118,7 @@ def test_query_and_limit_constraints_are_enforced(client: TestClient) -> None:
     assert client.get("/catalogue/v1/compounds", params={"query": "x"}).status_code == 422
     assert client.get("/catalogue/v1/compounds", params={"query": " x"}).status_code == 422
     assert (
-        client.get(
-            "/catalogue/v1/compounds", params={"query": "caffeic", "limit": 21}
-        ).status_code
+        client.get("/catalogue/v1/compounds", params={"query": "caffeic", "limit": 21}).status_code
         == 422
     )
 
@@ -134,9 +130,7 @@ def test_escaped_signature_path_returns_safe_503(tmp_path: Path, repo_root: Path
     )
     catalogue_dest = tmp_path / "data/catalogue/v1"
     catalogue_dest.mkdir(parents=True)
-    doc = json.loads(
-        (repo_root / "data/catalogue/v1/catalogue.json").read_text(encoding="utf-8")
-    )
+    doc = json.loads((repo_root / "data/catalogue/v1/catalogue.json").read_text(encoding="utf-8"))
     doc["compounds"][0]["signatures"][0]["signature_path"] = "data/catalogue/v1/catalogue.json"
     (catalogue_dest / "catalogue.json").write_text(json.dumps(doc), encoding="utf-8")
     signature_dest = tmp_path / "apps/web/src/demo-signatures"

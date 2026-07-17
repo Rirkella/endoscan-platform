@@ -249,9 +249,7 @@ def unified_identity_index(repo_root: Path) -> dict[str, CatalogueCompound]:
                 isomeric_smiles=item.isomeric_smiles,
                 signatures=linked.signatures if linked else [],
                 availability_status=(
-                    _availability(reference_contexts, linked)
-                    if resolved
-                    else "Identity unresolved"
+                    _availability(reference_contexts, linked) if resolved else "Identity unresolved"
                 ),
                 availability_reason=(
                     None

@@ -105,9 +105,9 @@ def _endpoint_clause(concept: EndpointLiteratureConcept) -> str:
 
 def _species_clause(species: str) -> str:
     if species.casefold() == "homo sapiens":
-        return "(humans[MeSH Terms] OR \"Homo sapiens\"[Title/Abstract])"
+        return '(humans[MeSH Terms] OR "Homo sapiens"[Title/Abstract])'
     cleaned = _safe_text(species)
-    return f'(\"{cleaned}\"[Title/Abstract] OR \"{cleaned}\"[MeSH Terms])'
+    return f'("{cleaned}"[Title/Abstract] OR "{cleaned}"[MeSH Terms])'
 
 
 def build_query_specs(
@@ -447,9 +447,7 @@ class LiteratureService:
 
 def _with_cache_hit(response: LiteratureResponse) -> LiteratureResponse:
     return response.model_copy(
-        update={
-            "provenance": response.provenance.model_copy(update={"cache_hit": True})
-        }
+        update={"provenance": response.provenance.model_copy(update={"cache_hit": True})}
     )
 
 
@@ -458,9 +456,7 @@ def _parse_summaries(raw: bytes) -> dict[str, dict]:
         payload = json.loads(raw)
         result = payload["result"]
         return {
-            str(pmid): result[str(pmid)]
-            for pmid in result.get("uids", [])
-            if str(pmid) in result
+            str(pmid): result[str(pmid)] for pmid in result.get("uids", []) if str(pmid) in result
         }
     except (KeyError, TypeError, ValueError) as exc:
         raise LiteratureUnavailableError("NCBI ESummary returned an invalid response") from exc
@@ -558,9 +554,7 @@ def _article(
             left = genes[0]
             # ESR1 can be both a displayed gene and an endpoint search synonym. It cannot justify
             # a tautological ESR1 ↔ ESR1 edge; require a distinct endpoint expression.
-            right = [
-                term for term in concept.search_terms if term.casefold() != left.casefold()
-            ]
+            right = [term for term in concept.search_terms if term.casefold() != left.casefold()]
         elif category == "gene_pathway" and genes and pathways:
             left, right = genes[0], pathways
         elif category == "pathway_endpoint" and pathways:
@@ -637,8 +631,7 @@ def _article(
         matched_abstract_terms=abstract_terms,
         endpoint_concept_used=endpoint_used,
         ranking_reason=(
-            f"{score}: relationship matched in "
-            f"{'title' if score >= 80 else 'abstract sentence'}"
+            f"{score}: relationship matched in {'title' if score >= 80 else 'abstract sentence'}"
         ),
         relevance_reason=reason,
         pubmed_url=f"{PUBMED_URL}/{pmid}/",

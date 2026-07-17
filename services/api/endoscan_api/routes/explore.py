@@ -222,8 +222,7 @@ def explore_reference_signature(
     umap_doc, manifest, row, row_index = load_reference_row(repo_root, context, compound_id)
     feature_names = [str(value) for value in manifest["feature_names"]]
     signature = {
-        gene: float(value)
-        for gene, value in zip(feature_names, row.tolist(), strict=True)
+        gene: float(value) for gene, value in zip(feature_names, row.tolist(), strict=True)
     }
     point = next(
         (item for item in umap_doc.get("points", []) if item.get("compound_id") == compound_id),

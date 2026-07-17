@@ -85,9 +85,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(CatalogueNotFoundError)
-    async def _catalogue_not_found(
-        request: Request, exc: CatalogueNotFoundError
-    ) -> JSONResponse:
+    async def _catalogue_not_found(request: Request, exc: CatalogueNotFoundError) -> JSONResponse:
         logger.info("catalogue item not found request_id=%s error=%s", request_id(request), exc)
         return JSONResponse(
             status_code=404,
@@ -99,9 +97,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(CatalogueCorruptError)
-    async def _catalogue_unavailable(
-        request: Request, exc: CatalogueCorruptError
-    ) -> JSONResponse:
+    async def _catalogue_unavailable(request: Request, exc: CatalogueCorruptError) -> JSONResponse:
         logger.error("catalogue unavailable request_id=%s error=%s", request_id(request), exc)
         return JSONResponse(
             status_code=503,
@@ -122,9 +118,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ExploreArtifactCorruptError)
-    async def _explore_corrupt(
-        request: Request, exc: ExploreArtifactCorruptError
-    ) -> JSONResponse:
+    async def _explore_corrupt(request: Request, exc: ExploreArtifactCorruptError) -> JSONResponse:
         logger.error("explore artifact corrupt request_id=%s error=%s", request_id(request), exc)
         return JSONResponse(
             status_code=503,
@@ -136,9 +130,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ExploreContextError)
-    async def _invalid_explore_context(
-        request: Request, exc: ExploreContextError
-    ) -> JSONResponse:
+    async def _invalid_explore_context(request: Request, exc: ExploreContextError) -> JSONResponse:
         logger.info("invalid explore context request_id=%s error=%s", request_id(request), exc)
         return JSONResponse(
             status_code=422,
@@ -169,7 +161,5 @@ def register_exception_handlers(app: FastAPI) -> None:
         logger.exception("unexpected API error request_id=%s", request_id(request), exc_info=exc)
         return JSONResponse(
             status_code=500,
-            content=error_payload(
-                request, "internal_error", "The request could not be completed."
-            ),
+            content=error_payload(request, "internal_error", "The request could not be completed."),
         )

@@ -127,6 +127,7 @@ def run_preranked_enrichment(
 
     def sort_key(item: RankedPathwayResult) -> tuple[float, float, str]:
         return (item.q_value, -abs(item.enrichment_statistic), item.pathway_id)
+
     increased = sorted((item for item in results if item.direction == "increased"), key=sort_key)
     decreased = sorted((item for item in results if item.direction == "decreased"), key=sort_key)
     return RankedEnrichmentOutcome(

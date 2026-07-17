@@ -73,9 +73,7 @@ def _capability(entry, model) -> dict:
             "reason": "No explanation capability is declared for this endpoint.",
         }
     missing = [
-        name
-        for name in declared.required_dependencies
-        if importlib.util.find_spec(name) is None
+        name for name in declared.required_dependencies if importlib.util.find_spec(name) is None
     ]
     estimator = _estimator(model)
     method_supported = (
@@ -132,9 +130,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         "configured": bool(ncbi_email),
         "available": bool(ncbi_email),
         "reason": (
-            None
-            if ncbi_email
-            else "NCBI_EMAIL is not configured; PubMed integration is disabled."
+            None if ncbi_email else "NCBI_EMAIL is not configured; PubMed integration is disabled."
         ),
     }
 

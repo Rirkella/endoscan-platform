@@ -48,9 +48,7 @@ def post_predict(
 
 
 @router.post("/explain", response_model=ExplanationResult)
-def post_explain(
-    body: ExplainRequest, request: Request, repo_root: Path = Depends(get_repo_root)
-):
+def post_explain(body: ExplainRequest, request: Request, repo_root: Path = Depends(get_repo_root)):
     """Top-N signed gene contributors + limitations; attributor auto-selected by model type.
 
     Core ``explain`` picks the method: tree models -> TreeSHAP (``method="tree_shap"``),
