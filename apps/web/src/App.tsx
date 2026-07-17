@@ -20,6 +20,7 @@ const NAV: NavItem[] = [
   { to: "/library", label: "Model library" },
   { to: "/explore", label: "Reference data" },
   { to: "/projects", label: "Projects" },
+  { to: "/admin/endpoints", label: "Agent builds" },
 ];
 
 function currentLabel(pathname: string): string {

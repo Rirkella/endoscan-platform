@@ -121,6 +121,10 @@ class HealthResponse(BaseModel):
     explain_available: bool
     explanation_capabilities: dict[str, ExplanationCapabilityStatus]
     pubmed: PubMedCapabilityStatus
+    workflow_database: dict[str, str | bool]
+    artifact_store: dict[str, str | bool | int]
+    agent_provider: dict[str, object]
+    admin: dict[str, object]
 
 
 class PubMedCapabilityStatus(BaseModel):

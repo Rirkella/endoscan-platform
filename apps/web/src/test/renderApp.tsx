@@ -3,6 +3,8 @@ import { RouterProvider, createMemoryRouter } from "react-router-dom";
 
 import App from "../App";
 import { Analyze } from "../pages/Analyze";
+import { AdminEndpointDetail } from "../pages/AdminEndpointDetail";
+import { AdminEndpoints } from "../pages/AdminEndpoints";
 import { Explore } from "../pages/Explore";
 import { Landing } from "../pages/Landing";
 import { ModelEvidence } from "../pages/ModelEvidence";
@@ -24,6 +26,8 @@ export function renderApp(initialPath: string) {
           { path: "/library", element: <ModelLibrary /> },
           { path: "/library/:id", element: <ModelEvidence /> },
           { path: "/explore", element: <Explore /> },
+          { path: "/admin/endpoints", element: <AdminEndpoints /> },
+          { path: "/admin/endpoints/:buildId", element: <AdminEndpointDetail /> },
         ],
       },
     ],

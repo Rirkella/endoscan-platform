@@ -5,6 +5,12 @@
 
 import type {
   AnalyzeResponse,
+  AdminAgentRun,
+  AdminApproval,
+  AdminArtifact,
+  AdminBuild,
+  AdminTimelineEvent,
+  AdminWorkflowError,
   ApiError,
   BiologicalResponse,
   CatalogueSearchResponse,
@@ -84,6 +90,36 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
   const res = await fetch(url(path), {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw await toError(res);
+  return (await res.json()) as T;
+}
+
+const ADMIN_HEADERS = { "X-EndoScan-Admin": "local-development" };
+
+function commandKey(prefix: string): string {
+  const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  return `${prefix}-${suffix}`;
+}
+
+async function adminGet<T>(path: string): Promise<T> {
+  const res = await fetch(url(path), {
+    headers: { accept: "application/json", ...ADMIN_HEADERS },
+  });
+  if (!res.ok) throw await toError(res);
+  return (await res.json()) as T;
+}
+
+async function adminPost<T>(path: string, payload: unknown, prefix: string): Promise<T> {
+  const res = await fetch(url(path), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "Idempotency-Key": commandKey(prefix),
+      ...ADMIN_HEADERS,
+    },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw await toError(res);
@@ -180,4 +216,59 @@ export const api = {
     if (!res.ok) throw await toError(res);
     return (await res.json()) as ParseResult;
   },
+
+  adminListBuilds: () => adminGet<AdminBuild[]>("/admin/endpoint-builds"),
+  adminGetBuild: (id: string) =>
+    adminGet<AdminBuild>(`/admin/endpoint-builds/${encodeURIComponent(id)}`),
+  adminCreateBuild: (payload: {
+    endpoint_name: string;
+    endpoint_slug: string;
+    biological_goal: string;
+    created_by: string;
+  }) => adminPost<AdminBuild>("/admin/endpoint-builds", payload, "create-build"),
+  adminCommand: (
+    id: string,
+    action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure",
+    version: number,
+  ) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/${action}`,
+      { expected_version: version, actor: "local-admin" },
+      action,
+    ),
+  adminTimeline: (id: string) =>
+    adminGet<AdminTimelineEvent[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/timeline`),
+  adminArtifacts: (id: string) =>
+    adminGet<AdminArtifact[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/artifacts`),
+  adminArtifactPreview: (id: string) =>
+    adminGet<{ artifact: AdminArtifact; content: unknown }>(
+      `/admin/artifacts/${encodeURIComponent(id)}/preview`,
+    ),
+  adminApprovals: (id: string) =>
+    adminGet<AdminApproval[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/approvals`),
+  adminDecideApproval: (
+    approval: AdminApproval,
+    buildVersion: number,
+    decision: "approve" | "reject" | "request_revision" | "choose_alternative",
+    reviewerComment: string,
+    selectedAlternativeId?: string,
+  ) =>
+    adminPost<AdminBuild>(
+      `/admin/approvals/${encodeURIComponent(approval.id)}/decisions`,
+      {
+        decision,
+        reviewer_id: "local-admin",
+        reviewer_comment: reviewerComment,
+        selected_alternative_id: selectedAlternativeId ?? null,
+        expected_version: buildVersion,
+        artifact_hashes: approval.request.artifact_hashes,
+      },
+      `approval-${decision}`,
+    ),
+  adminAgentRuns: (id: string) =>
+    adminGet<AdminAgentRun[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/agent-runs`),
+  adminAgentRun: (id: string) =>
+    adminGet<AdminAgentRun>(`/admin/agent-runs/${encodeURIComponent(id)}`),
+  adminErrors: (id: string) =>
+    adminGet<AdminWorkflowError[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/errors`),
 };
