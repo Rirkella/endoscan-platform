@@ -15,6 +15,8 @@ This branch turns the existing EndoScan application into a coherent internal res
 - Endpoint scores are model signals, not calibrated real-world probabilities. Current committed endpoint coverage is limited and applicability-domain information must be read with each result.
 - Analysis requires a measured transcriptomic signature. Catalogue identities and reference-map points only retrieve committed measured profiles; molecule identity is never converted directly into risk.
 - Reference profiles aggregate selected LINCS MCF7 and A549 conditions. Underlying per-condition details are not available in the committed aggregate, and opposing cell-specific responses may be attenuated.
-- Supporting literature is live, bounded PubMed retrieval rather than a persistent literature index. It requires `NCBI_EMAIL`, may be unavailable or rate-limited, and does not establish causality.
+- Some reference identities remain unresolved and are displayed by verified InChIKey instead of a preferred name.
+- Supporting literature is live, bounded PubMed retrieval rather than a persistent literature index. It requires `NCBI_EMAIL`, may be unavailable or rate-limited, and does not establish causality. Persistent background literature indexing is planned separately and is not part of this merge.
 - Guest analyses are scoped to the current browser session and stored in IndexedDB with an in-memory fallback. There are no accounts, server synchronization, collaboration, or cross-device recovery.
+- The full Python suite previously exceeded the available execution-time limit and was not rerun as a single command. The 111-test targeted backend matrix above covers the changed serving, inference, explore, identity, and literature paths.
 - The production build currently warns about a 538 kB minified JavaScript chunk, and the landing image is approximately 1.9 MB; code splitting and image optimization remain performance follow-ups.
