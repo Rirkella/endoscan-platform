@@ -584,16 +584,10 @@ button, input, select { color: inherit; font: inherit; letter-spacing: 0; }
   .toast { right: 14px; bottom: 14px; left: 14px; }
 }
 
-/* --- Production adjustments (not in the prototype): honesty chips for planned/mock areas, and a
-   static (non-interactive) Projects row since real history is not yet persisted. --- */
-.planned-badge, .mock-badge { display: inline-flex; align-items: center; margin-left: 9px; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 800; text-transform: uppercase; vertical-align: middle; letter-spacing: .02em; }
+/* --- Production adjustment: honesty chip for capabilities that are explicitly planned. --- */
+.planned-badge { display: inline-flex; align-items: center; margin-left: 9px; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: 800; text-transform: uppercase; vertical-align: middle; letter-spacing: .02em; }
 .planned-badge { color: #776126; border: 1px solid #ddcc93; background: #fff8e4; }
-.mock-badge { color: #55766c; border: 1px solid #c9d9d3; background: #f2f8f4; }
-h1 .planned-badge, h1 .mock-badge, h2 .planned-badge, h2 .mock-badge, h3 .planned-badge, h3 .mock-badge { font-size: 11px; }
-.projects-table > .projects-row-static { display: grid; grid-template-columns: 1.1fr 1.4fr 1.1fr 1fr .8fr; gap: 12px; align-items: center; min-height: 54px; padding: 8px 14px; border-top: 1px solid #e0e6e4; background: #fff; font-size: 9px; }
-.projects-table > .projects-row-static strong, .projects-table > .projects-row-static small { display: block; }
-.projects-table > .projects-row-static small { margin-top: 3px; color: #788689; font-size: 8px; }
-.project-toolbar input:disabled, .project-toolbar select:disabled { color: #9aa7a7; background: #f4f6f4; cursor: not-allowed; }
+h1 .planned-badge, h2 .planned-badge, h3 .planned-badge { font-size: 11px; }
 
 /* Wrap reused Tailwind honesty components (limitations, gene contributions, pathways, scatter)
    inside a prototype evidence card without fighting their own styling. */

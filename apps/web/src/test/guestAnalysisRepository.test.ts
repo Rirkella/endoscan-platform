@@ -57,6 +57,30 @@ describe("guest analysis repository", () => {
     expect(await guestAnalysisRepository.list()).toEqual([]);
   });
 
+  it("deduplicates concurrent and repeated automatic imports from one navigation", async () => {
+    const input = prepared("Exact reference import");
+    const endpoints = endpointsFixture as EndpointSummary[];
+    const importKey = "navigation-1:reference:ER:ZFMITUMMTDLWHR-UHFFFAOYSA-N";
+
+    const [first, second] = await Promise.all([
+      guestAnalysisRepository.create(input, endpoints, importKey),
+      guestAnalysisRepository.create(input, endpoints, importKey),
+    ]);
+    const repeated = await guestAnalysisRepository.create(input, endpoints, importKey);
+
+    expect(second.id).toBe(first.id);
+    expect(repeated.id).toBe(first.id);
+    expect(await guestAnalysisRepository.list()).toHaveLength(1);
+
+    const newNavigation = await guestAnalysisRepository.create(
+      input,
+      endpoints,
+      "navigation-2:reference:ER:ZFMITUMMTDLWHR-UHFFFAOYSA-N",
+    );
+    expect(newNavigation.id).not.toBe(first.id);
+    expect(await guestAnalysisRepository.list()).toHaveLength(2);
+  });
+
   it("migrates a supported older record and skips corrupt or future records", async () => {
     const record = await guestAnalysisRepository.create(prepared(), endpointsFixture as EndpointSummary[]);
     guestAnalysisRepository.__resetForTests();

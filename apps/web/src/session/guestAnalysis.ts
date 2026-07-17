@@ -197,6 +197,8 @@ function migrateRecord(value: unknown): GuestAnalysisRecord | null {
 
 class GuestAnalysisRepository {
   private readonly memory = new Map<string, GuestAnalysisRecord>();
+  private readonly pendingCreates = new Map<string, Promise<GuestAnalysisRecord>>();
+  private readonly importedRecordIds = new Map<string, string>();
   private dbPromise: Promise<IDBDatabase | null> | null = null;
   private durable = true;
 
@@ -204,7 +206,21 @@ class GuestAnalysisRepository {
     return this.durable;
   }
 
-  create(input: PreparedAnalysisInput, endpoints: EndpointSummary[]): Promise<GuestAnalysisRecord> {
+  async create(
+    input: PreparedAnalysisInput,
+    endpoints: EndpointSummary[],
+    importKey?: string,
+  ): Promise<GuestAnalysisRecord> {
+    if (importKey) {
+      const pending = this.pendingCreates.get(importKey);
+      if (pending) return pending;
+      const importedId = this.importedRecordIds.get(importKey);
+      if (importedId) {
+        const imported = await this.get(importedId);
+        if (imported) return imported;
+        this.importedRecordIds.delete(importKey);
+      }
+    }
     const now = new Date().toISOString();
     const record: GuestAnalysisRecord = {
       id: randomId("analysis"),
@@ -237,7 +253,16 @@ class GuestAnalysisRepository {
       application_version: APPLICATION_VERSION,
       errors_by_capability: {},
     };
-    return this.put(record);
+    const saving = this.put(record)
+      .then((saved) => {
+        if (importKey) this.importedRecordIds.set(importKey, saved.id);
+        return saved;
+      })
+      .finally(() => {
+        if (importKey) this.pendingCreates.delete(importKey);
+      });
+    if (importKey) this.pendingCreates.set(importKey, saving);
+    return saving;
   }
 
   async update(id: string, patch: Partial<GuestAnalysisRecord>): Promise<GuestAnalysisRecord> {
@@ -335,6 +360,8 @@ class GuestAnalysisRepository {
 
   __resetForTests(): void {
     this.memory.clear();
+    this.pendingCreates.clear();
+    this.importedRecordIds.clear();
     this.dbPromise = null;
     this.durable = true;
   }
