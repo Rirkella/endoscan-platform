@@ -5,6 +5,7 @@ This branch turns the existing EndoScan application into a coherent internal res
 ## Validation
 
 - Backend: 111 targeted tests pass across startup/health, parsing and analysis, explanations, biological response, pathways, UMAP/locate and exact reference retrieval, catalogue, PubMed failure/rate/cache behavior, inference, and affected explore/identity jobs.
+- Full Linux CI: all 398 Python tests pass, together with Ruff lint and format checks.
 - Frontend: all 81 Vitest tests pass; TypeScript typecheck and the Vite production build pass.
 - Shared-browser smoke: Caffeic Acid, Closantel, and an InChIKey-only exact reference profile complete against the real local stack. Back/Projects restore cached results without repeating model or literature requests; console errors and HTTP 500 responses are zero.
 - `main` synchronization: remote `main` (`86e28e5`) is the branch merge base; the branch is 14 commits ahead and 0 behind before this note.
@@ -18,5 +19,5 @@ This branch turns the existing EndoScan application into a coherent internal res
 - Some reference identities remain unresolved and are displayed by verified InChIKey instead of a preferred name.
 - Supporting literature is live, bounded PubMed retrieval rather than a persistent literature index. It requires `NCBI_EMAIL`, may be unavailable or rate-limited, and does not establish causality. Persistent background literature indexing is planned separately and is not part of this merge.
 - Guest analyses are scoped to the current browser session and stored in IndexedDB with an in-memory fallback. There are no accounts, server synchronization, collaboration, or cross-device recovery.
-- The full Python suite previously exceeded the available execution-time limit and was not rerun as a single command. The 111-test targeted backend matrix above covers the changed serving, inference, explore, identity, and literature paths.
+- A local full-suite run exceeded the five-minute execution window, but the authoritative Linux CI run completed all 398 Python tests in 229.75 seconds. The 111-test targeted backend matrix also covers the changed serving, inference, explore, identity, and literature paths.
 - The production build currently warns about a 538 kB minified JavaScript chunk, and the landing image is approximately 1.9 MB; code splitting and image optimization remain performance follow-ups.
