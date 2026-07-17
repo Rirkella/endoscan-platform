@@ -15,6 +15,8 @@ const expectedResults = [
   "Expected example result: ER and AR above threshold",
 ];
 
+const canonicalText = (content) => content.replaceAll("\r\n", "\n");
+
 for (const [index, compound] of catalogue.compounds.entries()) {
   const measured = compound.signatures[0];
   const payload = JSON.parse(readFileSync(resolve(repoRoot, measured.signature_path), "utf8"));
@@ -48,7 +50,7 @@ for (const [index, compound] of catalogue.compounds.entries()) {
     provenance: payload.provenance,
     file_sha256: createHash("sha256").update(content).digest("hex"),
     source_signature_sha256: createHash("sha256")
-      .update(readFileSync(resolve(repoRoot, measured.signature_path)))
+      .update(canonicalText(readFileSync(resolve(repoRoot, measured.signature_path), "utf8")))
       .digest("hex"),
     expected_result: expectedResults[index],
   });

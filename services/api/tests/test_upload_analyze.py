@@ -33,6 +33,10 @@ def full_delimited(delimiter: str, value: float = 0.0) -> str:
     )
 
 
+def canonical_text_bytes(path: Path) -> bytes:
+    return path.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8")
+
+
 @pytest.mark.parametrize(
     ("fmt", "content"),
     [
@@ -84,7 +88,7 @@ def test_all_named_example_files_round_trip_through_multipart(client) -> None:
         source_path = REPO_ROOT / compound["signatures"][0]["signature_path"]
         source = json.loads(source_path.read_text(encoding="utf-8"))
         assert (
-            hashlib.sha256(source_path.read_bytes()).hexdigest()
+            hashlib.sha256(canonical_text_bytes(source_path)).hexdigest()
             == metadata["source_signature_sha256"]
         )
         assert body["signature"] == source["signature"]
