@@ -335,192 +335,536 @@ export function Analyze() {
           {!catalogueLoading && (
             <SourceStep onPrepared={onPrepared} endpointCount={endpointList.length} />
           )}
-    8Ón÷¶‰žËkºwµçe_type: input.inputValueType,
-      experimental_context: input.experimentalContext ?? null,
-      signature: input.signature,
-      parse_result: input.parse,
-      endpoint_compatibility: input.parse.compatibility,
-      prepared_input: input,
-      analysis_result: null,
-      biological_response: null,
-      endpoint_explanations: {},
-      endpoint_pathways: {},
-      supporting_literature: {},
-      reference_placements: {},
-      selected_endpoint: input.parse.compatible_endpoint_ids[0] ?? null,
-      last_viewed_tab: "overview",
-      model_registry_snapshot: endpoints,
-      application_version: APPLICATION_VERSION,
-      errors_by_capability: {},
-    };
-    const saving = this.put(record)
-      .then((saved) => {
-        if (importKey) this.importedRecordIds.set(importKey, saved.id);
-        return saved;
-      })
-      .finally(() => {
-        if (importKey) this.pendingCreates.delete(importKey);
-      });
-    if (importKey) this.pendingCreates.set(importKey, saving);
-    return saving;
-  }
+        </>
+      )}
 
-  async update(id: string, patch: Partial<GuestAnalysisRecord>): Promise<GuestAnalysisRecord> {
-    const existing = await this.get(id);
-    if (!existing) throw new GuestStorageError("The saved analysis no longer exists.");
-    return this.put({ ...existing, ...clone(patch), id, updated_at: new Date().toISOString() });
-  }
+      {step === "validate" && prepared && (
+        <ValidationStep
+          input={prepared}
+          onBack={() => setStep("source")}
+          onRun={onRun}
+        />
+      )}
 
-  async rename(id: string, name: string): Promise<GuestAnalysisRecord> {
-    return this.update(id, { user_defined_name: name.trim() || null });
-  }
+      {step === "running" && prepared && <RunningStep title={prepared.title} />}
 
-  async touch(id: string, state?: { tab?: AnalysisResultTab; endpoint?: string | null }): Promise<GuestAnalysisRecord> {
-    return this.update(id, {
-      last_opened_at: new Date().toISOString(),
-      ...(state?.tab ? { last_viewed_tab: state.tab } : {}),
-      ...(state && "endpoint" in state ? { selected_endpoint: state.endpoint ?? null } : {}),
-    });
-  }
-
-  async get(id: string): Promise<GuestAnalysisRecord | null> {
-    const cached = this.memory.get(id);
-    if (cached) return cached.session_id === getGuestSessionId() ? clone(cached) : null;
-    const db = await this.openDatabase();
-    if (!db) return null;
-    try {
-      const value = await requestResult(db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(id));
-      const record = migrateRecord(value);
-      if (!record || record.session_id !== getGuestSessionId()) return null;
-      this.memory.set(record.id, record);
-      return clone(record);
-    } catch (error) {
-      throw new GuestStorageError("Saved analyses could not be read from this browser.", error);
-    }
-  }
-
-  async list(): Promise<GuestAnalysisRecord[]> {
-    const sessionId = getGuestSessionId();
-    const db = await this.openDatabase();
-    let values: unknown[] = [...this.memory.values()];
-    if (db) {
-      try {
-        values = await requestResult(db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).getAll());
-      } catch (error) {
-        throw new GuestStorageError("Saved analyses could not be listed in this browser.", error);
-      }
-    }
-    const records = values
-      .map(migrateRecord)
-      .filter((item): item is GuestAnalysisRecord => item != null && item.session_id === sessionId)
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-    records.forEach((item) => this.memory.set(item.id, item));
-    return clone(records);
-  }
-
-  async delete(id: string): Promise<void> {
-    this.memory.delete(id);
-    const db = await this.openDatabase();
-    if (db) await transactionDone(db.transaction(STORE_NAME, "readwrite"), (store) => store.delete(id));
-    if (getActiveAnalysisId() === id) setActiveAnalysisId(null);
-    dispatchWorkspaceChanged();
-  }
-
-  async clearCurrentSession(): Promise<void> {
-    const records = await this.list();
-    const db = await this.openDatabase();
-    records.forEach((record) => this.memory.delete(record.id));
-    if (db) {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      records.forEach((record) => tx.objectStore(STORE_NAME).delete(record.id));
-      await transactionComplete(tx);
-    }
-    setActiveAnalysisId(null);
-    dispatchWorkspaceChanged();
-  }
-
-  async put(record: GuestAnalysisRecord): Promise<GuestAnalysisRecord> {
-    const validated = migrateRecord(record);
-    if (!validated) throw new GuestStorageError("The analysis record did not pass runtime validation.");
-    this.memory.set(validated.id, clone(validated));
-    const db = await this.openDatabase();
-    if (db) {
-      try {
-        await transactionDone(db.transaction(STORE_NAME, "readwrite"), (store) => store.put(validated));
-      } catch (error) {
-        this.durable = false;
-        dispatchWorkspaceChanged();
-        console.warn("Guest analysis is continuing with in-memory storage after IndexedDB failed.", error);
-        return clone(validated);
-      }
-    }
-    dispatchWorkspaceChanged();
-    return clone(validated);
-  }
-
-  __resetForTests(): void {
-    this.memory.clear();
-    this.pendingCreates.clear();
-    this.importedRecordIds.clear();
-    this.dbPromise = null;
-    this.durable = true;
-  }
-
-  __seedForTests(value: unknown): void {
-    if (isObject(value) && typeof value.id === "string") {
-      this.memory.set(value.id, value as unknown as GuestAnalysisRecord);
-    }
-  }
-
-  private openDatabase(): Promise<IDBDatabase | null> {
-    if (this.dbPromise) return this.dbPromise;
-    this.dbPromise = new Promise((resolve) => {
-      if (typeof indexedDB === "undefined") {
-        this.durable = false;
-        return resolve(null);
-      }
-      try {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onupgradeneeded = () => {
-          const db = request.result;
-          if (!db.objectStoreNames.contains(STORE_NAME)) {
-            const store = db.createObjectStore(STORE_NAME, { keyPath: "id" });
-            store.createIndex("session_id", "session_id", { unique: false });
-          }
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => { this.durable = false; resolve(null); };
-        request.onblocked = () => { this.durable = false; resolve(null); };
-      } catch {
-        this.durable = false;
-        resolve(null);
-      }
-    });
-    return this.dbPromise;
-  }
+      {step === "result" && prepared && (
+        <ResultWorkspace
+          input={prepared}
+          endpoints={endpointList}
+          signals={analyze.signals}
+          allFailed={analyze.summary?.status === "all_failed"}
+          runError={runError}
+          tab={resultTab}
+          setTab={changeTab}
+          selectedEndpoint={selectedEndpoint}
+          onSelectedEndpoint={changeSelectedEndpoint}
+          record={record}
+          analysisPath={analysisId ? `/analyze/${encodeURIComponent(analysisId)}?tab=${encodeURIComponent(resultTab)}${selectedEndpoint ? `&endpoint=${encodeURIComponent(selectedEndpoint)}` : ""}` : "/analyze"}
+          onBiologicalResponse={(result) => void persistPatch({ biological_response: result })}
+          onExplanation={(endpointId, result) => void saveCapability("endpoint_explanations", endpointId, result)}
+          onPathways={(endpointId, result) => void saveCapability("endpoint_pathways", endpointId, result)}
+          onLiterature={(endpointId, result) => void saveCapability("supporting_literature", endpointId, result)}
+          onPlacement={(endpointId, result) => void saveCapability("reference_placements", endpointId, result)}
+          onCapabilityError={(key, error) => void saveCapabilityError(key, error)}
+          onNew={() => navigate("/analyze")}
+        />
+      )}
+      {record && <p className="session-privacy-note">Stored locally in this browser for the current guest session.</p>}
+    </div>
+  );
 }
 
-function requestResult<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+function parseResultTab(value: string | null): ResultTab | null {
+  return (["overview", "biological", "endpoint", "similar", "report"] as ResultTab[]).includes(value as ResultTab)
+    ? value as ResultTab
+    : null;
 }
 
-function transactionComplete(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? "Unknown error");
 }
 
-async function transactionDone(
-  tx: IDBTransaction,
-  operation: (store: IDBObjectStore) => IDBRequest,
-): Promise<void> {
-  operation(tx.objectStore(STORE_NAME));
-  await transactionComplete(tx);
+function saveScrollPosition(analysisId: string): void {
+  try { sessionStorage.setItem(`endoscan.scroll.${analysisId}`, String(window.scrollY)); } catch { /* optional */ }
 }
 
-export const guestAnalysisRepository = new GuestAnalysisRepository();
+function readScrollPosition(analysisId: string): number {
+  try { return Number(sessionStorage.getItem(`endoscan.scroll.${analysisId}`) ?? 0) || 0; } catch { return 0; }
+}
+
+function UnavailableAnalysis() {
+  const navigate = useNavigate();
+  return (
+    <section className="session-state">
+      <p className="eyebrow">Guest session</p>
+      <h1>This analysis is not available in the current browser session.</h1>
+      <p>It may have been deleted, cleared, or created in another browser session.</p>
+      <div className="session-state-actions">
+        <button className="button primary" type="button" onClick={() => navigate("/projects")}>Go to Projects</button>
+        <button className="button secondary" type="button" onClick={() => navigate("/analyze")}>Start a new analysis</button>
+      </div>
+    </section>
+  );
+}
+
+function WorkflowSteps({ current }: { current: AnalyzeStep }) {
+  const order: AnalyzeStep[] = ["source", "validate", "running", "result"];
+  const currentIndex = order.indexOf(current);
+  const labels = ["Add input", "Check compatibility", "Run models", "Review results"];
+  return (
+    <ol className="workflow-steps" aria-label="Analysis progress">
+      {labels.map((label, index) => (
+        <li key={label} className={index <= currentIndex ? "step-active" : ""}>
+          <span>{index < currentIndex ? "OK" : index + 1}</span>
+          <strong>{label}</strong>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function RunningStep({ title }: { title: string }) {
+  return (
+    <section className="running-panel">
+      <div className="running-indicator">
+        <span />
+        <span />
+        <span />
+      </div>
+      <p className="eyebrow">Analysis in progress</p>
+      <h2>Analyzing {title}</h2>
+      <p>Running the available endpoint models on your signature and preparing the evidence.</p>
+    </section>
+  );
+}
+
+function ResultWorkspace({
+  input,
+  endpoints,
+  signals,
+  allFailed,
+  runError,
+  tab,
+  setTab,
+  selectedEndpoint,
+  onSelectedEndpoint,
+  record,
+  analysisPath,
+  onBiologicalResponse,
+  onExplanation,
+  onPathways,
+  onLiterature,
+  onPlacement,
+  onCapabilityError,
+  onNew,
+}: {
+  input: PreparedInput;
+  endpoints: EndpointSummary[];
+  signals: EndpointSignal[];
+  allFailed: boolean;
+  runError: unknown;
+  tab: ResultTab;
+  setTab: (t: ResultTab) => void;
+  selectedEndpoint: string | null;
+  onSelectedEndpoint: (endpointId: string) => void;
+  record: GuestAnalysisRecord | null;
+  analysisPath: string;
+  onBiologicalResponse: (result: GuestAnalysisRecord["biological_response"] extends infer T ? NonNullable<T> : never) => void;
+  onExplanation: (endpointId: string, result: GuestAnalysisRecord["endpoint_explanations"][string]) => void;
+  onPathways: (endpointId: string, result: GuestAnalysisRecord["endpoint_pathways"][string]) => void;
+  onLiterature: (endpointId: string, result: GuestAnalysisRecord["supporting_literature"][string]) => void;
+  onPlacement: (endpointId: string, result: GuestAnalysisRecord["reference_placements"][string]) => void;
+  onCapabilityError: (key: string, error: unknown) => void;
+  onNew: () => void;
+}) {
+  const scored = signals.filter((s) => s.result != null);
+  const nAbove = scored.filter((s) => s.result!.call).length;
+
+  return (
+    <div className="result-workspace">
+      <div className="result-header">
+        <div>
+          <button className="back-link" onClick={onNew}>
+          New analysis
+          </button>
+          <p className="eyebrow">Transcriptomic analysis result</p>
+          <h1>{input.title}</h1>
+          <p>{input.subtitle}</p>
+        </div>
+        <div className="result-actions">
+          <button className="button primary" onClick={() => setTab("report")}>
+            Preview report
+          </button>
+        </div>
+      </div>
+
+      <nav className="result-tabs" aria-label="Result sections" role="tablist">
+        {([
+          ["overview", "Overview"],
+          ["biological", "Biological response"],
+          ["endpoint", "Endpoint evidence"],
+          ["similar", "Similar signatures"],
+          ["report", "Report"],
+        ] as [ResultTab, string][]).map(([item, label]) => (
+          <button
+            key={item}
+            role="tab"
+            aria-selected={tab === item}
+            className={tab === item ? "result-tab-active" : ""}
+            onClick={() => setTab(item)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "overview" && (
+        <OverviewTab
+          input={input}
+          signals={signals}
+          nAbove={nAbove}
+          nScored={scored.length}
+          runError={runError}
+          allFailed={allFailed}
+          onEvidence={() => setTab("endpoint")}
+          onReference={() => setTab("similar")}
+        />
+      )}
+      {tab === "biological" && (
+        <BiologicalResponsePanel
+          signature={input.signature}
+          inputValueType={input.inputValueType}
+          aggregationWarning={input.aggregationWarning}
+          initialResult={record?.biological_response}
+          onResult={onBiologicalResponse}
+          onError={(error) => onCapabilityError("biological-response", error)}
+        />
+      )}
+      {tab === "endpoint" && (
+        <EvidencePanel
+          signals={signals}
+          signature={input.signature}
+          compound={input.kind === "catalogue" || input.kind === "reference" ? input.title : undefined}
+          selectedEndpoint={selectedEndpoint}
+          onSelectedEndpoint={onSelectedEndpoint}
+          explanationCache={record?.endpoint_explanations}
+          pathwayCache={record?.endpoint_pathways}
+          literatureCache={record?.supporting_literature}
+          onExplanation={onExplanation}
+          onPathways={onPathways}
+          onLiterature={onLiterature}
+          onCapabilityError={onCapabilityError}
+        />
+      )}
+      {tab === "similar" && <ReferencePanel
+        endpoints={endpoints}
+        signature={input.signature}
+        initialContext={selectedEndpoint}
+        placementCache={record?.reference_placements}
+        analysisPath={analysisPath}
+        onContext={onSelectedEndpoint}
+        onPlacement={onPlacement}
+        onPlacementError={(endpointId, error) => onCapabilityError(`reference-placement:${endpointId}`, error)}
+      />}
+      {tab === "report" && <ReportTab input={input} signals={signals} nAbove={nAbove} />}
+    </div>
+  );
+}
+
+function OverviewTab({
+  input,
+  signals,
+  nAbove,
+  nScored,
+  runError,
+  allFailed,
+  onEvidence,
+  onReference,
+}: {
+  input: PreparedInput;
+  signals: EndpointSignal[];
+  nAbove: number;
+  nScored: number;
+  runError: unknown;
+  allFailed: boolean;
+  onEvidence: () => void;
+  onReference: () => void;
+}) {
+  return (
+    <div className="overview-layout">
+      <div className="overview-main">
+        <section className="executive-summary">
+          <div>
+            <p className="eyebrow">Endpoint summary</p>
+            <h2>
+              {nAbove > 0
+                ? `${nAbove} of ${nScored} endpoint ${nScored === 1 ? "model is" : "models are"} above threshold`
+                : "No endpoint model is above its threshold"}
+            </h2>
+            <p>
+              Each score reflects an endpoint-associated expression pattern. Model signal score â€”
+              not a calibrated probability of a real-world outcome.
+            </p>
+          </div>
+          <span className="summary-status">
+            <span
+              className={`status-dot ${nAbove > 0 ? "status-dot-coral" : ""}`}
+              aria-hidden
+            />
+            {nAbove} of {nScored} above threshold
+          </span>
+        </section>
+
+        {runError != null && (
+          <div className="no-signature" role="alert">
+            <strong>The analysis request failed.</strong>
+            <p>The models could not be run for this signature. Try again or adjust the input.</p>
+          </div>
+        )}
+
+        {runError == null && allFailed && (
+          <div className="no-signature" role="alert">
+            <strong>No compatible endpoint completed successfully.</strong>
+            <p>Each endpoint failure is isolated below. Use its request ID when asking an administrator for help.</p>
+          </div>
+        )}
+
+        <div className="endpoint-results">
+          {signals.map((s) => (
+            <EndpointResultCard
+              key={s.endpoint_id}
+              signal={s}
+              compatibility={input.parse.compatibility.find(
+                (item) => item.endpoint_id === s.endpoint_id,
+              )}
+              onEvidence={onEvidence}
+            />
+          ))}
+        </div>
+      </div>
+
+      <aside className="overview-aside">
+        <section>
+          <p className="aside-label">Input</p>
+          <dl className="metadata-list">
+            <div>
+              <dt>Source</dt>
+              <dd>{input.kind === "file" ? "Uploaded file" : input.kind === "catalogue" ? "Public measured signature" : input.kind === "reference" ? "Aggregated reference profile" : "Pasted signature"}</dd>
+            </div>
+            <div><dt>Value type</dt><dd>{input.valueTypeLabel ?? input.inputValueType.replace(/_/g, " ")}</dd></div>
+            {input.referenceComparison && <div><dt>Reference comparison</dt><dd>{input.referenceComparison}</dd></div>}
+            {input.cellModels?.length ? <div><dt>Cell models</dt><dd>{input.cellModels.join("; ")}</dd></div> : null}
+            <div>
+              <dt>Genes provided</dt>
+              <dd>{Object.keys(input.signature).length}</dd>
+            </div>
+            <div>
+              <dt>Compatible endpoints</dt>
+              <dd>{input.parse.compatible_endpoint_ids.length} / {input.parse.compatibility.length}</dd>
+            </div>
+          </dl>
+        </section>
+        <section>
+          <p className="aside-label">Similar measured signatures</p>
+          <p className="mini-reference-copy">
+            Compare this response with named public reference signatures. Similarity is descriptive
+            context, not a prediction.
+          </p>
+          <button className="detail-link" onClick={onReference}>
+            View similar signatures
+          </button>
+        </section>
+        <section className="limitations-summary">
+          <p className="aside-label">Interpretation boundary</p>
+          <p>
+            This screen reports experimental model signals, not biological mechanism or endocrine
+            safety. Review each endpoint&rsquo;s limitations before use.
+          </p>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function EndpointResultCard({
+  signal,
+  compatibility,
+  onEvidence,
+}: {
+  signal: EndpointSignal;
+  compatibility?: EndpointCompatibility;
+  onEvidence: () => void;
+}) {
+  if (signal.result == null) {
+    return (
+      <article className="endpoint-result">
+        <div className="endpoint-result-top">
+          <span className="endpoint-code code-generic">{signal.endpoint_id}</span>
+          <span className="status-chip status-note">Not available</span>
+        </div>
+        <h3>{signal.biological_target}</h3>
+        <p className="endpoint-result-note">
+          This endpoint could not score the signature. The other endpoints are unaffected.
+        </p>
+        {signal.error != null && <ErrorNotice error={signal.error} />}
+        {compatibility && (
+          <p className="endpoint-result-note">
+            Input compatibility: {compatibility.n_matched} of {compatibility.n_schema_genes} required
+            genes matched.
+          </p>
+        )}
+        <button className="detail-link" onClick={onEvidence}>
+          View endpoint evidence
+        </button>
+      </article>
+    );
+  }
+
+  const r = signal.result;
+  const above = r.call;
+  const score = predictionScore(r);
+  const pct = Math.max(0, Math.min(100, Math.round(score * 100)));
+  const thresholdPct = Math.max(0, Math.min(100, Math.round(r.threshold * 100)));
+
+  return (
+    <article className={`endpoint-result ${above ? "endpoint-positive" : ""}`}>
+      <div className="endpoint-result-top">
+        <span className="endpoint-code code-generic">{signal.endpoint_id}</span>
+        {/* Above-threshold = warm SIGNAL chip (attention, not hazard). Below = neutral, never green. */}
+        <span className={`status-chip ${above ? "status-signal" : "status-neutral"}`}>
+          {above ? "Above threshold" : "Below threshold"}
+        </span>
+      </div>
+      <h3>{signal.biological_target}</h3>
+      <span className="endpoint-status-label">{r.limitations.status}</span>
+      <p>Endpoint signal score</p>
+      <div className="score-row">
+        <strong className="tabular">{score.toFixed(2)}</strong>
+        <span>Threshold {r.threshold.toFixed(2)}</span>
+      </div>
+      <div className={`score-track ${above ? "" : "score-track-low"}`}>
+        <span style={{ width: `${pct}%` }} />
+        <i style={{ left: `${thresholdPct}%` }} />
+      </div>
+      <p className="endpoint-interpretation">
+        {above
+          ? "Strong endpoint-associated expression pattern."
+          : "Expression pattern below the registered endpoint threshold."}
+      </p>
+      <p className="score-disclaimer">
+        Model signal score â€” not a calibrated probability of a real-world outcome.
+      </p>
+      <details className="technical-disclosure endpoint-technical">
+        <summary>Model and provenance details</summary>
+        <dl className="technical-grid">
+          <div><dt>Input fit</dt><dd>{compatibility ? `${compatibility.n_matched} / ${compatibility.n_schema_genes} required genes` : "Technical schema met"}</dd></div>
+          <div><dt>Model version</dt><dd>{signal.model_version || "Not recorded"}</dd></div>
+          <div><dt>Data provenance</dt><dd>{signal.source_refs?.join(", ") || "Not recorded"}</dd></div>
+          <div><dt>Input handling</dt><dd>{r.standardized_input ? "Standardized by the registered model pipeline" : "No standardization applied"}</dd></div>
+        </dl>
+      </details>
+      <button className="detail-link" onClick={onEvidence}>
+        View endpoint evidence
+      </button>
+    </article>
+  );
+}
+
+function ReportTab({
+  input,
+  signals,
+  nAbove,
+}: {
+  input: PreparedInput;
+  signals: EndpointSignal[];
+  nAbove: number;
+}) {
+  const scored = signals.filter((s) => s.result != null);
+  return (
+    <div className="report-layout">
+      <aside className="report-toc">
+        <p className="aside-label">Report contents</p>
+        {[
+          "Input and experimental context",
+          "Endpoint summary",
+          "Global biological response",
+          "Endpoint-specific evidence",
+          "Contributing genes",
+          "Endpoint-specific pathways",
+          "Supporting literature",
+          "Similar measured signatures",
+          "Limitations",
+          "Model and analysis provenance",
+        ].map((item, index) => (
+          <button key={item} className={index === 0 ? "selected" : ""} disabled>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            {item}
+          </button>
+        ))}
+      </aside>
+      <article className="report-document">
+        <div className="report-document-header">
+          <div>
+            <p>ENDOSCAN ANALYSIS REPORT</p>
+            <span>Preview â€” export is a planned capability</span>
+          </div>
+          <div>
+            <PlannedBadge label="Report export: planned" />
+          </div>
+        </div>
+        <div className="report-title">
+          <div>
+            <p className="eyebrow">Executive summary</p>
+            <h1>Transcriptomic analysis result</h1>
+            <p>Measured biological response and registered experimental endpoint signals.</p>
+          </div>
+          <span className="summary-status">
+            <span className={`status-dot ${nAbove > 0 ? "status-dot-coral" : ""}`} aria-hidden />
+            {nAbove} of {scored.length} above threshold
+          </span>
+        </div>
+        <div className="report-metrics">
+          {scored.map((s) => (
+            <div key={s.endpoint_id}>
+              <span>{s.endpoint_id} endpoint</span>
+              <strong className="tabular">{predictionScore(s.result!).toFixed(2)}</strong>
+              <small>{s.result!.call ? "Above threshold" : "Below threshold"}</small>
+            </div>
+          ))}
+        </div>
+        <section className="report-section">
+          <h2>Input and compatibility</h2>
+          <div className="report-info-grid">
+            <div>
+              <span>Signature</span>
+              <strong>{input.title}</strong>
+            </div>
+            <div>
+              <span>Genes provided</span>
+              <strong>{Object.keys(input.signature).length}</strong>
+            </div>
+            {input.parse.preview && (
+              <div>
+                <span>Compatible endpoints</span>
+                <strong>{input.parse.compatible_endpoint_ids.length} / {input.parse.compatibility.length}</strong>
+              </div>
+            )}
+            <div>
+              <span>Endpoints assessed</span>
+              <strong>{scored.length}</strong>
+            </div>
+          </div>
+        </section>
+        <footer className="report-footer">
+          <strong>Experimental research use only</strong>
+          <p>
+            A downloadable, reproducible report (HTML / PDF / JSON with full provenance, model cards
+            and limitations) is a planned capability and is not generated yet. EndoScan does not
+            provide clinical, diagnostic, regulatory or safety conclusions.
+          </p>
+        </footer>
+      </article>
+    </div>
+  );
+}
