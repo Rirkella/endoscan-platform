@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0.0",
+  "initial_state": "DRAFT",
+  "terminal_states": ["COMPLETED", "CANCELLED"],
+  "special_states": {
+    "PAUSED": "Stores paused_from_state and resumes only after guards are rechecked.",
+    "FAILED": "Stores failed_from_state, retryability and the immutable failed attempt."
+  },
+  "states": [
+    "DRAFT", "DISCOVERING_DATA", "AWAITING_DATASET_APPROVAL", "CURATING_DATA",
+    "AWAITING_LABEL_APPROVAL", "RESOLVING_IDENTITIES", "AUDITING_DATASET",
+    "AUDITING_LEAKAGE", "AWAITING_TRAINING_APPROVAL", "TRAINING", "EVALUATING",
+    "AWAITING_SCIENTIFIC_APPROVAL", "REGISTERING", "COMPLETED", "FAILED", "PAUSED",
+    "CANCELLED"
+  ],
+  "transitions": [
+    {"from":"DRAFT","to":"DISCOVERING_DATA","initiator":"human","guard":"approved endpoint_definition artifact","required_artifacts":["endpoint_definition"]},
+    {"from":"DISCOVERING_DATA","to":"AWAITING_DATASET_APPROVAL","initiator":"orchestrator","guard":"valid cited candidate set or explicit no-candidate result","required_artifacts":["search_trace","dataset_candidates"]},
+    {"from":"AWAITING_DATASET_APPROVAL","to":"CURATING_DATA","initiator":"human","guard":"approved dataset_selection bound to candidate hash","required_artifacts":["dataset_selection_approval"]},
+    {"from":"AWAITING_DATASET_APPROVAL","to":"DISCOVERING_DATA","initiator":"human","guard":"revision requested","required_artifacts":["review_decision"]},
+    {"from":"CURATING_DATA","to":"AWAITING_LABEL_APPROVAL","initiator":"orchestrator","guard":"checksummed source inspection and valid label proposal","required_artifacts":["source_snapshot","sample_inspection","curation_proposal","label_proposal"]},
+    {"from":"AWAITING_LABEL_APPROVAL","to":"RESOLVING_IDENTITIES","initiator":"human","guard":"approved label_rules bound to curation artifacts","required_artifacts":["label_rules_approval"]},
+    {"from":"AWAITING_LABEL_APPROVAL","to":"CURATING_DATA","initiator":"human","guard":"revision requested","required_artifacts":["review_decision"]},
+    {"from":"RESOLVING_IDENTITIES","to":"AUDITING_DATASET","initiator":"orchestrator","guard":"identity report complete and all blocking conflicts resolved/excluded","required_artifacts":["identity_mapping","identity_coverage","identity_conflict_decisions"]},
+    {"from":"AUDITING_DATASET","to":"AUDITING_LEAKAGE","initiator":"orchestrator","guard":"candidate table built and quality gate passed","required_artifacts":["candidate_table","dataset_quality_report","dataset_card","quality_gate"]},
+    {"from":"AUDITING_LEAKAGE","to":"AWAITING_TRAINING_APPROVAL","initiator":"orchestrator","guard":"compound-level leakage audit passed","required_artifacts":["split_manifest","leakage_audit"]},
+    {"from":"AWAITING_TRAINING_APPROVAL","to":"TRAINING","initiator":"human","guard":"approved training_authorization bound to dataset/config hashes","required_artifacts":["training_approval","training_config"]},
+    {"from":"TRAINING","to":"EVALUATING","initiator":"orchestrator","guard":"candidate models and predictions complete","required_artifacts":["candidate_models","training_log"]},
+    {"from":"EVALUATING","to":"AWAITING_SCIENTIFIC_APPROVAL","initiator":"orchestrator","guard":"metrics, uncertainty, calibration, selection and cards valid","required_artifacts":["evaluation_report","model_selection","model_card","dataset_card","endpoint_candidate"]},
+    {"from":"AWAITING_SCIENTIFIC_APPROVAL","to":"REGISTERING","initiator":"human","guard":"model_acceptance and separate endpoint_registration approvals bound to candidate hash","required_artifacts":["model_acceptance_approval","registration_approval"]},
+    {"from":"AWAITING_SCIENTIFIC_APPROVAL","to":"TRAINING","initiator":"human","guard":"revision requested with newly approved training config","required_artifacts":["review_decision","training_approval"]},
+    {"from":"REGISTERING","to":"COMPLETED","initiator":"orchestrator","guard":"atomic publish plus registry/API/product verification","required_artifacts":["publish_receipt","serving_verification"]}
+  ],
+  "global_transitions": [
+    {"from":"non_terminal_non_registering","to":"PAUSED","initiator":"human","guard":"no uninterruptible commit section"},
+    {"from":"PAUSED","to":"paused_from_state","initiator":"human","guard":"all original state guards and artifact checksums remain valid"},
+    {"from":"non_terminal","to":"CANCELLED","initiator":"human","guard":"cooperative cancellation acknowledged or no worker active"},
+    {"from":"active_stage","to":"FAILED","initiator":"orchestrator","guard":"normalized stage failure persisted"},
+    {"from":"FAILED","to":"failed_from_state","initiator":"human","guard":"failure retryable, retry authorized, new step attempt and idempotency key"}
+  ],
+  "invalid_transition_policy": "Reject with conflict; return current state, version, allowed transitions and unmet guards. Never skip a state or infer approval.",
+  "checkpoint_policy": "Commit state/event and immutable output artifact references in one DB transaction after every bounded activity.",
+  "idempotency_policy": "Logical output is keyed by workflow, stage, input artifact hashes, tool/config version and idempotency key. Repeated identical commands return the prior result.",
+  "restart_policy": "Reconcile stale running attempts, verify artifacts, then requeue idempotent activities or enter FAILED. Pending approvals and PAUSED survive unchanged."
+}
