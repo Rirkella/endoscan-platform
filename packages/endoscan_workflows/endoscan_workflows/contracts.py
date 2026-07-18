@@ -243,6 +243,21 @@ class NormalizedAgentError(StrictContract):
     category: str = Field(default="provider", max_length=80)
 
 
+class ProviderPreflightResult(StrictContract):
+    provider: str = Field(min_length=1, max_length=80)
+    configured_model: str = Field(min_length=1, max_length=160)
+    api_key_present: bool
+    authentication_accepted: bool
+    model_accessible: bool
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    provider_error_code: str | None = Field(default=None, max_length=200)
+    provider_error_type: str | None = Field(default=None, max_length=200)
+    request_id: str | None = Field(default=None, max_length=200)
+    billing_status: Literal["not_checked"] = "not_checked"
+    generation_capability: Literal["not_checked"] = "not_checked"
+    checked_at: datetime = Field(default_factory=utc_now)
+
+
 class TraceEvent(StrictContract):
     sequence: int = Field(ge=0)
     event_type: str = Field(min_length=1, max_length=120)

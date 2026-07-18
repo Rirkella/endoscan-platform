@@ -34,8 +34,11 @@
 }
 button:disabled { opacity: .48; cursor: not-allowed; }
 .admin-icon-button { white-space: nowrap; }
-.admin-mode-row { display: flex; gap: 10px; align-items: baseline; border: 1px solid #b9dacc; background: #f2faf6; color: #315f50; border-radius: 12px; padding: 10px 13px; margin-bottom: 18px; font-size: .82rem; }
+.admin-mode-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border: 1px solid #b9dacc; background: #f2faf6; color: #315f50; border-radius: 12px; padding: 10px 13px; margin-bottom: 10px; font-size: .82rem; }
 .admin-mode-row strong { color: #145d45; white-space: nowrap; }
+.admin-mode-row button { margin-left: auto; }
+.admin-provider-preflight { display: flex; flex-wrap: wrap; gap: 6px 14px; border: 1px solid #cad8d2; background: #f8fbfa; color: #40564d; border-radius: 12px; padding: 10px 13px; margin-bottom: 18px; font-size: .82rem; }
+.admin-provider-preflight strong { color: #173f32; }
 .admin-mode-badge { display: inline-flex; width: max-content; border: 1px solid #b9dacc; background: #edf8f3; color: #145d45; border-radius: 999px; padding: 5px 9px; font-size: .74rem; font-weight: 750; }
 .admin-error { background: #fff0ee; border: 1px solid #edb8b1; color: #8b2e22; border-radius: 12px; padding: 13px 16px; margin-bottom: 16px; }
 .admin-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }

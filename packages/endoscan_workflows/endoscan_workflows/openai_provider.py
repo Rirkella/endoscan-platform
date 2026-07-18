@@ -37,6 +37,24 @@ class OpenAIAgentProvider:
 
     name = "openai"
 
+    @staticmethod
+    def _failure(
+        exc: Exception,
+        message: str,
+        *,
+        retryable: bool,
+    ) -> ProviderFailure:
+        return ProviderFailure(
+            message,
+            retryable=retryable,
+            exception_class=type(exc).__name__,
+            http_status=getattr(exc, "status_code", None),
+            provider_error_code=getattr(exc, "code", None),
+            provider_error_type=getattr(exc, "type", None),
+            provider_request_id=getattr(exc, "request_id", None),
+            provider_parameter=getattr(exc, "param", None),
+        )
+
     def __init__(
         self,
         configuration: AgentConfiguration,
@@ -66,7 +84,13 @@ class OpenAIAgentProvider:
                 ),
             )
         if not self.configuration.api_key_present:
-            raise ProviderFailure("OpenAI provider is not configured.", retryable=False)
+            raise ProviderFailure(
+                "OpenAI provider is not configured.",
+                retryable=False,
+                exception_class="ProviderConfigurationError",
+                provider_error_code="missing_api_key",
+                provider_error_type="local_configuration",
+            )
         try:
             sdk_tools = [self._proxy_tool(name) for name in request.available_tools]
             agent = Agent(
@@ -107,27 +131,50 @@ class OpenAIAgentProvider:
                 run_config=run_config,
             )
         except (APITimeoutError, TimeoutError) as exc:
-            raise ProviderTimeout("OpenAI provider exceeded the configured timeout.") from exc
+            raise ProviderTimeout(
+                "OpenAI provider exceeded the configured timeout.",
+                exception_class=type(exc).__name__,
+            ) from exc
         except RateLimitError as exc:
-            raise ProviderFailure("OpenAI provider rate limit reached.", retryable=True) from exc
+            raise self._failure(exc, "OpenAI provider rate limit reached.", retryable=True) from exc
         except APIConnectionError as exc:
-            raise ProviderFailure("OpenAI provider is unavailable.", retryable=True) from exc
+            raise self._failure(exc, "OpenAI provider is unavailable.", retryable=True) from exc
         except APIStatusError as exc:
-            retryable = exc.status_code >= 500 or exc.status_code == 429
-            raise ProviderFailure(
-                "OpenAI provider returned an API error.", retryable=retryable
+            retryable = exc.status_code >= 500 or exc.status_code in {408, 429}
+            raise self._failure(
+                exc, "OpenAI provider returned an API error.", retryable=retryable
             ) from exc
         except MaxTurnsExceeded as exc:
-            raise ProviderFailure(
-                "OpenAI provider exceeded the single-turn adapter boundary."
+            raise self._failure(
+                exc,
+                "OpenAI provider exceeded the single-turn adapter boundary.",
+                retryable=False,
             ) from exc
         except ModelBehaviorError as exc:
-            raise ProviderFailure(
-                "OpenAI provider returned malformed structured output.", retryable=False
+            raise self._failure(
+                exc,
+                "OpenAI provider returned malformed structured output.",
+                retryable=False,
             ) from exc
         except AgentsException as exc:
-            raise ProviderFailure("OpenAI Agents SDK run failed safely.", retryable=False) from exc
+            raise self._failure(
+                exc, "OpenAI Agents SDK run failed safely.", retryable=False
+            ) from exc
+        except Exception as exc:
+            raise self._failure(
+                exc, "OpenAI provider adapter failed safely.", retryable=False
+            ) from exc
 
+        try:
+            return self._translate_result(result)
+        except ProviderFailure:
+            raise
+        except Exception as exc:
+            raise self._failure(
+                exc, "OpenAI provider adapter failed safely.", retryable=False
+            ) from exc
+
+    def _translate_result(self, result: Any) -> ProviderTurn:
         usage = self._usage(result)
         output = result.final_output
         if hasattr(output, "model_dump"):
@@ -136,14 +183,20 @@ class OpenAIAgentProvider:
             try:
                 output = json.loads(output)
             except json.JSONDecodeError as exc:
-                raise ProviderFailure(
-                    "OpenAI provider returned malformed structured output.", retryable=False
+                raise self._failure(
+                    exc,
+                    "OpenAI provider returned malformed structured output.",
+                    retryable=False,
                 ) from exc
         if isinstance(output, dict) and output.get(TOOL_ENVELOPE) is True:
             arguments = output.get("arguments")
             if not isinstance(arguments, dict):
                 raise ProviderFailure(
-                    "OpenAI tool request arguments were invalid.", retryable=False
+                    "OpenAI tool request arguments were invalid.",
+                    retryable=False,
+                    exception_class="ProviderProtocolError",
+                    provider_error_code="invalid_tool_arguments",
+                    provider_error_type="local_output_validation",
                 )
             key = hashlib.sha256(
                 canonical_json({"name": output.get("tool_name"), "arguments": arguments}).encode()
@@ -160,7 +213,11 @@ class OpenAIAgentProvider:
         if isinstance(output, dict):
             return ProviderTurn(kind="output", output=output, usage=usage)
         raise ProviderFailure(
-            "OpenAI provider returned an unsupported output type.", retryable=False
+            "OpenAI provider returned an unsupported output type.",
+            retryable=False,
+            exception_class="ProviderProtocolError",
+            provider_error_code="unsupported_output_type",
+            provider_error_type="local_output_validation",
         )
 
     def _proxy_tool(self, name: str) -> FunctionTool:

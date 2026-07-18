@@ -302,7 +302,12 @@ class WorkflowService:
             with self.database.session() as session:
                 stored_step = session.get(WorkflowStepRow, step.id)
                 if stored_step and stored_step.status == StepStatus.RUNNING.value:
-                    stored_step.status = StepStatus.FAILED_RETRYABLE.value
+                    retryable = bool(result.error and result.error.retryable)
+                    stored_step.status = (
+                        StepStatus.FAILED_RETRYABLE.value if retryable else StepStatus.FAILED.value
+                    )
+                    if result.error:
+                        stored_step.error_id = deterministic_id("err", run_id, result.error.code)
                     stored_step.completed_at = utc_text()
             return self.transition(
                 workflow_id,
@@ -752,14 +757,11 @@ class WorkflowService:
                 raise InvalidTransition("Only a failed retryable workflow can be retried.")
             retryable = session.scalar(
                 select(WorkflowErrorRow)
-                .where(
-                    WorkflowErrorRow.workflow_id == workflow_id,
-                    WorkflowErrorRow.retryable == 1,
-                )
-                .order_by(WorkflowErrorRow.created_at.desc())
+                .where(WorkflowErrorRow.workflow_id == workflow_id)
+                .order_by(WorkflowErrorRow.created_at.desc(), WorkflowErrorRow.id.desc())
                 .limit(1)
             )
-            if retryable is None:
+            if retryable is None or not bool(retryable.retryable):
                 raise GuardNotSatisfied("The most recent workflow failure is not retryable.")
             snapshot = self._apply_transition(
                 session,

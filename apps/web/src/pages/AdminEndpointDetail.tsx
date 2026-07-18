@@ -218,6 +218,7 @@ export function AdminEndpointDetail() {
   const canFail = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
   const canPause = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
   const canCancel = !["CANCELLED", "COMPLETED"].includes(build.current_stage);
+  const canRetry = build.current_stage === "FAILED" && errors.at(-1)?.retryable === true;
   const selectedIndex = Math.max(0, candidates.findIndex((candidate) => candidate.candidate_id === selected));
   const selectedCandidate = candidates[selectedIndex];
 
@@ -372,7 +373,7 @@ export function AdminEndpointDetail() {
               {build.current_stage === "DRAFT" && <button disabled={busy} onClick={() => void command("start")}>Start workflow</button>}
               {canPause && <button disabled={busy} onClick={() => void command("pause")}>Pause</button>}
               {build.current_stage === "PAUSED" && <button disabled={busy} onClick={() => void command("resume")}>Resume</button>}
-              {build.current_stage === "FAILED" && <button disabled={busy} onClick={() => void command("retry")}>Retry failed step</button>}
+              {canRetry && <button disabled={busy} onClick={() => void command("retry")}>Retry failed step</button>}
               {canCancel && <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>}
               <button className="admin-secondary" disabled={busy} onClick={() => void load()}>Refresh</button>
               {import.meta.env.DEV && runMode !== "replay" && <button className="admin-secondary" disabled={busy} onClick={() => void refreshSourceMetadata()}>Refresh source metadata</button>}

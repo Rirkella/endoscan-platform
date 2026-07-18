@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from endoscan_api import create_app
+from endoscan_workflows.preflight import ProviderAccessPreflight
 
 ADMIN = {"X-EndoScan-Admin": "local-development"}
 
@@ -51,6 +54,106 @@ def test_admin_requires_explicit_local_marker(repo_root, monkeypatch, tmp_path) 
     with TestClient(create_app(repo_root)) as client:
         assert client.get("/admin/endpoint-builds").status_code == 401
         assert client.get("/admin/endpoint-builds", headers=ADMIN).status_code == 200
+
+
+def test_provider_preflight_requires_development_mode(repo_root, monkeypatch, tmp_path) -> None:
+    configure(monkeypatch, tmp_path, enabled=False)
+    app = create_app(repo_root)
+
+    class ForbiddenPreflight:
+        def check(self):
+            raise AssertionError("Preflight must not execute outside development mode")
+
+    app.state.provider_preflight = ForbiddenPreflight()
+    with TestClient(app) as client:
+        response = post(client, "/admin/agent-provider/preflight", {}, "preflight-disabled")
+        assert response.status_code == 403
+
+
+def test_provider_preflight_is_explicit_and_creates_no_workflow_state(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENDOSCAN_AGENT_PROVIDER", "openai")
+    monkeypatch.setenv("ENDOSCAN_AGENT_MODE", "live")
+    monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder")
+    app = create_app(repo_root)
+
+    class FakeClient:
+        retrieve_calls: list[str] = []
+
+        def __init__(self, **_kwargs):
+            self.models = SimpleNamespace(with_raw_response=SimpleNamespace(retrieve=self.retrieve))
+
+        @property
+        def responses(self):
+            raise AssertionError("Preflight must never use Responses generation")
+
+        def retrieve(self, model: str):
+            self.retrieve_calls.append(model)
+            return SimpleNamespace(
+                parse=lambda: SimpleNamespace(id=model),
+                http_response=SimpleNamespace(
+                    status_code=200,
+                    headers={"x-request-id": "req_preflight-safe"},
+                ),
+            )
+
+        def close(self):
+            return None
+
+    class ForbiddenGeoClient:
+        def __getattr__(self, _name):
+            raise AssertionError("Preflight must never access GEO")
+
+    fake_client = FakeClient()
+    app.state.provider_preflight = ProviderAccessPreflight(
+        app.state.agent_configuration,
+        client_factory=lambda **_kwargs: fake_client,
+    )
+    app.state.source_client = ForbiddenGeoClient()
+    with TestClient(app) as client:
+        assert fake_client.retrieve_calls == []
+        with app.state.workflow_database.session() as session:
+            before = {
+                "builds": session.execute(
+                    text("select count(*) from endpoint_builds")
+                ).scalar_one(),
+                "runs": session.execute(text("select count(*) from agent_runs")).scalar_one(),
+            }
+        response = post(client, "/admin/agent-provider/preflight", {}, "preflight-success")
+        assert response.status_code == 200
+        assert response.json()["generation_capability"] == "not_checked"
+        assert response.json()["billing_status"] == "not_checked"
+        assert fake_client.retrieve_calls == ["gpt-5.4-mini"]
+        with app.state.workflow_database.session() as session:
+            after = {
+                "builds": session.execute(
+                    text("select count(*) from endpoint_builds")
+                ).scalar_one(),
+                "runs": session.execute(text("select count(*) from agent_runs")).scalar_one(),
+            }
+        assert after == before == {"builds": 0, "runs": 0}
+        assert "unit-test" not in response.text.lower()
+        assert "authorization" not in response.text.lower()
+
+
+def test_provider_preflight_missing_key_makes_no_external_call(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENDOSCAN_AGENT_PROVIDER", "openai")
+    monkeypatch.setenv("ENDOSCAN_AGENT_MODE", "live")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with TestClient(create_app(repo_root)) as client:
+        response = post(client, "/admin/agent-provider/preflight", {}, "preflight-no-key")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["api_key_present"] is False
+        assert payload["authentication_accepted"] is False
+        assert payload["model_accessible"] is False
+        assert payload["provider_error_code"] == "missing_api_key"
+        assert payload["generation_capability"] == "not_checked"
 
 
 def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:

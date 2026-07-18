@@ -7,6 +7,7 @@ import type {
   AdminApproval,
   AdminArtifact,
   AdminBuild,
+  AdminProviderPreflight,
   AdminTimelineEvent,
   AdminWorkflowError,
 } from "../api/types";
@@ -333,9 +334,110 @@ describe("Phase-0 build detail information architecture", () => {
     const versions = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)).expected_version);
     expect(versions).toEqual([0, 3, 4]);
   });
+
+  it.each([
+    { retryable: true, visible: true },
+    { retryable: false, visible: false },
+  ])("shows Retry only when the latest workflow error is retryable", async ({ retryable, visible }) => {
+    installFetchMock(detailRoutes(
+      () => build("FAILED", 4),
+      [{ ...workflowErrors[0], retryable }],
+    ));
+    renderApp(`/admin/endpoints/${buildId}`);
+    await screen.findByRole("heading", { name: "Dataset review required" });
+    if (visible) {
+      expect(await screen.findByRole("button", { name: "Retry failed step" })).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole("button", { name: "Retry failed step" })).not.toBeInTheDocument();
+    }
+  });
 });
 
 describe("Phase-1 live discovery presentation", () => {
+  it("runs provider preflight only after an explicit administrator action", async () => {
+    let preflightCalls = 0;
+    const result: AdminProviderPreflight = {
+      schema_version: "1.0.0",
+      provider: "openai",
+      configured_model: "gpt-5.4-mini",
+      api_key_present: true,
+      authentication_accepted: true,
+      model_accessible: true,
+      http_status: 200,
+      provider_error_code: null,
+      provider_error_type: null,
+      request_id: "req_preflight-safe",
+      billing_status: "not_checked",
+      generation_capability: "not_checked",
+      checked_at: "2026-07-18T12:00:00Z",
+    };
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "GET /api/admin/capabilities": {
+        body: {
+          schema_version: "1.0.0",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          run_mode: "live",
+          api_key_present: true,
+          live_mode_enabled: true,
+          source_tools_available: true,
+          tracing_enabled: false,
+          configured_budget: {
+            maximum_turns: 6,
+            maximum_tool_calls: 4,
+            timeout_seconds: 90,
+            maximum_input_tokens: 3000,
+            maximum_output_tokens: 1000,
+            maximum_cost_usd: 0.2,
+            input_cost_per_million_usd: 0.75,
+            output_cost_per_million_usd: 4.5,
+          },
+        },
+      },
+      "POST /api/admin/agent-provider/preflight": () => {
+        preflightCalls += 1;
+        return { body: result };
+      },
+    });
+    renderApp("/admin/endpoints");
+    const button = await screen.findByRole("button", { name: "Check provider access" });
+    expect(preflightCalls).toBe(0);
+    expect(screen.queryByText("Provider access confirmed")).not.toBeInTheDocument();
+    await userEvent.click(button);
+    expect(await screen.findByText("Provider access confirmed")).toBeInTheDocument();
+    expect(screen.getByText("API credentials accepted: yes")).toBeInTheDocument();
+    expect(screen.getByText("Configured model accessible: yes")).toBeInTheDocument();
+    expect(screen.getByText("Billing and generation: not checked")).toBeInTheDocument();
+    expect(preflightCalls).toBe(1);
+  });
+
+  it("renders safe preflight failure categories without raw provider text", async () => {
+    const failed: AdminProviderPreflight = {
+      schema_version: "1.0.0",
+      provider: "openai",
+      configured_model: "gpt-5.4-mini",
+      api_key_present: true,
+      authentication_accepted: false,
+      model_accessible: false,
+      http_status: 401,
+      provider_error_code: "invalid_api_key",
+      provider_error_type: "authentication_error",
+      request_id: "req_preflight-failed",
+      billing_status: "not_checked",
+      generation_capability: "not_checked",
+      checked_at: "2026-07-18T12:00:00Z",
+    };
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "POST /api/admin/agent-provider/preflight": { body: failed },
+    });
+    renderApp("/admin/endpoints");
+    await userEvent.click(await screen.findByRole("button", { name: "Check provider access" }));
+    expect(await screen.findByText("Authentication rejected")).toBeInTheDocument();
+    expect(screen.queryByText(/raw provider/i)).not.toBeInTheDocument();
+  });
+
   it("shows provider-unavailable status while keeping replay usable", async () => {
     installFetchMock({
       "GET /api/admin/endpoint-builds": { body: [] },

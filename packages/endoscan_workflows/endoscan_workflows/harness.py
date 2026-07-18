@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -39,6 +40,7 @@ from .repository import (
 from .tools import ToolRegistry
 
 SECRET_KEYS = {"authorization", "api_key", "apikey", "password", "secret", "token"}
+logger = logging.getLogger("endoscan.workflow.provider")
 
 
 def redact(value: Any) -> Any:
@@ -102,6 +104,26 @@ class AgentHarness:
             if trace_callback:
                 trace_callback(event)
 
+        def log_provider_failure(detail: dict[str, Any]) -> None:
+            logger.warning(
+                "provider_failure workflow_id=%s agent_run_id=%s provider=%s model=%s "
+                "exception_class=%s http_status=%s provider_error_code=%s "
+                "provider_error_type=%s provider_request_id=%s provider_parameter=%s "
+                "retryable=%s attempt=%s",
+                request.workflow_id,
+                run_id,
+                request.model.provider,
+                request.model.model_identifier,
+                detail.get("exception_class"),
+                detail.get("http_status"),
+                detail.get("provider_error_code"),
+                detail.get("provider_error_type"),
+                detail.get("provider_request_id"),
+                detail.get("provider_parameter"),
+                detail["retryable"],
+                detail["turn"],
+            )
+
         emit("agent_run.started", "running", provider=provider.name)
         retries = 0
         result: AgentRunResult | None = None
@@ -141,8 +163,20 @@ class AgentHarness:
                     interruption_request(),
                     timeout=max(0.01, request.budget.timeout_seconds - elapsed),
                 )
-            except (ProviderTimeout, FutureTimeout):
-                emit("provider.turn.failed", "timed_out", turn=turns)
+            except (ProviderTimeout, FutureTimeout) as exc:
+                timeout_detail = {
+                    "turn": turns,
+                    "retryable": True,
+                    **getattr(
+                        exc,
+                        "trace_detail",
+                        ProviderTimeout(
+                            "Provider boundary timed out.", exception_class=type(exc).__name__
+                        ).trace_detail,
+                    ),
+                }
+                emit("provider.turn.failed", "timed_out", **timeout_detail)
+                log_provider_failure(timeout_detail)
                 result = self._failure(
                     AgentRunStatus.TIMED_OUT,
                     "provider_timeout",
@@ -152,10 +186,21 @@ class AgentHarness:
                     turns,
                     tool_calls,
                     started,
+                    retryable=True,
                 )
                 break
             except ProviderFailure as exc:
-                emit("provider.turn.failed", "failed", turn=turns, retryable=exc.retryable)
+                failure_detail = {
+                    "turn": turns,
+                    "retryable": exc.retryable,
+                    **exc.trace_detail,
+                }
+                emit(
+                    "provider.turn.failed",
+                    "failed",
+                    **failure_detail,
+                )
+                log_provider_failure(failure_detail)
                 if exc.retryable and retries < request.budget.retry_count:
                     retries += 1
                     emit("provider.retry", "retrying", retry=retries)
@@ -169,6 +214,7 @@ class AgentHarness:
                     turns,
                     tool_calls,
                     started,
+                    retryable=exc.retryable,
                 )
                 break
             usage = self._add_usage(usage, turn.usage)
@@ -616,7 +662,18 @@ class AgentHarness:
         return None
 
     @staticmethod
-    def _failure(status, code, message, trace, usage, turns, tool_calls, started):
+    def _failure(
+        status,
+        code,
+        message,
+        trace,
+        usage,
+        turns,
+        tool_calls,
+        started,
+        *,
+        retryable: bool | None = None,
+    ):
         return AgentRunResult(
             status=status,
             usage=usage,
@@ -624,7 +681,11 @@ class AgentHarness:
             error=NormalizedAgentError(
                 code=code,
                 safe_message=message,
-                retryable=code in {"provider_timeout", "provider_failure", "tool_timeout"},
+                retryable=(
+                    retryable
+                    if retryable is not None
+                    else code in {"provider_timeout", "provider_failure", "tool_timeout"}
+                ),
                 category="agent_runtime",
             ),
             turns=turns,

@@ -126,6 +126,22 @@ export interface AdminAgentCapabilities {
   live_unavailable_reason?: string | null;
 }
 
+export interface AdminProviderPreflight {
+  schema_version: "1.0.0";
+  provider: string;
+  configured_model: string;
+  api_key_present: boolean;
+  authentication_accepted: boolean;
+  model_accessible: boolean;
+  http_status: number | null;
+  provider_error_code: string | null;
+  provider_error_type: string | null;
+  request_id: string | null;
+  billing_status: "not_checked";
+  generation_capability: "not_checked";
+  checked_at: string;
+}
+
 export interface AdminWorkflowError {
   schema_version: "1.0.0";
   id: string;

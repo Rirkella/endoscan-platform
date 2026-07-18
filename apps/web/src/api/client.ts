@@ -10,6 +10,7 @@ import type {
   AdminApproval,
   AdminArtifact,
   AdminBuild,
+  AdminProviderPreflight,
   AdminTimelineEvent,
   AdminWorkflowError,
   ApiError,
@@ -220,6 +221,8 @@ export const api = {
 
   adminListBuilds: () => adminGet<AdminBuild[]>("/admin/endpoint-builds"),
   adminCapabilities: () => adminGet<AdminAgentCapabilities>("/admin/capabilities"),
+  adminProviderPreflight: () =>
+    adminPost<AdminProviderPreflight>("/admin/agent-provider/preflight", {}, "provider-preflight"),
   adminGetBuild: (id: string) =>
     adminGet<AdminBuild>(`/admin/endpoint-builds/${encodeURIComponent(id)}`),
   adminCreateBuild: (payload: {

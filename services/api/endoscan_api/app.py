@@ -23,6 +23,7 @@ from endoscan_workflows.database import WorkflowDatabase
 from endoscan_workflows.discovery_tools import DiscoveryToolService
 from endoscan_workflows.harness import AgentHarness
 from endoscan_workflows.openai_provider import OpenAIAgentProvider
+from endoscan_workflows.preflight import ProviderAccessPreflight
 from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
 from endoscan_workflows.service import WorkflowService
 from endoscan_workflows.source_cache import SourceResponseCache
@@ -208,6 +209,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.state.artifact_store = artifact_store
     app.state.provider_registry = provider_registry
     app.state.agent_configuration = agent_configuration
+    app.state.provider_preflight = ProviderAccessPreflight(agent_configuration)
     app.state.source_cache = source_cache
     app.state.source_client = source_client
     app.state.workflow_service = workflow_service

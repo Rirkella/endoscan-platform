@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -16,15 +17,58 @@ from .contracts import (
     UsageReport,
 )
 
+_SAFE_PROVIDER_DETAIL = re.compile(r"^[A-Za-z0-9_.$:/\[\]-]{1,200}$")
+_SECRET_LIKE_PROVIDER_DETAIL = re.compile(r"(?i)sk-[A-Za-z0-9_-]{6,}")
+
+
+def _safe_provider_detail(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if _SECRET_LIKE_PROVIDER_DETAIL.search(text):
+        return "[REDACTED]"
+    return text if _SAFE_PROVIDER_DETAIL.fullmatch(text) else None
+
 
 class ProviderFailure(RuntimeError):
-    def __init__(self, message: str, *, retryable: bool = True):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        exception_class: str | None = None,
+        http_status: int | None = None,
+        provider_error_code: object | None = None,
+        provider_error_type: object | None = None,
+        provider_request_id: object | None = None,
+        provider_parameter: object | None = None,
+    ):
         super().__init__(message)
         self.retryable = retryable
+        self.trace_detail = {
+            key: value
+            for key, value in {
+                "exception_class": _safe_provider_detail(exception_class),
+                "http_status": (
+                    http_status
+                    if isinstance(http_status, int) and 100 <= http_status <= 599
+                    else None
+                ),
+                "provider_error_code": _safe_provider_detail(provider_error_code),
+                "provider_error_type": _safe_provider_detail(provider_error_type),
+                "provider_request_id": _safe_provider_detail(provider_request_id),
+                "provider_parameter": _safe_provider_detail(provider_parameter),
+            }.items()
+            if value is not None
+        }
 
 
 class ProviderTimeout(TimeoutError):
-    pass
+    def __init__(self, message: str, *, exception_class: str | None = None):
+        super().__init__(message)
+        self.retryable = True
+        safe_class = _safe_provider_detail(exception_class)
+        self.trace_detail = {"exception_class": safe_class} if safe_class is not None else {}
 
 
 class AgentProvider(Protocol):

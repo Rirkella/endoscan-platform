@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
+
+import pytest
 
 from endoscan_workflows.contracts import (
     ActorType,
@@ -15,8 +18,9 @@ from endoscan_workflows.contracts import (
     WorkflowState,
 )
 from endoscan_workflows.discovery import DiscoveryOutput, discovery_request
+from endoscan_workflows.errors import GuardNotSatisfied
 from endoscan_workflows.harness import AgentHarness
-from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
+from endoscan_workflows.providers import FakeAgentProvider, ProviderFailure, ProviderRegistry
 from endoscan_workflows.testing import phase0_test_tool_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -211,6 +215,130 @@ def test_timeout_and_provider_failure_are_normalized(workflow_runtime) -> None:
     _run_id, failed = harness.run(failed_request, DiscoveryOutput)
     assert failed.status is AgentRunStatus.FAILED
     assert failed.error.code == "provider_failure"
+
+
+def test_safe_provider_failure_diagnostics_are_persisted_and_logged(
+    workflow_runtime, caplog
+) -> None:
+    database, _store, _providers, _harness, service = workflow_runtime
+    build, _discovering, _step, request, _default, _service = harness_context(workflow_runtime)
+
+    class DiagnosticFailureProvider:
+        name = "diagnostic"
+
+        def run_turn(self, *_args, **_kwargs):
+            raise ProviderFailure(
+                "Safe normalized message.",
+                retryable=False,
+                exception_class="BadRequestError",
+                http_status=400,
+                provider_error_code="unsupported_value",
+                provider_error_type="invalid_request_error",
+                provider_request_id="req_safe-diagnostic",
+                provider_parameter="temperature",
+            )
+
+    registry = ProviderRegistry()
+    registry.register("diagnostic", DiagnosticFailureProvider)
+    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    diagnostic_request = request.model_copy(
+        update={
+            "model": request.model.model_copy(update={"provider": "diagnostic"}),
+            "instruction_version": "safe-provider-diagnostic-test",
+            "budget": request.budget.model_copy(update={"retry_count": 0}),
+        }
+    )
+
+    caplog.set_level(logging.WARNING, logger="endoscan.workflow.provider")
+    run_id, result = harness.run(diagnostic_request, DiscoveryOutput)
+    assert result.error.retryable is False
+    failed = next(event for event in result.trace if event.event_type == "provider.turn.failed")
+    assert failed.detail == {
+        "turn": 1,
+        "retryable": False,
+        "exception_class": "BadRequestError",
+        "http_status": 400,
+        "provider_error_code": "unsupported_value",
+        "provider_error_type": "invalid_request_error",
+        "provider_request_id": "req_safe-diagnostic",
+        "provider_parameter": "temperature",
+    }
+    stored = service.agent_run(run_id)
+    stored_failed = next(
+        event
+        for event in stored["trace"]["events"]
+        if event["event_type"] == "provider.turn.failed"
+    )
+    assert stored_failed["detail"] == failed.detail
+    assert service.errors(build.id)[-1]["retryable"] is False
+    logged = caplog.get_records("call")[-1].getMessage()
+    assert "workflow_id=" in logged
+    assert "agent_run_id=" in logged
+    assert "exception_class=BadRequestError" in logged
+    assert "http_status=400" in logged
+    assert "provider_error_code=unsupported_value" in logged
+    assert "provider_request_id=req_safe-diagnostic" in logged
+    assert "retryable=False" in logged
+    assert "attempt=1" in logged
+    assert "Safe normalized message" not in logged
+
+
+@pytest.mark.parametrize(
+    ("retryable", "expected_step_status", "expected_calls"),
+    [(False, "failed", 1), (True, "failed_retryable", 2)],
+)
+def test_provider_retryability_agrees_across_result_error_and_step(
+    workflow_runtime, retryable: bool, expected_step_status: str, expected_calls: int
+) -> None:
+    database, _store, _providers, _harness, service = workflow_runtime
+
+    class ClassifiedFailureProvider:
+        name = "fake"
+        calls = 0
+
+        def run_turn(self, *_args, **_kwargs):
+            self.calls += 1
+            raise ProviderFailure(
+                "Classified provider failure.",
+                retryable=retryable,
+                exception_class="SyntheticProviderError",
+                http_status=429 if retryable else 400,
+            )
+
+    provider = ClassifiedFailureProvider()
+    registry = ProviderRegistry()
+    registry.register("fake", lambda: provider)
+    service.harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    created = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Retryability test",
+            endpoint_slug=f"retryability-{str(retryable).lower()}",
+            biological_goal="Verify one authoritative provider retryability classification.",
+            created_by="test-admin",
+            idempotency_key=f"retryability-build-{retryable}",
+        )
+    )
+    failed = service.start_build(
+        created.id,
+        expected_version=created.version,
+        actor="test-admin",
+        idempotency_key=f"retryability-start-{retryable}",
+    )
+    assert failed.current_stage is WorkflowState.FAILED
+    assert provider.calls == expected_calls
+    error = service.errors(created.id)[-1]
+    step = service.steps(created.id)[-1]
+    assert error["retryable"] is retryable
+    assert step["status"] == expected_step_status
+    assert step["error_id"] == error["id"]
+    if not retryable:
+        with pytest.raises(GuardNotSatisfied, match="not retryable"):
+            service.retry_failed(
+                created.id,
+                expected_version=failed.version,
+                actor="test-admin",
+                idempotency_key="retryability-terminal-retry",
+            )
 
 
 def test_transient_provider_failure_retries(workflow_runtime) -> None:

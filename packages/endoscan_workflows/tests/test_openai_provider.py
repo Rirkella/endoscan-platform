@@ -3,7 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from openai import (
+    APIConnectionError,
+    AuthenticationError,
+    BadRequestError,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 from pydantic import SecretStr
 
 from endoscan_workflows.config import AgentConfiguration, AgentRunMode
@@ -103,6 +113,24 @@ def provider(runner) -> OpenAIAgentProvider:
     )
 
 
+def status_error(error_class, status: int, code: str, error_type: str):
+    response = httpx.Response(
+        status,
+        headers={"x-request-id": f"req_status_{status}"},
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+    )
+    return error_class(
+        "raw provider message must not persist",
+        response=response,
+        body={
+            "code": code,
+            "param": "model",
+            "type": error_type,
+            "message": "raw provider body must not persist",
+        },
+    )
+
+
 def test_valid_structured_output_and_normalized_usage() -> None:
     item = provider(
         lambda *_args, **_kwargs: result(valid_output(), input_tokens=1000, output_tokens=500)
@@ -136,8 +164,134 @@ def test_provider_timeout_is_normalized() -> None:
     def timeout(*_args, **_kwargs):
         raise TimeoutError("provider internals must not leak")
 
-    with pytest.raises(ProviderTimeout, match="configured timeout"):
+    with pytest.raises(ProviderTimeout, match="configured timeout") as raised:
         provider(timeout).run_turn(request(), [], interruption_requested=False)
+    assert raised.value.retryable is True
+    assert raised.value.trace_detail == {"exception_class": "TimeoutError"}
+
+
+@pytest.mark.parametrize(
+    ("error", "retryable", "status", "code"),
+    [
+        (
+            status_error(AuthenticationError, 401, "invalid_api_key", "authentication_error"),
+            False,
+            401,
+            "invalid_api_key",
+        ),
+        (
+            status_error(PermissionDeniedError, 403, "model_access_denied", "permission_error"),
+            False,
+            403,
+            "model_access_denied",
+        ),
+        (
+            status_error(NotFoundError, 404, "model_not_found", "invalid_request_error"),
+            False,
+            404,
+            "model_not_found",
+        ),
+        (
+            status_error(BadRequestError, 400, "unsupported_parameter", "invalid_request_error"),
+            False,
+            400,
+            "unsupported_parameter",
+        ),
+        (
+            status_error(RateLimitError, 429, "rate_limit_exceeded", "rate_limit_error"),
+            True,
+            429,
+            "rate_limit_exceeded",
+        ),
+        (
+            status_error(InternalServerError, 500, "server_error", "server_error"),
+            True,
+            500,
+            "server_error",
+        ),
+    ],
+)
+def test_api_status_retryability_is_authoritative(
+    error: Exception, retryable: bool, status: int, code: str
+) -> None:
+    with pytest.raises(ProviderFailure) as raised:
+        provider(lambda *_args, **_kwargs: (_ for _ in ()).throw(error)).run_turn(
+            request(), [], interruption_requested=False
+        )
+    assert raised.value.retryable is retryable
+    assert raised.value.trace_detail["http_status"] == status
+    assert raised.value.trace_detail["provider_error_code"] == code
+    assert raised.value.trace_detail["provider_request_id"] == f"req_status_{status}"
+
+
+def test_connection_failure_is_retryable() -> None:
+    error = APIConnectionError(request=httpx.Request("POST", "https://api.openai.com/v1/responses"))
+    with pytest.raises(ProviderFailure) as raised:
+        provider(lambda *_args, **_kwargs: (_ for _ in ()).throw(error)).run_turn(
+            request(), [], interruption_requested=False
+        )
+    assert raised.value.retryable is True
+    assert raised.value.trace_detail == {"exception_class": "APIConnectionError"}
+
+
+def test_unknown_adapter_exception_is_non_retryable_and_safe() -> None:
+    error = RuntimeError("arbitrary repr with sk-unit-test-secret")
+    with pytest.raises(ProviderFailure) as raised:
+        provider(lambda *_args, **_kwargs: (_ for _ in ()).throw(error)).run_turn(
+            request(), [], interruption_requested=False
+        )
+    assert raised.value.retryable is False
+    assert raised.value.trace_detail == {"exception_class": "RuntimeError"}
+    assert "sk-unit-test-secret" not in str(raised.value.trace_detail)
+
+
+def test_api_status_failure_preserves_only_safe_diagnostics() -> None:
+    response = httpx.Response(
+        400,
+        headers={"x-request-id": "req_safe-diagnostic"},
+        request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+    )
+    api_error = BadRequestError(
+        "synthetic message must not be persisted",
+        response=response,
+        body={
+            "code": "unsupported_value",
+            "param": "temperature",
+            "type": "invalid_request_error",
+            "message": "synthetic body must not be persisted",
+        },
+    )
+
+    with pytest.raises(ProviderFailure) as raised:
+        provider(lambda *_args, **_kwargs: (_ for _ in ()).throw(api_error)).run_turn(
+            request(), [], interruption_requested=False
+        )
+
+    assert raised.value.retryable is False
+    assert raised.value.trace_detail == {
+        "exception_class": "BadRequestError",
+        "http_status": 400,
+        "provider_error_code": "unsupported_value",
+        "provider_error_type": "invalid_request_error",
+        "provider_request_id": "req_safe-diagnostic",
+        "provider_parameter": "temperature",
+    }
+    assert "synthetic" not in str(raised.value.trace_detail)
+
+
+def test_safe_error_names_survive_while_secret_like_values_are_redacted() -> None:
+    failure = ProviderFailure(
+        "Safe normalized message.",
+        retryable=False,
+        provider_error_code="invalid_api_key",
+        provider_request_id="req_prefix_sk-unit-secret_suffix",
+        provider_parameter="api_key",
+    )
+    assert failure.trace_detail == {
+        "provider_error_code": "invalid_api_key",
+        "provider_request_id": "[REDACTED]",
+        "provider_parameter": "api_key",
+    }
 
 
 def test_malformed_output_fails_safely() -> None:

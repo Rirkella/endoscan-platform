@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api, EndoscanApiError } from "../api/client";
-import type { AdminAgentCapabilities, AdminBuild } from "../api/types";
+import type { AdminAgentCapabilities, AdminBuild, AdminProviderPreflight } from "../api/types";
 import {
   BuildFilter,
   buildFilter,
@@ -31,11 +31,21 @@ const FILTERS: Array<{ value: BuildFilter; label: string }> = [
   { value: "completed", label: "Completed" },
 ];
 
+function preflightLabel(result: AdminProviderPreflight): string {
+  if (result.authentication_accepted && result.model_accessible) return "Provider access confirmed";
+  if (!result.api_key_present) return "Invalid configuration";
+  if (result.http_status === 401) return "Authentication rejected";
+  if ([403, 404].includes(result.http_status ?? 0)) return "Model not accessible";
+  if (result.http_status === 400) return "Invalid configuration";
+  return "Provider temporarily unavailable";
+}
+
 export function AdminEndpoints() {
   const navigate = useNavigate();
   const newButton = useRef<HTMLButtonElement>(null);
   const [builds, setBuilds] = useState<AdminBuild[]>([]);
   const [capabilities, setCapabilities] = useState<AdminAgentCapabilities | null>(null);
+  const [preflight, setPreflight] = useState<AdminProviderPreflight | null>(null);
   const [name, setName] = useState("Oxidative stress");
   const [goal, setGoal] = useState(
     "Evaluate a response-defined oxidative-stress endpoint from transcriptomic signatures.",
@@ -45,6 +55,7 @@ export function AdminEndpoints() {
   const [createOpen, setCreateOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [checkingProvider, setCheckingProvider] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -101,6 +112,18 @@ export function AdminEndpoints() {
     }
   }
 
+  async function checkProviderAccess() {
+    setCheckingProvider(true);
+    setError(null);
+    try {
+      setPreflight(await api.adminProviderPreflight());
+    } catch {
+      setError("Provider access could not be checked. No agent run was started.");
+    } finally {
+      setCheckingProvider(false);
+    }
+  }
+
   return (
     <section className="admin-page" aria-labelledby="admin-endpoints-title">
       <header className="admin-heading admin-list-page-heading">
@@ -120,7 +143,20 @@ export function AdminEndpoints() {
         <strong>{capabilities?.run_mode === "live" ? "Live agent mode" : capabilities?.run_mode === "cached" ? "Cached mode" : "Replay mode"}</strong>
         <span>{capabilities ? `${capabilities.provider} · ${capabilities.model} · API key present: ${capabilities.api_key_present ? "yes" : "no"} · source tools: ${capabilities.source_tools_available ? "available" : "unavailable"} · tracing: ${capabilities.tracing_enabled ? "enabled" : "disabled"} · budget: ${capabilities.configured_budget.maximum_tool_calls} tools / $${capabilities.configured_budget.maximum_cost_usd.toFixed(2)}` : "Configuration status is unavailable; the Admin Console remains usable with replay data."}</span>
         {capabilities && !capabilities.live_mode_enabled && <span>Live runs are disabled because no OpenAI API key is configured. Replay remains available.</span>}
+        <button className="admin-secondary" disabled={checkingProvider} onClick={() => void checkProviderAccess()}>
+          {checkingProvider ? "Checking provider access..." : "Check provider access"}
+        </button>
       </div>
+
+      {preflight && (
+        <section className="admin-provider-preflight" aria-live="polite">
+          <strong>{preflightLabel(preflight)}</strong>
+          <span>API credentials accepted: {preflight.authentication_accepted ? "yes" : "no"}</span>
+          <span>Configured model accessible: {preflight.model_accessible ? "yes" : "no"}</span>
+          <span>Billing and generation: not checked</span>
+          <span>Checked {new Date(preflight.checked_at).toLocaleString()}</span>
+        </section>
+      )}
 
       {error && <div className="admin-error" role="alert">{error}</div>}
 
