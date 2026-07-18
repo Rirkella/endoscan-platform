@@ -1,8 +1,18 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api, EndoscanApiError } from "../api/client";
 import type { AdminBuild } from "../api/types";
+import {
+  BuildFilter,
+  buildFilter,
+  buildStatusLabel,
+  relativeTime,
+  shortBuildId,
+  stageLabel,
+  stageProgress,
+} from "../adminPresentation";
+import { AdminModal } from "../components/AdminModal";
 
 function slugify(value: string): string {
   return value
@@ -12,28 +22,58 @@ function slugify(value: string): string {
     .replace(/^-|-$/g, "");
 }
 
+const FILTERS: Array<{ value: BuildFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "review", label: "Needs review" },
+  { value: "running", label: "Running" },
+  { value: "paused", label: "Paused" },
+  { value: "failed", label: "Failed" },
+  { value: "completed", label: "Completed" },
+];
+
 export function AdminEndpoints() {
   const navigate = useNavigate();
+  const newButton = useRef<HTMLButtonElement>(null);
   const [builds, setBuilds] = useState<AdminBuild[]>([]);
   const [name, setName] = useState("Oxidative stress");
   const [goal, setGoal] = useState(
     "Evaluate a response-defined oxidative-stress endpoint from transcriptomic signatures.",
   );
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<BuildFilter>("all");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
+    setLoading(true);
     try {
-      setBuilds(await api.adminListBuilds());
+      const next = await api.adminListBuilds();
+      setBuilds([...next].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)));
       setError(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to load endpoint builds.");
+    } catch {
+      setError("Endpoint builds could not be loaded. Check the local service and try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     void load();
   }, []);
+
+  const visibleBuilds = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return builds.filter((build) => {
+      const matchesQuery = !normalized || `${build.endpoint_name} ${build.id}`.toLowerCase().includes(normalized);
+      const matchesFilter = filter === "all" || buildFilter(build) === filter;
+      return matchesQuery && matchesFilter;
+    });
+  }, [builds, filter, query]);
+
+  const needsReview = builds.filter((build) => buildFilter(build) === "review").length;
+  const running = builds.filter((build) => buildFilter(build) === "running").length;
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -46,10 +86,13 @@ export function AdminEndpoints() {
         biological_goal: goal,
         created_by: "local-admin",
       });
+      setCreateOpen(false);
       navigate(`/admin/endpoints/${encodeURIComponent(build.id)}`);
     } catch (reason) {
       setError(
-        reason instanceof EndoscanApiError ? reason.detail : "Endpoint build could not be created.",
+        reason instanceof EndoscanApiError
+          ? "The endpoint draft could not be created. Review the fields and try again."
+          : "The endpoint draft could not be created. Try again.",
       );
     } finally {
       setBusy(false);
@@ -58,71 +101,126 @@ export function AdminEndpoints() {
 
   return (
     <section className="admin-page" aria-labelledby="admin-endpoints-title">
-      <div className="admin-heading">
+      <header className="admin-heading admin-list-page-heading">
         <div>
-          <span className="admin-eyebrow">Agent foundation / Phase 0</span>
           <h1 id="admin-endpoints-title">Endpoint builds</h1>
-          <p>Durable workflow control, evidence review, and human approval.</p>
+          <p>Review durable agent-assisted workflows and the human decisions waiting on you.</p>
         </div>
-        <span className="admin-simulation-label">Prepared deterministic agent simulation</span>
-      </div>
+        <div className="admin-heading-actions">
+          <button className="admin-secondary admin-icon-button" onClick={() => void load()} aria-label="Refresh endpoint builds">
+            Refresh
+          </button>
+          <button ref={newButton} className="admin-primary" onClick={() => setCreateOpen(true)}>+ New endpoint</button>
+        </div>
+      </header>
 
-      <div className="admin-notice" role="note">
-        No live AI or dataset discovery is enabled. This local-development console uses a
-        deterministic fake provider and cannot publish the production endpoint registry.
+      <div className="admin-mode-row" role="note">
+        <strong>Simulation mode</strong>
+        <span>Prepared agent outputs test workflow control, approvals and tracing. The workflow infrastructure is live; scientific discovery is not.</span>
       </div>
 
       {error && <div className="admin-error" role="alert">{error}</div>}
 
-      <form className="admin-create-card" onSubmit={create}>
-        <div>
-          <span className="admin-section-kicker">New governed workflow</span>
-          <h2>Create endpoint draft</h2>
-        </div>
-        <label>
-          Endpoint name
-          <input value={name} onChange={(event) => setName(event.target.value)} required />
-        </label>
-        <label className="admin-wide-field">
-          Biological goal
-          <textarea value={goal} onChange={(event) => setGoal(event.target.value)} required />
-        </label>
-        <button className="admin-primary" disabled={busy}>{busy ? "Creating…" : "Create endpoint"}</button>
-      </form>
+      <section className="admin-summary" aria-label="Build status summary">
+        <div><strong>{builds.length}</strong><span>Total builds</span></div>
+        <div><strong>{needsReview}</strong><span>Need review</span></div>
+        <div><strong>{running}</strong><span>Running</span></div>
+      </section>
 
-      <div className="admin-list-heading">
-        <h2>Persisted builds</h2>
-        <button className="admin-secondary" onClick={() => void load()}>Refresh</button>
+      <div className="admin-list-toolbar">
+        <label className="admin-search">
+          <span className="sr-only">Search builds</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search endpoint name or build ID"
+          />
+        </label>
+        <div className="admin-filter-tabs" role="group" aria-label="Filter builds by status">
+          {FILTERS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              aria-pressed={filter === item.value}
+              onClick={() => setFilter(item.value)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <span className="admin-sort-label">Sorted by last updated</span>
       </div>
-      <div className="admin-build-list">
-        {builds.length === 0 ? (
-          <div className="admin-empty">No endpoint builds yet.</div>
+
+      <div className="admin-build-list" aria-live="polite" aria-busy={loading}>
+        {loading ? (
+          <div className="admin-list-skeleton" role="status">Loading endpoint builds...</div>
+        ) : visibleBuilds.length === 0 && builds.length === 0 ? (
+          <div className="admin-empty admin-empty-builds">
+            <h2>No endpoint builds yet.</h2>
+            <p>Create a new endpoint to start an agent-assisted workflow.</p>
+            <button className="admin-primary" onClick={() => setCreateOpen(true)}>+ New endpoint</button>
+          </div>
+        ) : visibleBuilds.length === 0 ? (
+          <div className="admin-empty"><strong>No builds match these filters.</strong><span>Try a different search or status.</span></div>
         ) : (
-          builds.map((build) => (
-            <article className="admin-build-row" key={build.id}>
-              <div>
-                <span className={`admin-status admin-status-${build.status}`}>{build.status}</span>
-                <h3>{build.endpoint_name}</h3>
-                <p>{build.biological_goal}</p>
-              </div>
-              <div className="admin-row-stage">
-                <span>Current stage</span>
-                <strong>{build.current_stage.split("_").join(" ")}</strong>
-                <div className="admin-progress" aria-label={`${build.progress}% complete`}>
-                  <span style={{ width: `${build.progress}%` }} />
+          visibleBuilds.map((build) => {
+            const progress = stageProgress(build);
+            return (
+              <article className="admin-build-row" key={build.id}>
+                <div className="admin-build-identity">
+                  <div className="admin-card-title-row">
+                    <h2>{build.endpoint_name}</h2>
+                    <span className={`admin-status admin-status-${buildFilter(build)}`}>{buildStatusLabel(build)}</span>
+                  </div>
+                  <p className="admin-build-number">Build {shortBuildId(build.id)}</p>
+                  <p>{build.biological_goal}</p>
                 </div>
-              </div>
-              <div className="admin-row-meta">
-                {build.pending_approval_id && <span>Approval pending</span>}
-                <time>{new Date(build.updated_at).toLocaleString()}</time>
-                <Link className="admin-primary" to={`/admin/endpoints/${encodeURIComponent(build.id)}`}>
-                  Open
-                </Link>
-              </div>
-            </article>
-          ))
+                <div className="admin-row-stage">
+                  <span>Current stage</span>
+                  <strong>{stageLabel(build.current_stage)}</strong>
+                  <div className="admin-progress" role="progressbar" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={progress.completed} aria-label={`${progress.completed} of ${progress.total} stages completed`}>
+                    <span style={{ width: `${(progress.completed / progress.total) * 100}%` }} />
+                  </div>
+                  <small>{progress.completed} of {progress.total} stages completed</small>
+                </div>
+                <div className="admin-row-meta">
+                  {build.pending_approval_id && <span className="admin-review-flag">Review required</span>}
+                  <span>Updated {relativeTime(build.updated_at)}</span>
+                  <span>Created {new Date(build.created_at).toLocaleDateString()}</span>
+                  <Link className="admin-primary" to={`/admin/endpoints/${encodeURIComponent(build.id)}`} aria-label={`Open ${build.endpoint_name}, build ${shortBuildId(build.id)}`}>
+                    Open build
+                  </Link>
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
+
+      {createOpen && (
+        <AdminModal
+          title="Create endpoint draft"
+          description="Start a governed workflow using the prepared Phase 0 agent fixtures."
+          onClose={() => setCreateOpen(false)}
+          returnFocus={newButton.current}
+        >
+          <form className="admin-create-form" onSubmit={create}>
+            <label>
+              Endpoint name
+              <input data-autofocus value={name} onChange={(event) => setName(event.target.value)} required />
+            </label>
+            <label>
+              Biological goal
+              <textarea value={goal} onChange={(event) => setGoal(event.target.value)} required />
+            </label>
+            <div className="admin-modal-actions">
+              <button type="button" className="admin-secondary" onClick={() => setCreateOpen(false)}>Cancel</button>
+              <button className="admin-primary" disabled={busy}>{busy ? "Creating..." : "Create endpoint"}</button>
+            </div>
+          </form>
+        </AdminModal>
+      )}
     </section>
   );
 }

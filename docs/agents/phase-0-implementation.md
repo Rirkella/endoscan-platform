@@ -164,6 +164,30 @@ The Admin Console provides:
 Layouts collapse for narrow viewports and unknown future stage strings render without a fixed
 ER/AR assumption. Chat is not the primary interface.
 
+### Admin Console UX refinement
+
+The endpoint-build list leads with persisted builds, status counts, search, review/status
+filters, and most-recently-updated ordering. Endpoint creation opens a compact, focus-managed
+dialog so the existing governed work remains visible first. Cards use a short build identifier,
+human-readable state, current stage, timestamps, pending-review status, and grouped stage
+progress to distinguish repeated endpoint names.
+
+Build detail uses a responsive approval-first layout. A ten-stage, future-safe stepper makes the
+current workflow position explicit, then places the bound human decision and prepared candidate
+comparison ahead of supporting telemetry. The review card presents the recommendation,
+limitations, alternatives, reviewer comment, and a confirmation summary without exposing hashes
+as primary content. Agent activity summarizes the deterministic provider run and translates
+tool calls into human steps; raw traces remain optional.
+
+Human-readable Activity is separate from the complete immutable Technical audit log. Activity
+shows a short recent sequence by default and expands in normal page flow, without a nested
+timeline scrollbar. Machine state, workflow version, identifiers, and hashes are retained under
+Technical details. The console uses one concise `Simulation mode` indicator: workflow control,
+approvals, persistence, and audit are live, while Phase-0 agent recommendations remain prepared
+deterministic fixtures rather than live scientific discovery. The controlled-failure action is
+collapsed under development-only Developer tools and is visually separated from valid workflow
+controls.
+
 ## Restart recovery and observability
 
 Startup migrates the database and reconciles interrupted running steps. An interrupted running
