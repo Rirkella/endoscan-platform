@@ -98,7 +98,7 @@ const events: AdminTimelineEvent[] = [
 const run: AdminAgentRun = {
   schema_version: "1.0.0", id: runId, workflow_id: buildId, step_id: "step-discovery",
   agent_name: "Dataset Discovery Agent", provider: "fake", model_identifier: "fake-phase0-v1",
-  status: "approval_required", turns: 2, duration_ms: 18,
+  run_mode: "replay", status: "approval_required", turns: 2, duration_ms: 18,
   usage: { input_tokens: 120, output_tokens: 80, estimated_cost_usd: 0 },
   tools: [
     { id: "tool-1", tool_name: "inspect_endpoint_registry", status: "completed", duration_ms: 2 },
@@ -475,11 +475,14 @@ describe("Phase-1 live discovery presentation", () => {
     ["cached", "Cached mode"],
     ["replay", "Replay mode"],
   ])("renders the %s badge", async (mode, label) => {
+    const modeRun = { ...run, run_mode: mode as AdminAgentRun["run_mode"] };
     installFetchMock({
       ...detailRoutes(() => build()),
       [`GET /api/admin/artifacts/${artifactId}/preview`]: {
         body: { artifact, content: { run_mode: mode, candidates } },
       },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [modeRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: modeRun },
     });
     renderApp(`/admin/endpoints/${buildId}`);
     expect(await screen.findByText(label)).toBeInTheDocument();
@@ -490,6 +493,7 @@ describe("Phase-1 live discovery presentation", () => {
       ...run,
       provider: "openai",
       model_identifier: "gpt-5.4-mini",
+      run_mode: "live" as const,
       duration_ms: 1540,
       usage: { input_tokens: 1000, output_tokens: 500, cost_cents: 0.3 },
       tools: [{ id: "tool-live", tool_name: "validate_geo_accession", status: "completed", duration_ms: 40 }],
@@ -559,5 +563,56 @@ describe("Phase-1 live discovery presentation", () => {
     expect(screen.getByRole("button", { name: "Refresh source metadata" })).toBeInTheDocument();
     expect(screen.queryByText(/chain of thought/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve dataset" })).toBeInTheDocument();
+  });
+
+  it("shows a failed live run from persisted run truth without replay or review claims", async () => {
+    const failedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "failed",
+      turns: 1,
+      duration_ms: 16,
+      usage: { input_tokens: 0, output_tokens: 0, cached_tokens: 0, cost_cents: 0 },
+      tools: [],
+      trace: {
+        events: [
+          {
+            event_type: "provider.turn.failed",
+            detail: {
+              retryable: false,
+              exception_class: "UserError",
+              developer_message: "additionalProperties should not be set for object types.",
+            },
+          },
+        ],
+      },
+    };
+    const terminalError: AdminWorkflowError = {
+      ...workflowErrors[0],
+      code: "provider_failure",
+      retryable: false,
+      safe_message: "Provider failed after bounded retries.",
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("FAILED", 4), [terminalError]),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [failedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: failedRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Live agent run failed")).toBeInTheDocument();
+    expect(screen.getByText("Live agent mode")).toBeInTheDocument();
+    expect(screen.getByText("No recommendation available")).toBeInTheDocument();
+    expect(screen.getByText("additionalProperties should not be set for object types.")).toBeInTheDocument();
+    expect(screen.getByText("No review required")).toBeInTheDocument();
+    expect(screen.queryByText("Replay mode")).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed for review")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry failed step" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    const activity = screen.getByRole("heading", { name: "Agent activity" }).closest("section")!;
+    expect(within(activity).getAllByText("0", { selector: "dd" })).toHaveLength(3);
   });
 });

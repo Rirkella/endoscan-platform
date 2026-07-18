@@ -156,6 +156,43 @@ def test_provider_preflight_missing_key_makes_no_external_call(
         assert payload["generation_capability"] == "not_checked"
 
 
+def test_adapter_boundary_probe_reaches_model_boundary_without_state_or_network(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+
+    def forbidden_external_call(*args, **kwargs):
+        raise AssertionError("Boundary probe attempted an external request")
+
+    monkeypatch.setattr("endoscan_workflows.openai_provider.AsyncOpenAI", forbidden_external_call)
+    monkeypatch.setattr(
+        "endoscan_workflows.source_security.ScientificSourceClient.get",
+        forbidden_external_call,
+    )
+    with TestClient(create_app(repo_root)) as client:
+        response = post(
+            client,
+            "/admin/agent-provider/boundary-probe",
+            {},
+            "adapter-boundary-probe",
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload == {
+            "schema_version": "1.0.0",
+            "local_sdk_configuration_valid": True,
+            "model_call_boundary_reached": True,
+            "developer_message": None,
+            "exception_class": None,
+            "sdk_version": "0.18.2",
+            "model": "gpt-5.4-mini",
+            "tool_count": 6,
+            "output_schema_name": "DiscoveryOutput",
+            "network_requests": 0,
+        }
+        assert client.get("/admin/endpoint-builds", headers=ADMIN).json() == []
+
+
 def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
     configure(monkeypatch, tmp_path)
     registry = repo_root / "registry" / "models" / "endpoints.json"
@@ -208,6 +245,7 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
         runs = client.get(f"/admin/endpoint-builds/{build['id']}/agent-runs", headers=ADMIN).json()
         trace = client.get(f"/admin/agent-runs/{runs[0]['id']}", headers=ADMIN).json()
         assert trace["provider"] == "fake"
+        assert trace["run_mode"] == "replay"
         assert len(trace["tools"]) == 4
         assert all(item["tool_name"] != "shell" for item in trace["tools"])
 

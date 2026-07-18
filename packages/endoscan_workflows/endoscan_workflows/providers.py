@@ -19,6 +19,13 @@ from .contracts import (
 
 _SAFE_PROVIDER_DETAIL = re.compile(r"^[A-Za-z0-9_.$:/\[\]-]{1,200}$")
 _SECRET_LIKE_PROVIDER_DETAIL = re.compile(r"(?i)sk-[A-Za-z0-9_-]{6,}")
+_DEVELOPER_MESSAGE_LIMIT = 800
+_AUTHORIZATION_VALUE = re.compile(r"(?i)(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+")
+_BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+_NAMED_SECRET_VALUE = re.compile(
+    r"(?i)\b(api[_ -]?key|token|password|secret)\b(\s*[:=]\s*)" r"(?:['\"]?)[^\s,'\";]+"
+)
+_CREDENTIAL_URL = re.compile(r"(?i)\b(https?://)([^\s/@:]+):([^\s/@]+)@")
 
 
 def _safe_provider_detail(value: object | None) -> str | None:
@@ -28,6 +35,21 @@ def _safe_provider_detail(value: object | None) -> str | None:
     if _SECRET_LIKE_PROVIDER_DETAIL.search(text):
         return "[REDACTED]"
     return text if _SAFE_PROVIDER_DETAIL.fullmatch(text) else None
+
+
+def sanitize_local_sdk_message(value: object | None) -> str | None:
+    """Return a bounded developer diagnostic for a known local SDK configuration error."""
+    if value is None:
+        return None
+    text = " ".join(str(value).replace("\x00", " ").split())
+    text = _SECRET_LIKE_PROVIDER_DETAIL.sub("[REDACTED]", text)
+    text = _AUTHORIZATION_VALUE.sub(r"\1[REDACTED]", text)
+    text = _BEARER_VALUE.sub("Bearer [REDACTED]", text)
+    text = _NAMED_SECRET_VALUE.sub(r"\1\2[REDACTED]", text)
+    text = _CREDENTIAL_URL.sub(r"\1[REDACTED]@", text)
+    if len(text) > _DEVELOPER_MESSAGE_LIMIT:
+        text = f"{text[: _DEVELOPER_MESSAGE_LIMIT - 3]}..."
+    return text or None
 
 
 class ProviderFailure(RuntimeError):
@@ -42,13 +64,26 @@ class ProviderFailure(RuntimeError):
         provider_error_type: object | None = None,
         provider_request_id: object | None = None,
         provider_parameter: object | None = None,
+        developer_message: object | None = None,
+        sdk_version: object | None = None,
+        adapter_operation: object | None = None,
+        adapter_model: object | None = None,
+        adapter_max_turns: int | None = None,
+        adapter_tool_count: int | None = None,
+        adapter_output_schema: object | None = None,
+        adapter_use_responses: bool | None = None,
+        adapter_parallel_tool_calls: bool | None = None,
+        adapter_store: bool | None = None,
+        adapter_tracing_disabled: bool | None = None,
     ):
         super().__init__(message)
         self.retryable = retryable
+        safe_exception_class = _safe_provider_detail(exception_class)
+        local_sdk_configuration_error = safe_exception_class == "UserError"
         self.trace_detail = {
             key: value
             for key, value in {
-                "exception_class": _safe_provider_detail(exception_class),
+                "exception_class": safe_exception_class,
                 "http_status": (
                     http_status
                     if isinstance(http_status, int) and 100 <= http_status <= 599
@@ -58,6 +93,47 @@ class ProviderFailure(RuntimeError):
                 "provider_error_type": _safe_provider_detail(provider_error_type),
                 "provider_request_id": _safe_provider_detail(provider_request_id),
                 "provider_parameter": _safe_provider_detail(provider_parameter),
+                "developer_message": (
+                    sanitize_local_sdk_message(developer_message)
+                    if local_sdk_configuration_error
+                    else None
+                ),
+                "sdk_version": (
+                    _safe_provider_detail(sdk_version) if local_sdk_configuration_error else None
+                ),
+                "adapter_operation": (
+                    _safe_provider_detail(adapter_operation)
+                    if local_sdk_configuration_error
+                    else None
+                ),
+                "adapter_model": (
+                    _safe_provider_detail(adapter_model) if local_sdk_configuration_error else None
+                ),
+                "adapter_max_turns": (
+                    adapter_max_turns
+                    if local_sdk_configuration_error and isinstance(adapter_max_turns, int)
+                    else None
+                ),
+                "adapter_tool_count": (
+                    adapter_tool_count
+                    if local_sdk_configuration_error and isinstance(adapter_tool_count, int)
+                    else None
+                ),
+                "adapter_output_schema": (
+                    _safe_provider_detail(adapter_output_schema)
+                    if local_sdk_configuration_error
+                    else None
+                ),
+                "adapter_use_responses": (
+                    adapter_use_responses if local_sdk_configuration_error else None
+                ),
+                "adapter_parallel_tool_calls": (
+                    adapter_parallel_tool_calls if local_sdk_configuration_error else None
+                ),
+                "adapter_store": (adapter_store if local_sdk_configuration_error else None),
+                "adapter_tracing_disabled": (
+                    adapter_tracing_disabled if local_sdk_configuration_error else None
+                ),
             }.items()
             if value is not None
         }

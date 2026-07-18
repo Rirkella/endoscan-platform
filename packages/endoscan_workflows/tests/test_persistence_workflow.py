@@ -23,7 +23,7 @@ from endoscan_workflows.errors import (
     WorkflowConflict,
     WorkflowNotFound,
 )
-from endoscan_workflows.models import EndpointBuildRow, WorkflowEventRow
+from endoscan_workflows.models import EndpointBuildRow, WorkflowErrorRow, WorkflowEventRow
 from endoscan_workflows.repository import load_versioned_json
 
 
@@ -359,7 +359,8 @@ def test_restart_recovery_marks_running_step_retryable(workflow_runtime) -> None
     recovered = service.get_build(curating.id)
     assert recovered.current_stage is WorkflowState.FAILED
     assert recovered.failed_from_state is WorkflowState.CURATING_DATA
-    assert service.steps(curating.id)[-1]["status"] == "failed_retryable"
+    assert service.steps(curating.id)[-1]["status"] == "interrupted"
+    assert service.timeline(curating.id)[-2]["event_type"] == "workflow.step.interrupted"
     assert service.list_approvals(curating.id)[-1]["status"] == "approved"
 
 
@@ -381,6 +382,82 @@ def test_controlled_failure_retry_does_not_duplicate_discovery(workflow_runtime)
     )
     assert retried.current_stage is WorkflowState.AWAITING_DATASET_APPROVAL
     assert len(service.agent_runs(waiting.id)) == run_count
+
+
+def test_new_step_attempt_explicitly_supersedes_only_active_attempt(workflow_runtime) -> None:
+    _database, _store, _providers, _harness, service = workflow_runtime
+    waiting = start_build(service, create_build(service))
+    approval = service.get_approval(waiting.pending_approval_id)
+    curating = service.decide_approval(
+        approval["id"],
+        ApprovalDecision(
+            decision=ApprovalDecisionValue.APPROVE,
+            reviewer_id="scientist",
+            expected_version=waiting.version,
+            idempotency_key="supersede-approval",
+            artifact_hashes=approval["request"]["artifact_hashes"],
+        ),
+    )
+    first = service.create_step(
+        curating.id,
+        WorkflowState.CURATING_DATA,
+        idempotency_key="curation-attempt-one",
+        input_payload={"attempt": 1},
+    )
+    second = service.create_step(
+        curating.id,
+        WorkflowState.CURATING_DATA,
+        idempotency_key="curation-attempt-two",
+        input_payload={"attempt": 2},
+    )
+    steps = service.steps(curating.id)
+    assert first.id != second.id
+    assert [step["status"] for step in steps[-2:]] == ["interrupted", "running"]
+    assert sum(step["status"] == "running" for step in steps) == 1
+    assert any(
+        event["event_type"] == "workflow.step.superseded"
+        and event["payload"]["step_id"] == first.id
+        for event in service.timeline(curating.id)
+    )
+
+
+def test_restart_repairs_stale_attempt_on_already_failed_workflow(workflow_runtime) -> None:
+    database, _store, _providers, _harness, service = workflow_runtime
+    waiting = start_build(service, create_build(service))
+    failed = service.simulate_failure(
+        waiting.id,
+        expected_version=waiting.version,
+        actor="test-admin",
+        idempotency_key="persisted-failure",
+    )
+    stale = service.create_step(
+        waiting.id,
+        WorkflowState.DISCOVERING_DATA,
+        idempotency_key="persisted-stale-attempt",
+        input_payload={"persisted": True},
+    )
+    with database.session() as session:
+        error = session.scalar(
+            select(WorkflowErrorRow)
+            .where(WorkflowErrorRow.workflow_id == waiting.id)
+            .order_by(WorkflowErrorRow.created_at.desc(), WorkflowErrorRow.id.desc())
+            .limit(1)
+        )
+        error.retryable = 0
+    assert service.recover_interrupted() == 1
+    repaired = service.get_build(waiting.id)
+    assert repaired.current_stage is WorkflowState.FAILED
+    assert repaired.version == failed.version
+    assert (
+        next(step for step in service.steps(waiting.id) if step["id"] == stale.id)["status"]
+        == "interrupted"
+    )
+    assert service.errors(waiting.id)[-1]["retryable"] is False
+    assert any(
+        event["event_type"] == "workflow.step.interrupted"
+        and event["payload"]["repair"] == "backend_restart"
+        for event in service.timeline(waiting.id)
+    )
 
 
 def test_schema_version_is_validated_defensively() -> None:

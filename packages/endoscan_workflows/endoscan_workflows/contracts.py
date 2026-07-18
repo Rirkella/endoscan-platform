@@ -258,6 +258,18 @@ class ProviderPreflightResult(StrictContract):
     checked_at: datetime = Field(default_factory=utc_now)
 
 
+class AdapterBoundaryProbeResult(StrictContract):
+    local_sdk_configuration_valid: bool
+    model_call_boundary_reached: bool
+    developer_message: str | None = Field(default=None, max_length=800)
+    exception_class: str | None = Field(default=None, max_length=160)
+    sdk_version: str = Field(min_length=1, max_length=80)
+    model: str = Field(min_length=1, max_length=160)
+    tool_count: int = Field(ge=0, le=64)
+    output_schema_name: str = Field(min_length=1, max_length=160)
+    network_requests: int = Field(default=0, ge=0)
+
+
 class TraceEvent(StrictContract):
     sequence: int = Field(ge=0)
     event_type: str = Field(min_length=1, max_length=120)

@@ -94,6 +94,7 @@ export interface AdminAgentRun {
   agent_name: string;
   provider: string;
   model_identifier: string;
+  run_mode: "live" | "cached" | "replay" | null;
   status: string;
   turns: number;
   duration_ms: number;

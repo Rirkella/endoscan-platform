@@ -114,8 +114,22 @@ class PublicationMetadataOutput(ToolContract):
     cache_status: Literal["live", "cached"]
 
 
+class DatasetComparisonCandidate(ToolContract):
+    """Bounded fields accepted by the deterministic candidate comparator."""
+
+    accession: str = Field(pattern=r"^GSE[1-9][0-9]{1,8}$")
+    title: str = Field(max_length=500)
+    organism: list[str] = Field(default_factory=list, max_length=10)
+    sample_count: int = Field(default=0, ge=0, le=1_000_000)
+    biological_context: str = Field(default="", max_length=2000)
+    likely_treatment_groups: list[str] = Field(default_factory=list, max_length=50)
+    likely_control_groups: list[str] = Field(default_factory=list, max_length=50)
+    dose_time_evidence: str = Field(default="", max_length=2000)
+    source_artifact_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
 class CompareDatasetCandidatesInput(ToolContract):
-    candidates: list[dict[str, Any]] = Field(min_length=1, max_length=10)
+    candidates: list[DatasetComparisonCandidate] = Field(min_length=1, max_length=10)
 
 
 class CompareDatasetCandidatesOutput(ToolContract):
@@ -404,13 +418,14 @@ class DiscoveryToolService:
     ) -> CompareDatasetCandidatesOutput:
         normalized = []
         for candidate in request.candidates:
-            sample_count = int(candidate.get("sample_count") or 0)
-            control_evidence = bool(candidate.get("likely_control_groups"))
-            treatment_evidence = bool(candidate.get("likely_treatment_groups"))
+            candidate_payload = candidate.model_dump(mode="json")
+            sample_count = candidate.sample_count
+            control_evidence = bool(candidate.likely_control_groups)
+            treatment_evidence = bool(candidate.likely_treatment_groups)
             metadata_score = (
                 min(sample_count, 100) + 25 * control_evidence + 25 * treatment_evidence
             )
-            normalized.append({**candidate, "metadata_completeness_score": metadata_score})
+            normalized.append({**candidate_payload, "metadata_completeness_score": metadata_score})
         normalized.sort(
             key=lambda item: (
                 -int(item["metadata_completeness_score"]),

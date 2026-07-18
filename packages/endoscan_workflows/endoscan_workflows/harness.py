@@ -40,7 +40,7 @@ from .repository import (
 from .tools import ToolRegistry
 
 SECRET_KEYS = {"authorization", "api_key", "apikey", "password", "secret", "token"}
-logger = logging.getLogger("endoscan.workflow.provider")
+logger = logging.getLogger("uvicorn.error.endoscan.workflow.provider")
 
 
 def redact(value: Any) -> Any:
@@ -75,7 +75,10 @@ class AgentHarness:
     ) -> tuple[str, AgentRunResult]:
         started = time.monotonic()
         interruption_request = interruption_request or (lambda: False)
-        safe_request = redact(request.model_dump(mode="json"))
+        request_payload = request.model_dump(mode="json")
+        instructions = str(request_payload.pop("instructions", ""))
+        request_payload["instructions_sha256"] = hashlib.sha256(instructions.encode()).hexdigest()
+        safe_request = redact(request_payload)
         input_hash = hashlib.sha256(canonical_json(safe_request).encode()).hexdigest()
         run_id = deterministic_id("run", request.workflow_id, request.step_id, input_hash)
         prior = self._start_run(run_id, request, safe_request, input_hash)
@@ -109,6 +112,7 @@ class AgentHarness:
                 "provider_failure workflow_id=%s agent_run_id=%s provider=%s model=%s "
                 "exception_class=%s http_status=%s provider_error_code=%s "
                 "provider_error_type=%s provider_request_id=%s provider_parameter=%s "
+                "sdk_version=%s adapter_operation=%s developer_message=%s "
                 "retryable=%s attempt=%s",
                 request.workflow_id,
                 run_id,
@@ -120,6 +124,9 @@ class AgentHarness:
                 detail.get("provider_error_type"),
                 detail.get("provider_request_id"),
                 detail.get("provider_parameter"),
+                detail.get("sdk_version"),
+                detail.get("adapter_operation"),
+                detail.get("developer_message"),
                 detail["retryable"],
                 detail["turn"],
             )

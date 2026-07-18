@@ -520,47 +520,13 @@ class WorkflowService:
             )
             if existing is not None:
                 return existing
-            attempt = (
-                int(
-                    session.scalar(
-                        select(func.coalesce(func.max(WorkflowStepRow.attempt), 0)).where(
-                            WorkflowStepRow.workflow_id == workflow_id,
-                            WorkflowStepRow.stage == stage.value,
-                        )
-                    )
-                    or 0
-                )
-                + 1
-            )
-            now = utc_text()
-            step = WorkflowStepRow(
-                id=deterministic_id("step", workflow_id, stage.value, str(attempt)),
-                workflow_id=workflow_id,
-                stage=stage.value,
-                attempt=attempt,
-                status=StepStatus.RUNNING.value,
-                idempotency_key=idempotency_key,
-                started_at=now,
-                completed_at=None,
-                heartbeat_at=now,
-                input_json=canonical_json(versioned_payload(**input_payload)),
-                output_json=None,
-                error_id=None,
-            )
-            session.add(step)
-            session.flush()
-            append_event(
+            return self._create_step_in_session(
                 session,
                 build,
-                event_type="workflow.step.started",
-                actor_type=ActorType.ORCHESTRATOR.value,
-                actor_id="workflow-service",
-                idempotency_key=f"{idempotency_key}:started",
-                payload={"step_id": step.id, "stage": stage.value, "attempt": attempt},
-                from_state=build.current_stage,
-                to_state=build.current_stage,
+                stage,
+                idempotency_key=idempotency_key,
+                input_payload=input_payload,
             )
-            return step
 
     def complete_step(self, step_id: str, *, output_payload: dict, idempotency_key: str) -> None:
         with self.database.session() as session:
@@ -776,22 +742,6 @@ class WorkflowService:
                 ),
                 retry=True,
             )
-            stage = WorkflowState(build.current_stage)
-            completed = session.scalar(
-                select(WorkflowStepRow).where(
-                    WorkflowStepRow.workflow_id == workflow_id,
-                    WorkflowStepRow.stage == stage.value,
-                    WorkflowStepRow.status == StepStatus.COMPLETED.value,
-                )
-            )
-            if completed is None:
-                self._create_step_in_session(
-                    session,
-                    build,
-                    stage,
-                    idempotency_key=f"{idempotency_key}:attempt",
-                    input_payload={"retry_of_error_id": retryable.id},
-                )
             return snapshot
 
     def recover_interrupted(self) -> int:
@@ -800,44 +750,105 @@ class WorkflowService:
             steps = session.scalars(
                 select(WorkflowStepRow).where(WorkflowStepRow.status == StepStatus.RUNNING.value)
             ).all()
-            for step in steps:
-                build = require_build(session, step.workflow_id)
+            workflow_ids = sorted({step.workflow_id for step in steps})
+            for workflow_id in workflow_ids:
+                build = require_build(session, workflow_id)
                 original = build.current_stage
-                error_id = deterministic_id("err", build.id, step.id, "startup-recovery")
-                error = WorkflowErrorRow(
-                    id=error_id,
-                    workflow_id=build.id,
-                    step_id=step.id,
-                    agent_run_id=None,
-                    tool_call_id=None,
-                    code="interrupted_by_restart",
-                    category="recovery",
-                    retryable=1,
-                    safe_message="Running step was interrupted by backend restart.",
-                    detail_json=canonical_json(versioned_payload(previous_stage=original)),
-                    created_at=utc_text(),
+                workflow_steps = [step for step in steps if step.workflow_id == workflow_id]
+                latest_error = session.scalar(
+                    select(WorkflowErrorRow)
+                    .where(WorkflowErrorRow.workflow_id == workflow_id)
+                    .order_by(WorkflowErrorRow.created_at.desc(), WorkflowErrorRow.id.desc())
+                    .limit(1)
                 )
-                session.add(error)
-                step.status = StepStatus.FAILED_RETRYABLE.value
-                step.error_id = error_id
-                step.completed_at = utc_text()
-                build.failed_from_state = original
-                build.current_stage = WorkflowState.FAILED.value
-                build.status = WorkflowStatus.FAILED.value
-                build.updated_at = utc_text()
-                build.version += 1
-                append_event(
-                    session,
-                    build,
-                    event_type="workflow.recovered_interruption",
-                    actor_type=ActorType.SYSTEM.value,
-                    actor_id="startup-recovery",
-                    idempotency_key=f"startup-recovery:{step.id}",
-                    payload={"step_id": step.id, "failed_from_state": original},
-                    from_state=original,
-                    to_state=WorkflowState.FAILED.value,
+                repair_retryable = (
+                    bool(latest_error.retryable)
+                    if original == WorkflowState.FAILED.value and latest_error is not None
+                    else True
                 )
-                recovered += 1
+                for step in workflow_steps:
+                    error_id = deterministic_id("err", build.id, step.id, "startup-recovery")
+                    if session.get(WorkflowErrorRow, error_id) is None:
+                        session.add(
+                            WorkflowErrorRow(
+                                id=error_id,
+                                workflow_id=build.id,
+                                step_id=step.id,
+                                agent_run_id=None,
+                                tool_call_id=None,
+                                code="interrupted_by_restart",
+                                category="recovery",
+                                retryable=int(repair_retryable),
+                                safe_message=(
+                                    "A stale running attempt was interrupted during backend "
+                                    "restart recovery."
+                                ),
+                                detail_json=canonical_json(
+                                    versioned_payload(
+                                        previous_stage=original,
+                                        repaired_status=StepStatus.INTERRUPTED.value,
+                                    )
+                                ),
+                                created_at=utc_text(),
+                            )
+                        )
+                    step.status = StepStatus.INTERRUPTED.value
+                    step.error_id = error_id
+                    step.completed_at = utc_text()
+                    append_event(
+                        session,
+                        build,
+                        event_type="workflow.step.interrupted",
+                        actor_type=ActorType.SYSTEM.value,
+                        actor_id="startup-recovery",
+                        idempotency_key=f"startup-recovery:{step.id}",
+                        payload={
+                            "step_id": step.id,
+                            "stage": step.stage,
+                            "attempt": step.attempt,
+                            "repair": "backend_restart",
+                        },
+                        from_state=original,
+                        to_state=original,
+                    )
+                    recovered += 1
+                if original not in {
+                    WorkflowState.FAILED.value,
+                    WorkflowState.CANCELLED.value,
+                    WorkflowState.COMPLETED.value,
+                }:
+                    current_version = build.version
+                    result = session.execute(
+                        update(EndpointBuildRow)
+                        .where(
+                            EndpointBuildRow.id == build.id,
+                            EndpointBuildRow.version == current_version,
+                        )
+                        .values(
+                            failed_from_state=original,
+                            current_stage=WorkflowState.FAILED.value,
+                            status=WorkflowStatus.FAILED.value,
+                            updated_at=utc_text(),
+                            version=current_version + 1,
+                        )
+                    )
+                    if result.rowcount != 1:
+                        raise StaleWorkflowVersion("Concurrent startup recovery detected.")
+                    session.refresh(build)
+                    append_event(
+                        session,
+                        build,
+                        event_type="workflow.recovered_interruption",
+                        actor_type=ActorType.SYSTEM.value,
+                        actor_id="startup-recovery",
+                        idempotency_key=f"startup-recovery:{build.id}:failed",
+                        payload={
+                            "step_ids": [step.id for step in workflow_steps],
+                            "failed_from_state": original,
+                        },
+                        from_state=original,
+                        to_state=WorkflowState.FAILED.value,
+                    )
         return recovered
 
     def _apply_transition(
@@ -1241,6 +1252,11 @@ class WorkflowService:
 
     @staticmethod
     def _agent_run_dict(session: Session, row: AgentRunRow, *, include_trace: bool) -> dict:
+        request_payload = load_versioned_json(row.request_json)
+        context = request_payload.get("context")
+        run_mode = context.get("run_mode") if isinstance(context, dict) else None
+        if run_mode not in {"live", "cached", "replay"}:
+            run_mode = None
         tool_calls = session.scalars(
             select(ToolCallRow)
             .where(ToolCallRow.agent_run_id == row.id)
@@ -1255,6 +1271,7 @@ class WorkflowService:
             "agent_version": row.agent_version,
             "provider": row.provider,
             "model_identifier": row.model_identifier,
+            "run_mode": run_mode,
             "instruction_version": row.instruction_version,
             "input_hash": row.input_hash,
             "status": row.status,
@@ -1277,7 +1294,7 @@ class WorkflowService:
         }
         if include_trace:
             result.update(
-                request=load_versioned_json(row.request_json),
+                request=request_payload,
                 result=load_versioned_json(row.result_json) if row.result_json else None,
                 trace=load_versioned_json(row.trace_json),
                 tool_calls=[
@@ -1342,6 +1359,55 @@ class WorkflowService:
             + 1
         )
         now = utc_text()
+        active_steps = session.scalars(
+            select(WorkflowStepRow).where(
+                WorkflowStepRow.workflow_id == build.id,
+                WorkflowStepRow.stage == stage.value,
+                WorkflowStepRow.status == StepStatus.RUNNING.value,
+            )
+        ).all()
+        for active in active_steps:
+            error_id = deterministic_id("err", active.id, "superseded", str(attempt))
+            session.add(
+                WorkflowErrorRow(
+                    id=error_id,
+                    workflow_id=build.id,
+                    step_id=active.id,
+                    agent_run_id=None,
+                    tool_call_id=None,
+                    code="step_attempt_superseded",
+                    category="consistency",
+                    retryable=0,
+                    safe_message="An older running attempt was superseded by a newer attempt.",
+                    detail_json=canonical_json(
+                        versioned_payload(
+                            stage=stage.value,
+                            old_attempt=active.attempt,
+                            new_attempt=attempt,
+                        )
+                    ),
+                    created_at=now,
+                )
+            )
+            active.status = StepStatus.INTERRUPTED.value
+            active.error_id = error_id
+            active.completed_at = now
+            append_event(
+                session,
+                build,
+                event_type="workflow.step.superseded",
+                actor_type=ActorType.ORCHESTRATOR.value,
+                actor_id="workflow-service",
+                idempotency_key=f"step-superseded:{active.id}:{attempt}",
+                payload={
+                    "step_id": active.id,
+                    "stage": stage.value,
+                    "old_attempt": active.attempt,
+                    "new_attempt": attempt,
+                },
+                from_state=build.current_stage,
+                to_state=build.current_stage,
+            )
         step = WorkflowStepRow(
             id=deterministic_id("step", build.id, stage.value, str(attempt)),
             workflow_id=build.id,

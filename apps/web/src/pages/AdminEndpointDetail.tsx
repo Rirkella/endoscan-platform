@@ -79,6 +79,29 @@ function usageNumber(run: AdminAgentRun, name: string): number {
   return typeof value === "number" ? value : 0;
 }
 
+function configuredModeLabel(mode: "live" | "cached" | "replay"): string {
+  return mode === "live" ? "Live" : mode === "cached" ? "Cached" : "Replay";
+}
+
+function runStatusLabel(run: AdminAgentRun, mode: "live" | "cached" | "replay"): string {
+  if (run.status === "failed") return mode === "live" ? "Live agent run failed" : "Agent run failed";
+  if (run.status === "completed") return "Completed";
+  if (run.status === "approval_required") return "Completed for review";
+  return humanizeMachineValue(run.status);
+}
+
+function safeDeveloperDiagnostic(run: AdminAgentRun): string | null {
+  const events = run.trace?.events ?? [];
+  for (const event of [...events].reverse()) {
+    const detail = event.detail;
+    if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+      const message = (detail as Record<string, unknown>).developer_message;
+      if (typeof message === "string" && message.length > 0) return message;
+    }
+  }
+  return null;
+}
+
 export function AdminEndpointDetail() {
   const { buildId = "" } = useParams();
   const confirmationTrigger = useRef<HTMLElement | null>(null);
@@ -120,6 +143,7 @@ export function AdminEndpointDetail() {
       setApprovals(nextApprovals);
       setRuns(nextRuns);
       setErrors(nextErrors);
+      const persistedRunMode = nextRuns.at(-1)?.run_mode ?? undefined;
       const candidateArtifact = [...nextArtifacts]
         .reverse()
         .find((item) => item.artifact_type === "dataset_candidates");
@@ -128,13 +152,13 @@ export function AdminEndpointDetail() {
         const content = preview.content as CandidateArtifact;
         setCandidates(content.candidates ?? []);
         setSelected((current) => current || content.candidates?.[0]?.candidate_id || "");
-        setRunMode(content.run_mode ?? (content.live_discovery ? "live" : "replay"));
+        setRunMode(persistedRunMode ?? content.run_mode ?? (content.live_discovery ? "live" : "replay"));
         setSimulationLabel(content.simulation_label ?? null);
         setDecisionSummary(content.decision_summary ?? "");
         setUnresolvedQuestions(content.unresolved_questions ?? []);
       } else {
         setCandidates([]);
-        setRunMode("replay");
+        setRunMode(persistedRunMode ?? "replay");
         setSimulationLabel(null);
         setDecisionSummary("");
         setUnresolvedQuestions([]);
@@ -205,8 +229,8 @@ export function AdminEndpointDetail() {
     [candidates],
   );
   const agentTools = useMemo(
-    () => trace?.tools.length ? trace.tools : [...runs].reverse().find((run) => run.tools.length > 0)?.tools ?? [],
-    [runs, trace],
+    () => trace?.tools ?? [],
+    [trace],
   );
 
   if (!build) {
@@ -221,6 +245,7 @@ export function AdminEndpointDetail() {
   const canRetry = build.current_stage === "FAILED" && errors.at(-1)?.retryable === true;
   const selectedIndex = Math.max(0, candidates.findIndex((candidate) => candidate.candidate_id === selected));
   const selectedCandidate = candidates[selectedIndex];
+  const developerDiagnostic = trace ? safeDeveloperDiagnostic(trace) : null;
 
   function requestConfirmation(kind: Confirmation["kind"], approval?: AdminApproval, trigger?: HTMLElement) {
     confirmationTrigger.current = trigger ?? null;
@@ -395,10 +420,12 @@ export function AdminEndpointDetail() {
             {trace ? (
               <div className="admin-agent-summary">
                 <h3>{trace.agent_name}</h3>
-                <span className="admin-status">{trace.status === "completed" ? "Completed" : "Completed for review"}</span>
+                <span className="admin-status">{runStatusLabel(trace, runMode)}</span>
                 <dl>
-                  <div><dt>Output</dt><dd>{candidates.length} candidates prepared</dd></div>
-                  <div><dt>Tools used</dt><dd>{agentTools.length}{trace.tools.length === 0 && agentTools.length > 0 ? " (replayed)" : ""}</dd></div>
+                  <div><dt>Configured mode</dt><dd>{configuredModeLabel(runMode)}</dd></div>
+                  <div><dt>Final run status</dt><dd>{humanizeMachineValue(trace.status)}</dd></div>
+                  <div><dt>Output</dt><dd>{trace.status === "failed" ? "No recommendation available" : `${candidates.length} candidates prepared`}</dd></div>
+                  <div><dt>Tools used</dt><dd>{agentTools.length}</dd></div>
                   <div><dt>Duration</dt><dd>{(trace.duration_ms / 1000).toFixed(2)} s</dd></div>
                   <div><dt>Provider</dt><dd>{trace.provider}</dd></div>
                   <div><dt>Model</dt><dd>{trace.model_identifier}</dd></div>
@@ -406,7 +433,8 @@ export function AdminEndpointDetail() {
                   <div><dt>Output tokens</dt><dd>{usageNumber(trace, "output_tokens")}</dd></div>
                   <div><dt>Estimated cost</dt><dd>${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}</dd></div>
                 </dl>
-                <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{trace.tools.length === 0 ? "replayed" : tool.status}</small></li>)}</ol>
+                {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
+                <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
                 <div className="admin-inline-actions">
                   <button className="admin-link-button" onClick={() => setShowTrace((value) => !value)}>{showTrace ? "Hide trace" : "View trace"}</button>
                   <a href="#agent-tools">View tools used</a>

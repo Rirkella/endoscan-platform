@@ -43,6 +43,11 @@ def provider_preflight(request: Request):
     return request.app.state.provider_preflight.check()
 
 
+@router.post("/agent-provider/boundary-probe", dependencies=[Depends(require_mutation_budget)])
+def adapter_boundary_probe(request: Request):
+    return request.app.state.adapter_boundary_probe.check()
+
+
 @router.post("/endpoint-builds", dependencies=[Depends(require_mutation_budget)])
 def create_build(
     body: CreateBuildBody,

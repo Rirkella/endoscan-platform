@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from endoscan_core.inference import ModelArtifactUnavailableError
 from endoscan_core.registry import find_repo_root, list_endpoints
 from endoscan_workflows.artifacts import LocalArtifactStore
+from endoscan_workflows.boundary_probe import AdapterBoundaryProbe
 from endoscan_workflows.config import AgentConfiguration
 from endoscan_workflows.database import WorkflowDatabase
 from endoscan_workflows.discovery_tools import DiscoveryToolService
@@ -210,6 +211,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.state.provider_registry = provider_registry
     app.state.agent_configuration = agent_configuration
     app.state.provider_preflight = ProviderAccessPreflight(agent_configuration)
+    app.state.adapter_boundary_probe = AdapterBoundaryProbe(agent_configuration, tool_registry)
     app.state.source_cache = source_cache
     app.state.source_client = source_client
     app.state.workflow_service = workflow_service

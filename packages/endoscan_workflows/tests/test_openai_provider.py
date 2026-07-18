@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from agents.exceptions import UserError
 from openai import (
     APIConnectionError,
     AuthenticationError,
@@ -243,6 +244,46 @@ def test_unknown_adapter_exception_is_non_retryable_and_safe() -> None:
     assert raised.value.retryable is False
     assert raised.value.trace_detail == {"exception_class": "RuntimeError"}
     assert "sk-unit-test-secret" not in str(raised.value.trace_detail)
+
+
+def test_user_error_preserves_only_bounded_redacted_developer_diagnostics() -> None:
+    sdk_message = (
+        "additionalProperties should not be set for object types. "
+        "Authorization: Bearer local-token api_key=sk-unit-test-secret "
+        "https://user:password@example.test/path"
+    )
+    with pytest.raises(ProviderFailure) as raised:
+        provider(lambda *_args, **_kwargs: (_ for _ in ()).throw(UserError(sdk_message))).run_turn(
+            request(), [], interruption_requested=False
+        )
+    detail = raised.value.trace_detail
+    assert raised.value.retryable is False
+    assert detail["exception_class"] == "UserError"
+    assert detail["sdk_version"] == "0.18.2"
+    assert detail["adapter_operation"] == "run_turn"
+    assert detail["adapter_model"] == "gpt-5.4-mini"
+    assert detail["adapter_max_turns"] == 1
+    assert detail["adapter_tool_count"] == 1
+    assert detail["adapter_output_schema"] == "DiscoveryOutput"
+    assert detail["adapter_use_responses"] is True
+    assert detail["adapter_parallel_tool_calls"] is False
+    assert detail["adapter_store"] is False
+    assert detail["adapter_tracing_disabled"] is True
+    assert "additionalProperties should not be set" in detail["developer_message"]
+    assert "local-token" not in detail["developer_message"]
+    assert "sk-unit-test-secret" not in detail["developer_message"]
+    assert "user:password" not in detail["developer_message"]
+    assert len(detail["developer_message"]) <= 800
+
+
+def test_developer_message_is_rejected_for_unknown_exception_classes() -> None:
+    failure = ProviderFailure(
+        "Safe normalized message.",
+        exception_class="RuntimeError",
+        developer_message="must not persist",
+        sdk_version="0.18.2",
+    )
+    assert failure.trace_detail == {"exception_class": "RuntimeError"}
 
 
 def test_api_status_failure_preserves_only_safe_diagnostics() -> None:

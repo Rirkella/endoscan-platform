@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from agents import Agent, FunctionTool, ModelSettings, OpenAIProvider, RunConfig, Runner
-from agents.exceptions import AgentsException, MaxTurnsExceeded, ModelBehaviorError
+from agents.exceptions import AgentsException, MaxTurnsExceeded, ModelBehaviorError, UserError
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
 
 from .config import AgentConfiguration
@@ -38,6 +39,13 @@ class OpenAIAgentProvider:
     name = "openai"
 
     @staticmethod
+    def sdk_version() -> str:
+        try:
+            return version("openai-agents")
+        except PackageNotFoundError:
+            return "unknown"
+
+    @staticmethod
     def _failure(
         exc: Exception,
         message: str,
@@ -53,6 +61,24 @@ class OpenAIAgentProvider:
             provider_error_type=getattr(exc, "type", None),
             provider_request_id=getattr(exc, "request_id", None),
             provider_parameter=getattr(exc, "param", None),
+        )
+
+    def _user_error_failure(self, exc: UserError, request: AgentRunRequest) -> ProviderFailure:
+        return ProviderFailure(
+            "OpenAI Agents SDK configuration was rejected locally.",
+            retryable=False,
+            exception_class=type(exc).__name__,
+            developer_message=exc.message,
+            sdk_version=self.sdk_version(),
+            adapter_operation="run_turn",
+            adapter_model=request.model.model_identifier,
+            adapter_max_turns=1,
+            adapter_tool_count=len(request.available_tools),
+            adapter_output_schema=request.output_schema_name,
+            adapter_use_responses=True,
+            adapter_parallel_tool_calls=False,
+            adapter_store=False,
+            adapter_tracing_disabled=not self.configuration.tracing_enabled,
         )
 
     def __init__(
@@ -92,38 +118,8 @@ class OpenAIAgentProvider:
                 provider_error_type="local_configuration",
             )
         try:
-            sdk_tools = [self._proxy_tool(name) for name in request.available_tools]
-            agent = Agent(
-                name=request.agent_name,
-                instructions=request.instructions,
-                model=request.model.model_identifier,
-                model_settings=ModelSettings(
-                    parallel_tool_calls=False,
-                    max_tokens=request.budget.maximum_output_tokens,
-                    store=False,
-                    verbosity="low",
-                ),
-                tools=sdk_tools,
-                output_type=DiscoveryOutput,
-                tool_use_behavior="stop_on_first_tool",
-            )
-            client = AsyncOpenAI(
-                api_key=self.configuration.api_key.get_secret_value(),
-                timeout=request.budget.timeout_seconds,
-                max_retries=0,
-            )
-            run_config = RunConfig(
-                model_provider=OpenAIProvider(openai_client=client, use_responses=True),
-                tracing_disabled=not self.configuration.tracing_enabled,
-                trace_include_sensitive_data=False,
-                workflow_name="EndoScan dataset discovery",
-                group_id=request.workflow_id,
-                trace_metadata={
-                    "endoscan_workflow_id": request.workflow_id,
-                    "endoscan_step_id": request.step_id,
-                    "agent_version": request.agent_version,
-                },
-            )
+            agent = self._build_agent(request)
+            run_config = self._build_run_config(request)
             result = self.runner(
                 agent,
                 self._turn_input(request, history),
@@ -156,6 +152,8 @@ class OpenAIAgentProvider:
                 "OpenAI provider returned malformed structured output.",
                 retryable=False,
             ) from exc
+        except UserError as exc:
+            raise self._user_error_failure(exc, request) from exc
         except AgentsException as exc:
             raise self._failure(
                 exc, "OpenAI Agents SDK run failed safely.", retryable=False
@@ -218,6 +216,45 @@ class OpenAIAgentProvider:
             exception_class="ProviderProtocolError",
             provider_error_code="unsupported_output_type",
             provider_error_type="local_output_validation",
+        )
+
+    def _build_agent(self, request: AgentRunRequest) -> Agent:
+        return Agent(
+            name=request.agent_name,
+            instructions=request.instructions,
+            model=request.model.model_identifier,
+            model_settings=ModelSettings(
+                parallel_tool_calls=False,
+                max_tokens=request.budget.maximum_output_tokens,
+                store=False,
+                verbosity="low",
+            ),
+            tools=[self._proxy_tool(name) for name in request.available_tools],
+            output_type=DiscoveryOutput,
+            tool_use_behavior="stop_on_first_tool",
+        )
+
+    def _build_run_config(
+        self, request: AgentRunRequest, *, model_provider: Any | None = None
+    ) -> RunConfig:
+        if model_provider is None:
+            client = AsyncOpenAI(
+                api_key=self.configuration.api_key.get_secret_value(),
+                timeout=request.budget.timeout_seconds,
+                max_retries=0,
+            )
+            model_provider = OpenAIProvider(openai_client=client, use_responses=True)
+        return RunConfig(
+            model_provider=model_provider,
+            tracing_disabled=not self.configuration.tracing_enabled,
+            trace_include_sensitive_data=False,
+            workflow_name="EndoScan dataset discovery",
+            group_id=request.workflow_id,
+            trace_metadata={
+                "endoscan_workflow_id": request.workflow_id,
+                "endoscan_step_id": request.step_id,
+                "agent_version": request.agent_version,
+            },
         )
 
     def _proxy_tool(self, name: str) -> FunctionTool:

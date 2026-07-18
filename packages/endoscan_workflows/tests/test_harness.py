@@ -249,7 +249,7 @@ def test_safe_provider_failure_diagnostics_are_persisted_and_logged(
         }
     )
 
-    caplog.set_level(logging.WARNING, logger="endoscan.workflow.provider")
+    caplog.set_level(logging.WARNING, logger="uvicorn.error.endoscan.workflow.provider")
     run_id, result = harness.run(diagnostic_request, DiscoveryOutput)
     assert result.error.retryable is False
     failed = next(event for event in result.trace if event.event_type == "provider.turn.failed")
@@ -281,6 +281,70 @@ def test_safe_provider_failure_diagnostics_are_persisted_and_logged(
     assert "retryable=False" in logged
     assert "attempt=1" in logged
     assert "Safe normalized message" not in logged
+
+
+def test_local_sdk_diagnostic_is_internal_and_does_not_store_request_prompt(
+    workflow_runtime, caplog
+) -> None:
+    database, _store, _providers, _harness, service = workflow_runtime
+    build, _discovering, _step, request, _default, _service = harness_context(workflow_runtime)
+
+    class LocalSdkFailureProvider:
+        name = "diagnostic"
+
+        def run_turn(self, *_args, **_kwargs):
+            raise ProviderFailure(
+                "OpenAI Agents SDK configuration was rejected locally.",
+                retryable=False,
+                exception_class="UserError",
+                developer_message="additionalProperties should not be set for object types.",
+                sdk_version="0.18.2",
+                adapter_operation="run_turn",
+                adapter_model="gpt-5.4-mini",
+                adapter_max_turns=1,
+                adapter_tool_count=6,
+                adapter_output_schema="DiscoveryOutput",
+                adapter_use_responses=True,
+                adapter_parallel_tool_calls=False,
+                adapter_store=False,
+                adapter_tracing_disabled=True,
+            )
+
+    registry = ProviderRegistry()
+    registry.register("diagnostic", LocalSdkFailureProvider)
+    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    raw_prompt = "RAW-PROMPT-MUST-NOT-APPEAR-IN-DIAGNOSTICS"
+    diagnostic_request = request.model_copy(
+        update={
+            "instructions": raw_prompt,
+            "model": request.model.model_copy(update={"provider": "diagnostic"}),
+            "instruction_version": "local-sdk-diagnostic-test",
+            "budget": request.budget.model_copy(update={"retry_count": 0}),
+        }
+    )
+    caplog.set_level(logging.WARNING, logger="uvicorn.error.endoscan.workflow.provider")
+    run_id, result = harness.run(diagnostic_request, DiscoveryOutput)
+    failed = next(event for event in result.trace if event.event_type == "provider.turn.failed")
+    assert failed.detail["developer_message"] == (
+        "additionalProperties should not be set for object types."
+    )
+    assert failed.detail["retryable"] is False
+    stored = service.agent_run(run_id)
+    assert stored["run_mode"] == "replay"
+    assert stored["request"]["instructions_sha256"]
+    assert "instructions" not in stored["request"]
+    stored_failed = next(
+        event
+        for event in stored["trace"]["events"]
+        if event["event_type"] == "provider.turn.failed"
+    )
+    assert stored_failed["detail"] == failed.detail
+    assert raw_prompt not in str(stored)
+    assert raw_prompt not in caplog.get_records("call")[-1].getMessage()
+    assert service.errors(build.id)[-1]["safe_message"] == (
+        "Provider failed after bounded retries."
+    )
+    assert "additionalProperties" not in service.errors(build.id)[-1]["safe_message"]
 
 
 @pytest.mark.parametrize(
