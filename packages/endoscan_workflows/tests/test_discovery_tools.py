@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -23,9 +23,11 @@ from endoscan_workflows.discovery_tools import (
     _parse_geo_soft,
     render_geo_query,
 )
-from endoscan_workflows.source_cache import SourceResponseCache
+from endoscan_workflows.models import SourceCacheRow
+from endoscan_workflows.source_cache import CACHE_POLICY_VERSION, SourceResponseCache
 from endoscan_workflows.source_security import (
     ScientificSourceClient,
+    SourceFormatError,
     SourcePolicyError,
     SourceRateLimitError,
     SourceTimeoutError,
@@ -117,6 +119,16 @@ def test_geo_soft_parser_extracts_metadata_and_sample_design() -> None:
     assert parsed["platform_ids"] == ["GPL999"]
     assert parsed["publication_ids"] == ["12345678"]
     assert len(parsed["samples"]) == 2
+
+
+def test_geo_soft_parser_preserves_multiple_organisms() -> None:
+    parsed = _parse_geo_soft(
+        GEO_SOFT_FIXTURE.replace(
+            "!Series_organism_ch1 = Homo sapiens",
+            "!Series_organism_ch1 = Homo sapiens\n!Series_organism_ch1 = Mus musculus",
+        )
+    )
+    assert parsed["organism"] == ["Homo sapiens", "Mus musculus"]
     assert parsed["experimental_variables"] == ["dose", "time"]
 
 
@@ -259,6 +271,64 @@ def test_disallowed_domain_and_private_network_are_rejected() -> None:
     client.close()
 
 
+def test_official_geo_text_mime_is_endpoint_scoped() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=GEO_SOFT_FIXTURE,
+            headers={"content-type": "geo/text"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    response = client.get(
+        "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
+        params={"acc": "GSE12345", "targ": "self", "view": "brief", "form": "text"},
+        accepted_types={"text/plain"},
+        allow_official_geo_text=True,
+    )
+    assert response.content_type == "geo/text"
+    assert response.diagnostic is not None
+    assert response.diagnostic.content_type == "geo/text"
+
+    for url, params in [
+        (
+            "https://www.ncbi.nlm.nih.gov/geo/query/other.cgi",
+            {"acc": "GSE12345", "targ": "self", "view": "brief", "form": "text"},
+        ),
+        (
+            "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
+            {"acc": "not-a-gse", "targ": "self", "view": "brief", "form": "text"},
+        ),
+    ]:
+        with pytest.raises(SourceFormatError, match="unexpected content type"):
+            client.get(
+                url,
+                params=params,
+                accepted_types={"geo/text"},
+                allow_official_geo_text=True,
+            )
+    with pytest.raises(SourceFormatError, match="unexpected content type"):
+        client.get(
+            "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
+            params={"acc": "GSE12345", "targ": "self", "view": "brief", "form": "text"},
+            accepted_types={"geo/text"},
+        )
+    with pytest.raises(SourcePolicyError, match="HTTPS"):
+        client.get(
+            "http://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
+            params={"acc": "GSE12345", "targ": "self", "view": "brief", "form": "text"},
+            allow_official_geo_text=True,
+        )
+    with pytest.raises(SourcePolicyError, match="not allowlisted"):
+        client.get(
+            "https://example.com/geo/query/acc.cgi",
+            params={"acc": "GSE12345", "targ": "self", "view": "brief", "form": "text"},
+            allow_official_geo_text=True,
+        )
+    client.close()
+
+
 def test_scientific_response_url_drops_secret_query_parameters() -> None:
     client = ScientificSourceClient(
         transport=httpx.MockTransport(
@@ -361,7 +431,7 @@ def test_live_geo_validation_then_cached_lookup_uses_one_http_request(
         return httpx.Response(
             200,
             text=GEO_SOFT_FIXTURE,
-            headers={"content-type": "text/plain"},
+            headers={"content-type": "geo/text"},
             request=request,
         )
 
@@ -381,6 +451,32 @@ def test_live_geo_validation_then_cached_lookup_uses_one_http_request(
     assert cached.status == "public_valid" and cached.cache_status == "cached"
     assert calls == 1
     assert live.source_artifact_id == cached.source_artifact_id
+    assert live.source_artifact_sha256 == cached.source_artifact_sha256
+    assert live.title == "Oxidative stress response in human cells"
+    assert live.organism == ["Homo sapiens"]
+    assert live.study_type == ["Expression profiling by high throughput sequencing"]
+    assert live.source_diagnostic is not None
+    assert live.source_diagnostic.content_type == "geo/text"
+    assert live.source_diagnostic.artifact_content_type == "text/plain"
+    assert live.source_diagnostic.parser_outcome == "public_valid"
+    assert live.source_diagnostic.source_artifact_id == live.source_artifact_id
+    assert live.source_diagnostic.cache_status == "live"
+    assert cached.source_diagnostic is not None
+    assert cached.source_diagnostic.content_type == "geo/text"
+    assert cached.source_diagnostic.artifact_content_type == "text/plain"
+    assert cached.source_diagnostic.cache_status == "cached"
+    descriptor, raw = artifacts.get(live.source_artifact_id)
+    assert descriptor.mime_type == "text/plain"
+    assert descriptor.sha256 == live.source_artifact_sha256
+    assert raw == GEO_SOFT_FIXTURE.encode()
+    cache_entry = SourceResponseCache(database).get(
+        "validate_geo_accession", {"accession": "GSE12345", "view": "brief"}
+    )
+    assert cache_entry is not None
+    assert cache_entry.policy_version == CACHE_POLICY_VERSION
+    assert cache_entry.http_metadata["source_content_type"] == "geo/text"
+    assert cache_entry.http_metadata["artifact_content_type"] == "text/plain"
+    assert cache_entry.http_metadata["validation_policy_version"] == CACHE_POLICY_VERSION
     client.close()
 
 
@@ -523,6 +619,34 @@ def test_geo_malformed_text_document_is_structured(workflow_runtime) -> None:
     client.close()
 
 
+def test_geo_series_missing_title_is_not_public_valid(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                text=GEO_SOFT_FIXTURE.replace(
+                    "!Series_title = Oxidative stress response in human cells\n", ""
+                ),
+                headers={"content-type": "geo/text"},
+                request=request,
+            )
+        ),
+        sleep=lambda _: None,
+    )
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert result.status == "unexpected_source_format"
+    assert result.safe_warning_or_error_category == "record_title_missing"
+    assert result.source_diagnostic is not None
+    assert result.source_diagnostic.parser_outcome == "record_title_missing"
+    client.close()
+
+
 @pytest.mark.parametrize(
     ("status_code", "index_ids", "expected"),
     [
@@ -642,7 +766,7 @@ def test_geo_approved_redirect_is_followed_and_record_validated(workflow_runtime
         return httpx.Response(
             200,
             text=GEO_SOFT_FIXTURE,
-            headers={"content-type": "text/plain"},
+            headers={"content-type": "geo/text"},
             request=request,
         )
 
@@ -655,6 +779,8 @@ def test_geo_approved_redirect_is_followed_and_record_validated(workflow_runtime
     assert result.status == "public_valid"
     assert result.source_diagnostic is not None
     assert result.source_diagnostic.final_approved_host == "www.ncbi.nlm.nih.gov"
+    assert result.source_diagnostic.content_type == "geo/text"
+    assert result.source_diagnostic.artifact_content_type == "text/plain"
     assert calls == 2
     client.close()
 
@@ -754,6 +880,81 @@ def test_geo_batch_isolates_bad_candidate_and_keeps_successes(workflow_runtime) 
     assert result.public_valid_count == 4
     assert len(result.source_artifact_references) == 4
     client.close()
+
+
+def test_five_real_probe_profiles_with_geo_text_reach_parser_and_artifacts(
+    workflow_runtime,
+) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        accession = str(request.url.params["acc"])
+        calls.append(accession)
+        fixture = GEO_SOFT_FIXTURE.replace("GSE12345", accession).replace(
+            "Oxidative stress response in human cells", f"Official GEO Series {accession}"
+        )
+        return httpx.Response(
+            200,
+            text=fixture,
+            headers={"content-type": "geo/text"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    accessions = ["GSE330744", "GSE338134", "GSE314573", "GSE314406", "GSE301422"]
+    result = service.validate_geo_accessions(
+        GeoAccessionsInput(accessions=accessions),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert calls == accessions
+    assert result.public_valid_count == 5
+    assert [item.status for item in result.results] == ["public_valid"] * 5
+    assert all(item.source_artifact_id for item in result.results)
+    assert all(item.source_artifact_sha256 for item in result.results)
+    assert all(item.source_diagnostic.content_type == "geo/text" for item in result.results)
+    assert all(
+        item.source_diagnostic.artifact_content_type == "text/plain"
+        for item in result.results
+    )
+    client.close()
+
+
+def test_old_geo_validation_policy_cache_entry_is_not_reused(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    artifact = artifacts.put_bytes(
+        workflow_id=workflow_id,
+        content=GEO_SOFT_FIXTURE.encode(),
+        mime_type="text/plain",
+        artifact_type="scientific_source_raw",
+        logical_name="old-policy-source.txt",
+        producer="test",
+        idempotency_key="old-policy-source",
+    )
+    arguments = {"accession": "GSE12345", "view": "brief"}
+    old_key = SourceResponseCache.key("validate_geo_accession", arguments)
+    now = datetime.now(UTC)
+    with database.session() as session:
+        session.add(
+            SourceCacheRow(
+                cache_key=old_key,
+                tool_name="validate_geo_accession",
+                normalized_arguments_json=json.dumps(arguments),
+                policy_version="phase1-source-policy-v1",
+                source_version=None,
+                source_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
+                http_metadata_json="{}",
+                content_hash=artifact.sha256,
+                parsed_output_json=json.dumps({"accession": "GSE12345"}),
+                raw_artifact_id=artifact.id,
+                retrieved_at=now.isoformat(),
+                expires_at=(now + timedelta(days=1)).isoformat(),
+            )
+        )
+    assert SourceResponseCache(database).get("validate_geo_accession", arguments) is None
 
 
 def test_cache_expiry_returns_miss(workflow_runtime) -> None:

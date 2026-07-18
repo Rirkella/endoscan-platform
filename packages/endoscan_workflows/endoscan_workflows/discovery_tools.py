@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .artifacts import LocalArtifactStore
 from .config import AgentRunMode
 from .contracts import SourceToolDiagnostic, ToolInvocation
-from .source_cache import SourceResponseCache
+from .source_cache import CACHE_POLICY_VERSION, SourceResponseCache
 from .source_security import (
     ScientificResponse,
     ScientificSourceClient,
@@ -650,6 +650,11 @@ class DiscoveryToolService:
         record_type = str(parsed.get("record_type") or "")
         record_status = str(parsed.get("record_status") or "").casefold()
         if returned != requested or record_type != "Series":
+            parser_outcome = (
+                "accession_mismatch"
+                if returned and returned != requested
+                else "record_type_mismatch"
+            )
             return GeoValidationOutput(
                 accession=requested,
                 status="unexpected_source_format",
@@ -666,7 +671,27 @@ class DiscoveryToolService:
                     else "record_type_mismatch"
                 ),
                 cache_status=cache_status,
-                source_diagnostic=diagnostic,
+                source_diagnostic=diagnostic.model_copy(
+                    update={"parser_outcome": parser_outcome}
+                ),
+            )
+        title = str(parsed.get("title") or "").strip()
+        if not title:
+            return GeoValidationOutput(
+                accession=requested,
+                status="unexpected_source_format",
+                exists_in_geo_index=True,
+                public_record_available=False,
+                source_reference=url,
+                source_artifact_id=artifact_id,
+                source_artifact_sha256=sha256,
+                evidence_references=[f"artifact:{artifact_id}#Series_geo_accession"],
+                validation_timestamp=now,
+                safe_warning_or_error_category="record_title_missing",
+                cache_status=cache_status,
+                source_diagnostic=diagnostic.model_copy(
+                    update={"parser_outcome": "record_title_missing"}
+                ),
             )
         if not record_status:
             return GeoValidationOutput(
@@ -681,7 +706,9 @@ class DiscoveryToolService:
                 validation_timestamp=now,
                 safe_warning_or_error_category="record_status_missing",
                 cache_status=cache_status,
-                source_diagnostic=diagnostic,
+                source_diagnostic=diagnostic.model_copy(
+                    update={"parser_outcome": "record_status_missing"}
+                ),
             )
         if any(marker in record_status for marker in ("private", "suppressed", "on hold")):
             return GeoValidationOutput(
@@ -696,14 +723,16 @@ class DiscoveryToolService:
                 validation_timestamp=now,
                 safe_warning_or_error_category="record_not_public",
                 cache_status=cache_status,
-                source_diagnostic=diagnostic,
+                source_diagnostic=diagnostic.model_copy(
+                    update={"parser_outcome": "not_public"}
+                ),
             )
         return GeoValidationOutput(
             accession=requested,
             status="public_valid",
             exists_in_geo_index=True,
             public_record_available=True,
-            title=parsed.get("title") or None,
+            title=title,
             organism=parsed.get("organism", []),
             study_type=parsed.get("study_type", []),
             source_reference=url,
@@ -715,7 +744,9 @@ class DiscoveryToolService:
             ],
             validation_timestamp=now,
             cache_status=cache_status,
-            source_diagnostic=diagnostic,
+            source_diagnostic=diagnostic.model_copy(
+                update={"parser_outcome": "public_valid"}
+            ),
         )
 
     @staticmethod
@@ -976,6 +1007,7 @@ class DiscoveryToolService:
                 tool_name=invocation.tool_name,
                 params={"acc": accession, "targ": "self", "form": "text", "view": "full"},
                 accepted_types={"text/plain"},
+                allow_official_geo_text=True,
             )
             return response, _parse_geo_soft(response.content.decode("utf-8", errors="replace"))
 
@@ -1001,6 +1033,7 @@ class DiscoveryToolService:
                 tool_name="validate_geo_accessions",
                 params={"acc": accession, "targ": "self", "view": "brief", "form": "text"},
                 accepted_types={"text/plain"},
+                allow_official_geo_text=True,
             )
             text = response.content.decode("utf-8", errors="replace")
             if _looks_like_html_or_search_form(text):
@@ -1094,6 +1127,13 @@ class DiscoveryToolService:
                     source_error_category="none",
                     request_duration_ms=0,
                 )
+            diagnostic = diagnostic.model_copy(
+                update={
+                    "artifact_content_type": descriptor.mime_type,
+                    "source_artifact_id": current.id,
+                    "cache_status": "cached",
+                }
+            )
             return (
                 cached.parsed_output,
                 current.id,
@@ -1107,31 +1147,17 @@ class DiscoveryToolService:
                 "Cached mode has no fresh source artifact; an explicit live refresh is required."
             )
         response, parsed = retrieve()
+        artifact_content_type = _artifact_content_type(response.content_type)
         artifact = self.artifacts.put_bytes(
             workflow_id=_required(invocation.workflow_id, "workflow_id"),
             step_id=invocation.step_id,
             content=response.content,
-            mime_type=response.content_type,
+            mime_type=artifact_content_type,
             artifact_type="scientific_source_raw",
             logical_name=f"source-{tool_name}-{response.sha256[:12]}.{suffix}",
             producer=tool_name,
             original_source=response.url,
             idempotency_key=f"{invocation.idempotency_key}:live-source",
-        )
-        self.cache.put(
-            tool_name,
-            arguments,
-            source_url=response.url,
-            content_hash=response.sha256,
-            parsed_output=parsed,
-            raw_artifact_id=artifact.id,
-            http_metadata={
-                "status_code": response.status_code,
-                "headers": response.headers,
-                "diagnostic": (
-                    response.diagnostic.model_dump(mode="json") if response.diagnostic else None
-                ),
-            },
         )
         diagnostic = response.diagnostic
         if diagnostic is None:
@@ -1146,6 +1172,30 @@ class DiscoveryToolService:
                 response_byte_count=len(response.content),
                 source_error_category="none",
             )
+        diagnostic = diagnostic.model_copy(
+            update={
+                "artifact_content_type": artifact_content_type,
+                "parser_outcome": "parsed_source_document",
+                "source_artifact_id": artifact.id,
+                "cache_status": "live",
+            }
+        )
+        self.cache.put(
+            tool_name,
+            arguments,
+            source_url=response.url,
+            content_hash=response.sha256,
+            parsed_output=parsed,
+            raw_artifact_id=artifact.id,
+            http_metadata={
+                "status_code": response.status_code,
+                "headers": response.headers,
+                "source_content_type": response.content_type,
+                "artifact_content_type": artifact_content_type,
+                "validation_policy_version": CACHE_POLICY_VERSION,
+                "diagnostic": diagnostic.model_dump(mode="json"),
+            },
+        )
         return parsed, artifact.id, "live", response.url, diagnostic, response.sha256
 
     def _eutils_params(self) -> dict[str, str]:
@@ -1155,6 +1205,10 @@ class DiscoveryToolService:
         if self.ncbi_api_key:
             values["api_key"] = self.ncbi_api_key
         return values
+
+
+def _artifact_content_type(source_content_type: str) -> str:
+    return "text/plain" if source_content_type == "geo/text" else source_content_type
 
 
 def _looks_like_html_or_search_form(value: str) -> bool:

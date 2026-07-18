@@ -109,6 +109,7 @@ class ProbeSourceResponseCache:
             expires_at=retrieved + timedelta(seconds=self.ttl_seconds),
             fresh=True,
             http_metadata=http_metadata,
+            policy_version=CACHE_POLICY_VERSION,
         )
         self._items[key] = item
         return item

@@ -14,7 +14,7 @@ from .database import WorkflowDatabase
 from .models import SourceCacheRow
 from .repository import canonical_json, parse_utc
 
-CACHE_POLICY_VERSION = "phase1-source-policy-v1"
+CACHE_POLICY_VERSION = "phase1-source-policy-v2-geo-text"
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class CachedSourceResponse:
     expires_at: datetime
     fresh: bool
     http_metadata: dict[str, Any]
+    policy_version: str
 
 
 class SourceResponseCache:
@@ -64,7 +65,7 @@ class SourceResponseCache:
         key = self.key(tool_name, arguments, source_version=source_version)
         with self.database.session() as session:
             row = session.get(SourceCacheRow, key)
-            if row is None:
+            if row is None or row.policy_version != CACHE_POLICY_VERSION:
                 return None
             expires_at = parse_utc(row.expires_at)
             fresh = expires_at > datetime.now(UTC)
@@ -80,6 +81,7 @@ class SourceResponseCache:
                 expires_at=expires_at,
                 fresh=fresh,
                 http_metadata=json.loads(row.http_metadata_json),
+                policy_version=row.policy_version,
             )
 
     def put(
@@ -128,6 +130,7 @@ class SourceResponseCache:
             expires_at=expires,
             fresh=True,
             http_metadata=http_metadata,
+            policy_version=CACHE_POLICY_VERSION,
         )
 
     def invalidate(self, *, tool_name: str | None = None) -> int:

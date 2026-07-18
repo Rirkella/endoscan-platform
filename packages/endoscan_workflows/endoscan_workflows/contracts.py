@@ -245,8 +245,14 @@ class SourceToolDiagnostic(StrictContract):
     http_method: Literal["GET"] = "GET"
     http_status: int | None = Field(default=None, ge=100, le=599)
     final_approved_host: str | None = Field(default=None, max_length=253)
+    # ``content_type`` is always the exact upstream response MIME. Textual artifacts may
+    # use a narrower normalized MIME, recorded separately below.
     content_type: str | None = Field(default=None, max_length=160)
+    artifact_content_type: str | None = Field(default=None, max_length=160)
     response_byte_count: int | None = Field(default=None, ge=0)
+    parser_outcome: str | None = Field(default=None, max_length=120)
+    source_artifact_id: str | None = Field(default=None, max_length=160)
+    cache_status: Literal["live", "cached", "not_available"] | None = None
     exception_class: str | None = Field(default=None, max_length=160)
     source_error_category: str = Field(min_length=1, max_length=120)
     retryable: bool = False

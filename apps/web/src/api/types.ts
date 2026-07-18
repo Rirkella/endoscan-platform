@@ -166,7 +166,11 @@ export interface AdminSourceToolDiagnostic {
   http_status: number | null;
   final_approved_host: string | null;
   content_type: string | null;
+  artifact_content_type: string | null;
   response_byte_count: number | null;
+  parser_outcome: string | null;
+  source_artifact_id: string | null;
+  cache_status: "live" | "cached" | "not_available" | null;
   exception_class: string | null;
   source_error_category: string;
   retryable: boolean;

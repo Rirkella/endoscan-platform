@@ -22,6 +22,10 @@ APPROVED_SOURCE_HOSTS = frozenset(
         "www.ncbi.nlm.nih.gov",
     }
 )
+OFFICIAL_GEO_HOST = "www.ncbi.nlm.nih.gov"
+OFFICIAL_GEO_ACCESSION_PATH = "/geo/query/acc.cgi"
+OFFICIAL_GEO_TEXT_MIME = "geo/text"
+GSE_ACCESSION = re.compile(r"^GSE[1-9][0-9]{1,8}$", re.I)
 ALLOWED_CONTENT_TYPES = frozenset(
     {
         "application/json",
@@ -140,6 +144,7 @@ class ScientificSourceClient:
         tool_name: str = "scientific_source",
         params: dict[str, str | int] | None = None,
         accepted_types: set[str] | frozenset[str] = ALLOWED_CONTENT_TYPES,
+        allow_official_geo_text: bool = False,
     ) -> ScientificResponse:
         try:
             self._validate_url(url)
@@ -240,7 +245,14 @@ class ScientificSourceClient:
                         ),
                     )
                 else:
-                    if content_type not in accepted_types:
+                    if not self._content_type_allowed(
+                        content_type,
+                        accepted_types=accepted_types,
+                        requested_url=url,
+                        final_url=str(response.url),
+                        params=params,
+                        allow_official_geo_text=allow_official_geo_text,
+                    ):
                         raise SourceFormatError(
                             "Scientific source returned an unexpected content type.",
                             diagnostic=self._diagnostic(
@@ -288,6 +300,46 @@ class ScientificSourceClient:
         if last_error:
             raise last_error
         raise SourceUnavailableError("Official scientific source is unavailable.")
+
+    @staticmethod
+    def _content_type_allowed(
+        content_type: str,
+        *,
+        accepted_types: set[str] | frozenset[str],
+        requested_url: str,
+        final_url: str,
+        params: dict[str, str | int] | None,
+        allow_official_geo_text: bool,
+    ) -> bool:
+        # ``geo/text`` is not a generic safe MIME. It is accepted only for the exact
+        # internally constructed, validated GEO Accession Display contract.
+        if content_type != OFFICIAL_GEO_TEXT_MIME:
+            return content_type in accepted_types
+        if not allow_official_geo_text or params is None:
+            return False
+        requested = urlparse(requested_url)
+        final = urlparse(final_url)
+        if (
+            requested.scheme != "https"
+            or (requested.hostname or "").lower().rstrip(".") != OFFICIAL_GEO_HOST
+            or requested.port not in {None, 443}
+            or requested.path != OFFICIAL_GEO_ACCESSION_PATH
+            or requested.query
+            or final.scheme != "https"
+            or (final.hostname or "").lower().rstrip(".") != OFFICIAL_GEO_HOST
+            or final.port not in {None, 443}
+            or final.path != OFFICIAL_GEO_ACCESSION_PATH
+        ):
+            return False
+        if set(params) != {"acc", "targ", "view", "form"}:
+            return False
+        accession = str(params.get("acc", "")).upper()
+        return (
+            bool(GSE_ACCESSION.fullmatch(accession))
+            and str(params.get("targ", "")) == "self"
+            and str(params.get("form", "")) == "text"
+            and str(params.get("view", "")) in {"brief", "full"}
+        )
 
     def _get_with_approved_redirects(
         self,

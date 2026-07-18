@@ -744,8 +744,12 @@ describe("Phase-1 live discovery presentation", () => {
       http_method: "GET" as const,
       http_status: 200,
       final_approved_host: "www.ncbi.nlm.nih.gov",
-      content_type: "text/html",
+      content_type: "geo/text",
+      artifact_content_type: "text/plain",
       response_byte_count: 512,
+      parser_outcome: "public_valid",
+      source_artifact_id: "art-geo-source",
+      cache_status: "live" as const,
       exception_class: "SourceFormatError",
       source_error_category: "unexpected_content_type",
       retryable: false,
@@ -790,7 +794,10 @@ describe("Phase-1 live discovery presentation", () => {
     expect(await screen.findByText("Scientific-source diagnostics")).toBeInTheDocument();
     expect(screen.getAllByText("www.ncbi.nlm.nih.gov/geo/query/acc.cgi")).toHaveLength(2);
     expect(screen.getAllByText(/GET.*200/)).toHaveLength(2);
-    expect(screen.getAllByText(/text\/html.*512 bytes/)).toHaveLength(2);
+    expect(screen.getAllByText(/geo\/text.*512 bytes/)).toHaveLength(2);
+    expect(screen.getAllByText("text/plain")).toHaveLength(2);
+    expect(screen.getAllByText("Public valid")).toHaveLength(2);
+    expect(screen.getAllByText("art-geo-source")).toHaveLength(2);
     expect(screen.getAllByText("SourceFormatError")).toHaveLength(2);
     expect(screen.getAllByText("Expected a machine-readable GEO response.")).toHaveLength(2);
     expect(document.body).not.toHaveTextContent("do-not-store");

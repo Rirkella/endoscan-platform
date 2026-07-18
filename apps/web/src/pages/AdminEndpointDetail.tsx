@@ -202,7 +202,11 @@ function SourceDiagnosticDetails({ diagnostic }: { diagnostic: AdminSourceToolDi
     <div><dt>Source</dt><dd>{diagnostic.source_host}{diagnostic.safe_url_path}</dd></div>
     <div><dt>HTTP</dt><dd>{diagnostic.http_method} · {diagnostic.http_status ?? "not received"}</dd></div>
     <div><dt>Final host</dt><dd>{diagnostic.final_approved_host ?? "not reached"}</dd></div>
-    <div><dt>Response</dt><dd>{diagnostic.content_type ?? "unknown"} · {diagnostic.response_byte_count ?? 0} bytes</dd></div>
+    <div><dt>Source MIME</dt><dd>{diagnostic.content_type ?? "unknown"} · {diagnostic.response_byte_count ?? 0} bytes</dd></div>
+    <div><dt>Artifact MIME</dt><dd>{diagnostic.artifact_content_type ?? "not stored"}</dd></div>
+    <div><dt>Parser</dt><dd>{diagnostic.parser_outcome ? humanizeMachineValue(diagnostic.parser_outcome) : "not reached"}</dd></div>
+    <div><dt>Artifact</dt><dd>{diagnostic.source_artifact_id ?? "not stored"}</dd></div>
+    <div><dt>Cache</dt><dd>{diagnostic.cache_status ? humanizeMachineValue(diagnostic.cache_status) : "not available"}</dd></div>
     <div><dt>Category</dt><dd>{humanizeMachineValue(diagnostic.source_error_category)}</dd></div>
     <div><dt>Exception</dt><dd>{diagnostic.exception_class ?? "none"}</dd></div>
     <div><dt>Attempt</dt><dd>{diagnostic.attempt_number} · {diagnostic.request_duration_ms} ms</dd></div>
