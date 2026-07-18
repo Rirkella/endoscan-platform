@@ -26,22 +26,39 @@ import { AdminModal } from "../components/AdminModal";
 
 type Candidate = {
   candidate_id: string;
+  accession?: string;
   title: string;
   source: string;
-  recommendation: string;
+  recommendation?: string;
+  recommendation_status?: string;
   limitations: string[];
+  strengths?: string[];
+  organism?: string[];
   sample_count?: number;
   controls_available?: boolean;
   data_type?: string;
   context?: string;
+  biological_context?: string;
+  treatment_control_evidence?: string;
+  dose_time_evidence?: string;
+  accession_verified?: boolean;
   description?: string;
+};
+
+type CandidateArtifact = {
+  candidates?: Candidate[];
+  run_mode?: "live" | "cached" | "replay";
+  simulation_label?: string | null;
+  live_discovery?: boolean;
+  decision_summary?: string;
+  unresolved_questions?: string[];
 };
 
 type Decision = "approve" | "reject" | "request_revision" | "choose_alternative";
 type Confirmation = { kind: Decision | "cancel"; approval?: AdminApproval };
 
 function candidateStatus(candidate: Candidate, index: number): string {
-  const value = candidate.recommendation.toLowerCase();
+  const value = (candidate.recommendation_status ?? candidate.recommendation ?? "").toLowerCase();
   if (value.includes("reject")) return "Rejected";
   if (value.includes("review")) return index === 0 ? "Recommended" : "Needs review";
   if (value.includes("prefer") || value.includes("recommend")) return "Recommended";
@@ -49,8 +66,17 @@ function candidateStatus(candidate: Candidate, index: number): string {
   return "Needs review";
 }
 
-function fixtureId(index: number): string {
-  return `SIM-OS-${String(index + 1).padStart(3, "0")}`;
+function candidateLabel(candidate: Candidate | undefined, index = 0): string {
+  return candidate?.accession ?? (candidate?.candidate_id.startsWith("SIM-") ? candidate.candidate_id : `SIM-OS-${String(index + 1).padStart(3, "0")}`);
+}
+
+function modeLabel(mode: "live" | "cached" | "replay"): string {
+  return mode === "live" ? "Live agent mode" : mode === "cached" ? "Cached mode" : "Replay mode";
+}
+
+function usageNumber(run: AdminAgentRun, name: string): number {
+  const value = run.usage[name];
+  return typeof value === "number" ? value : 0;
 }
 
 export function AdminEndpointDetail() {
@@ -64,6 +90,10 @@ export function AdminEndpointDetail() {
   const [trace, setTrace] = useState<AdminAgentRun | null>(null);
   const [errors, setErrors] = useState<AdminWorkflowError[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [runMode, setRunMode] = useState<"live" | "cached" | "replay">("replay");
+  const [simulationLabel, setSimulationLabel] = useState<string | null>(null);
+  const [decisionSummary, setDecisionSummary] = useState("");
+  const [unresolvedQuestions, setUnresolvedQuestions] = useState<string[]>([]);
   const [comment, setComment] = useState("");
   const [selected, setSelected] = useState("");
   const [activityTab, setActivityTab] = useState<"activity" | "audit">("activity");
@@ -95,11 +125,19 @@ export function AdminEndpointDetail() {
         .find((item) => item.artifact_type === "dataset_candidates");
       if (candidateArtifact) {
         const preview = await api.adminArtifactPreview(candidateArtifact.id);
-        const content = preview.content as { candidates?: Candidate[] };
+        const content = preview.content as CandidateArtifact;
         setCandidates(content.candidates ?? []);
         setSelected((current) => current || content.candidates?.[0]?.candidate_id || "");
+        setRunMode(content.run_mode ?? (content.live_discovery ? "live" : "replay"));
+        setSimulationLabel(content.simulation_label ?? null);
+        setDecisionSummary(content.decision_summary ?? "");
+        setUnresolvedQuestions(content.unresolved_questions ?? []);
       } else {
         setCandidates([]);
+        setRunMode("replay");
+        setSimulationLabel(null);
+        setDecisionSummary("");
+        setUnresolvedQuestions([]);
       }
       if (nextRuns.length > 0) setTrace(await api.adminAgentRun(nextRuns.at(-1)!.id));
       else setTrace(null);
@@ -143,6 +181,19 @@ export function AdminEndpointDetail() {
       await load();
     } catch (reason) {
       setError(reason instanceof EndoscanApiError ? reason.detail : "The review decision could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshSourceMetadata() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminRefreshSourceMetadata(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "Source metadata could not be refreshed.");
     } finally {
       setBusy(false);
     }
@@ -203,7 +254,7 @@ export function AdminEndpointDetail() {
           <span className="admin-status admin-status-detail">{buildStatusLabel(build)}</span>
           <strong>{stageLabel(build.current_stage)}</strong>
           <span>Local administrator</span>
-          <span className="admin-mode-badge">Simulation mode</span>
+          <span className="admin-mode-badge">{modeLabel(runMode)}</span>
         </div>
       </header>
 
@@ -240,7 +291,7 @@ export function AdminEndpointDetail() {
               <div>
                 <span className="admin-section-kicker">Human decision</span>
                 <h2 id="decision-title">{pending ? "Dataset review required" : "No review required"}</h2>
-                <p>{pending ? "Choose whether this prepared candidate should advance to data curation." : "This workflow is not currently waiting for a reviewer."}</p>
+                <p>{pending ? "Review the bounded recommendation before any data curation can begin." : "This workflow is not currently waiting for a reviewer."}</p>
               </div>
               {pending && <span className="admin-review-flag">Action required</span>}
             </div>
@@ -248,18 +299,14 @@ export function AdminEndpointDetail() {
               <div className="admin-approval-card">
                 <div className="admin-recommendation">
                   <span>Recommended candidate</span>
-                  <strong>{recommended ? fixtureId(Math.max(0, candidates.indexOf(recommended))) : "Prepared candidate"}</strong>
+                  <strong>{recommended ? candidateLabel(recommended, Math.max(0, candidates.indexOf(recommended))) : "No candidate"}</strong>
                   <h3>{recommended?.title ?? pending.request.proposed_decision}</h3>
-                  <p>{recommended?.description ?? pending.request.evidence_summary}</p>
+                  <p>{recommended?.description ?? recommended?.biological_context ?? pending.request.evidence_summary}</p>
                 </div>
                 <div className="admin-decision-evidence">
                   <div>
                     <h3>Why it is recommended</h3>
-                    <ul>
-                      <li>Structured for deterministic review and replay.</li>
-                      <li>Bound to the current immutable candidate artifact.</li>
-                      <li>{pending.request.agent_recommendation}</li>
-                    </ul>
+                    <ul>{[...(recommended?.strengths ?? []), pending.request.agent_recommendation].map((item) => <li key={item}>{item}</li>)}</ul>
                   </div>
                   <div>
                     <h3>Limitations</h3>
@@ -283,7 +330,7 @@ export function AdminEndpointDetail() {
           {candidates.length > 0 && (
             <section className="admin-panel" aria-labelledby="candidate-comparison-title">
               <div className="admin-panel-heading">
-                <div><h2 id="candidate-comparison-title">Candidate comparison</h2><p>Prepared simulation fixtures, not live public datasets.</p></div>
+                <div><h2 id="candidate-comparison-title">Candidate comparison</h2><p>{runMode === "replay" ? simulationLabel ?? "Prepared replay fixture; not live scientific discovery." : "Official-source metadata prepared for human scientific review."}</p></div>
                 <span>{candidates.length} candidates</span>
               </div>
               <div className="admin-candidate-grid">
@@ -293,22 +340,24 @@ export function AdminEndpointDetail() {
                     <article className={`admin-candidate-card ${selected === candidate.candidate_id ? "candidate-selected" : ""}`} key={candidate.candidate_id}>
                       <div className="admin-card-title-row">
                         <span className={`admin-candidate-status admin-candidate-${status.toLowerCase().replace(/ /g, "-")}`}>{status}</span>
-                        <span className="admin-fixture-label">Prepared simulation fixture</span>
+                        <span className="admin-fixture-label">{runMode === "replay" ? "Prepared replay fixture" : candidate.accession_verified ? "Official accession verified" : "Verification required"}</span>
                       </div>
-                      <h3>{fixtureId(index)}</h3>
+                      <h3>{candidateLabel(candidate, index)}</h3>
                       <p>{candidate.title}</p>
                       <dl className="admin-candidate-facts">
-                        <div><dt>Source</dt><dd>Prepared Phase 0 fixture</dd></div>
+                        <div><dt>Source</dt><dd>{candidate.source.startsWith("https://") ? <a href={candidate.source} target="_blank" rel="noreferrer">NCBI GEO</a> : candidate.source}</dd></div>
+                        <div><dt>Organism</dt><dd>{candidate.organism?.join(", ") || "Not specified"}</dd></div>
                         <div><dt>Samples</dt><dd>{candidate.sample_count ?? "Not supplied"}</dd></div>
-                        <div><dt>Controls</dt><dd>{candidate.controls_available == null ? "Not verified" : candidate.controls_available ? "Available" : "Unavailable"}</dd></div>
+                        <div><dt>Controls</dt><dd>{candidate.treatment_control_evidence ?? (candidate.controls_available == null ? "Not verified" : candidate.controls_available ? "Available" : "Unavailable")}</dd></div>
                         <div><dt>Data type</dt><dd>{candidate.data_type ?? "Not specified"}</dd></div>
-                        <div><dt>Context</dt><dd>{candidate.context ?? "Not specified"}</dd></div>
+                        <div><dt>Context</dt><dd>{candidate.biological_context ?? candidate.context ?? "Not specified"}</dd></div>
+                        <div><dt>Dose / time</dt><dd>{candidate.dose_time_evidence ?? "Not verified"}</dd></div>
                       </dl>
                       <h4>Cautions</h4>
                       <ul>{candidate.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
                       <label className="admin-candidate-choice">
                         <input type="radio" name="candidate" checked={selected === candidate.candidate_id} onChange={() => setSelected(candidate.candidate_id)} />
-                        Select {fixtureId(index)}
+                        Select {candidateLabel(candidate, index)}
                       </label>
                     </article>
                   );
@@ -326,8 +375,17 @@ export function AdminEndpointDetail() {
               {build.current_stage === "FAILED" && <button disabled={busy} onClick={() => void command("retry")}>Retry failed step</button>}
               {canCancel && <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>}
               <button className="admin-secondary" disabled={busy} onClick={() => void load()}>Refresh</button>
+              {import.meta.env.DEV && runMode !== "replay" && <button className="admin-secondary" disabled={busy} onClick={() => void refreshSourceMetadata()}>Refresh source metadata</button>}
             </div>
           </section>
+
+          {(decisionSummary || unresolvedQuestions.length > 0) && (
+            <section className="admin-panel" aria-labelledby="decision-summary-title">
+              <div className="admin-panel-heading"><h2 id="decision-summary-title">Decision summary</h2><span>Human review required</span></div>
+              {decisionSummary && <p>{decisionSummary}</p>}
+              {unresolvedQuestions.length > 0 && <><h3>Unresolved questions</h3><ul>{unresolvedQuestions.map((item) => <li key={item}>{item}</li>)}</ul></>}
+            </section>
+          )}
         </main>
 
         <aside className="admin-secondary-column">
@@ -341,7 +399,11 @@ export function AdminEndpointDetail() {
                   <div><dt>Output</dt><dd>{candidates.length} candidates prepared</dd></div>
                   <div><dt>Tools used</dt><dd>{agentTools.length}{trace.tools.length === 0 && agentTools.length > 0 ? " (replayed)" : ""}</dd></div>
                   <div><dt>Duration</dt><dd>{(trace.duration_ms / 1000).toFixed(2)} s</dd></div>
-                  <div><dt>Provider</dt><dd>Deterministic simulation</dd></div>
+                  <div><dt>Provider</dt><dd>{trace.provider}</dd></div>
+                  <div><dt>Model</dt><dd>{trace.model_identifier}</dd></div>
+                  <div><dt>Input tokens</dt><dd>{usageNumber(trace, "input_tokens")}</dd></div>
+                  <div><dt>Output tokens</dt><dd>{usageNumber(trace, "output_tokens")}</dd></div>
+                  <div><dt>Estimated cost</dt><dd>${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}</dd></div>
                 </dl>
                 <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{trace.tools.length === 0 ? "replayed" : tool.status}</small></li>)}</ol>
                 <div className="admin-inline-actions">
@@ -406,7 +468,7 @@ export function AdminEndpointDetail() {
       {confirmation && (
         <AdminModal
           title={confirmation.kind === "approve" ? "Confirm dataset approval" : confirmation.kind === "cancel" ? "Cancel this workflow?" : `Confirm ${humanizeMachineValue(confirmation.kind).toLowerCase()}`}
-          description={confirmation.kind === "approve" ? "Review the selected fixture and the scope of this decision before continuing." : "This decision will be recorded in the immutable audit history."}
+          description={confirmation.kind === "approve" ? "Review the selected candidate and the scope of this decision before continuing." : "This decision will be recorded in the immutable audit history."}
           onClose={() => setConfirmation(null)}
           returnFocus={confirmationTrigger.current}
         >
@@ -418,7 +480,7 @@ export function AdminEndpointDetail() {
           ) : (
             <div className="admin-confirmation">
               <dl>
-                <div><dt>Selected candidate</dt><dd>{selectedCandidate ? `${fixtureId(selectedIndex)} · ${selectedCandidate.title}` : "Prepared candidate"}</dd></div>
+                <div><dt>Selected candidate</dt><dd>{selectedCandidate ? `${candidateLabel(selectedCandidate, selectedIndex)} · ${selectedCandidate.title}` : "No candidate"}</dd></div>
                 <div><dt>Evidence binding</dt><dd>Current immutable candidate artifact</dd></div>
                 <div><dt>Approval scope</dt><dd>Dataset selection for this build only</dd></div>
                 <div><dt>Next stage</dt><dd>{confirmation.kind === "approve" ? "Prepare the selected dataset" : confirmation.kind === "request_revision" ? "Revise the prepared comparison" : confirmation.kind === "choose_alternative" ? "Record the alternative selection" : "Stop this dataset proposal"}</dd></div>

@@ -1,0 +1,574 @@
+"""Typed deterministic tools for bounded NCBI GEO metadata discovery."""
+
+from __future__ import annotations
+
+import json
+import re
+from datetime import UTC, datetime
+from typing import Any, Literal
+from xml.etree import ElementTree
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from .artifacts import LocalArtifactStore
+from .config import AgentRunMode
+from .contracts import ToolInvocation
+from .source_cache import SourceResponseCache
+from .source_security import (
+    ScientificResponse,
+    ScientificSourceClient,
+    SourceResponseError,
+    SourceUnavailableError,
+    sanitize_untrusted_text,
+)
+
+EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+GEO_SOFT = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
+GSE_PATTERN = re.compile(r"^GSE[1-9][0-9]{1,8}$", re.I)
+
+
+class ToolContract(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SearchGeoSeriesInput(ToolContract):
+    query: str = Field(min_length=3, max_length=300)
+    organism_filters: list[str] = Field(default_factory=lambda: ["Homo sapiens"], max_length=5)
+    transcriptomic_platform_filters: list[str] = Field(default_factory=list, max_length=8)
+    maximum_results: int = Field(default=5, ge=1, le=10)
+    publication_date_start: str | None = Field(
+        default=None, pattern=r"^[0-9]{4}(/[0-9]{2}/[0-9]{2})?$"
+    )
+    publication_date_end: str | None = Field(
+        default=None, pattern=r"^[0-9]{4}(/[0-9]{2}/[0-9]{2})?$"
+    )
+
+
+class SearchGeoSeriesOutput(ToolContract):
+    schema_version: str = "1.0.0"
+    results: list[dict[str, Any]]
+    retrieval_timestamp: datetime
+    source_artifact_id: str
+    cache_status: Literal["live", "cached"]
+
+
+class GeoAccessionInput(ToolContract):
+    accession: str = Field(pattern=r"^GSE[1-9][0-9]{1,8}$")
+
+
+class GeoValidationOutput(ToolContract):
+    schema_version: str = "1.0.0"
+    accession: str
+    exists: bool
+    resolves: bool
+    source_url: str
+    source_artifact_id: str
+    evidence_references: list[str]
+    cache_status: Literal["live", "cached"]
+
+
+class GeoSeriesMetadataOutput(ToolContract):
+    schema_version: str = "1.0.0"
+    accession: str
+    title: str
+    summary: str
+    organism: list[str]
+    study_type: list[str]
+    sample_metadata_summary: list[dict[str, Any]]
+    platform_ids: list[str]
+    sample_count: int
+    related_publication_ids: list[str]
+    experimental_variables: list[str]
+    source_links: list[str]
+    raw_source_artifact_id: str
+    evidence_references: list[str]
+    prompt_injection_warnings: list[str]
+    cache_status: Literal["live", "cached"]
+
+
+class GeoSampleDesignOutput(ToolContract):
+    schema_version: str = "1.0.0"
+    accession: str
+    likely_treatment_groups: list[str]
+    likely_control_groups: list[str]
+    cell_lines_or_tissues: list[str]
+    dose_fields: list[str]
+    time_fields: list[str]
+    replicate_counts: dict[str, int]
+    missing_metadata: list[str]
+    evidence_references: list[str]
+    uncertainty: list[str]
+    prompt_injection_warnings: list[str]
+
+
+class PublicationMetadataInput(ToolContract):
+    publication_ids: list[str] = Field(min_length=1, max_length=10)
+
+
+class PublicationMetadataOutput(ToolContract):
+    schema_version: str = "1.0.0"
+    publications: list[dict[str, Any]]
+    source_artifact_id: str
+    evidence_references: list[str]
+    prompt_injection_warnings: list[str]
+    cache_status: Literal["live", "cached"]
+
+
+class CompareDatasetCandidatesInput(ToolContract):
+    candidates: list[dict[str, Any]] = Field(min_length=1, max_length=10)
+
+
+class CompareDatasetCandidatesOutput(ToolContract):
+    schema_version: str = "1.0.0"
+    candidates: list[dict[str, Any]]
+    comparison_fields: list[str]
+
+
+class DiscoveryToolService:
+    def __init__(
+        self,
+        cache: SourceResponseCache,
+        artifacts: LocalArtifactStore,
+        client: ScientificSourceClient,
+        *,
+        ncbi_email: str | None = None,
+        ncbi_api_key: str | None = None,
+    ):
+        self.cache = cache
+        self.artifacts = artifacts
+        self.client = client
+        self.ncbi_email = ncbi_email
+        self.ncbi_api_key = ncbi_api_key
+
+    def search_geo_series(
+        self, request: SearchGeoSeriesInput, invocation: ToolInvocation
+    ) -> SearchGeoSeriesOutput:
+        args = request.model_dump(mode="json")
+
+        def retrieve() -> tuple[ScientificResponse, dict[str, Any]]:
+            terms = [request.query, "gse[Entry Type]"]
+            terms.extend(f'"{item}"[Organism]' for item in request.organism_filters)
+            terms.extend(request.transcriptomic_platform_filters)
+            if request.publication_date_start or request.publication_date_end:
+                start = request.publication_date_start or "1900"
+                end = request.publication_date_end or "3000"
+                terms.append(f"{start}:{end}[Publication Date]")
+            common = self._eutils_params()
+            search = self.client.get(
+                f"{EUTILS}/esearch.fcgi",
+                params={
+                    **common,
+                    "db": "gds",
+                    "term": " AND ".join(terms),
+                    "retmax": request.maximum_results,
+                    "retmode": "json",
+                },
+                accepted_types={"application/json"},
+            )
+            search_json = json.loads(search.content)
+            ids = search_json.get("esearchresult", {}).get("idlist", [])
+            summaries: dict[str, Any] = {}
+            summary_response = search
+            if ids:
+                summary_response = self.client.get(
+                    f"{EUTILS}/esummary.fcgi",
+                    params={**common, "db": "gds", "id": ",".join(ids), "retmode": "json"},
+                    accepted_types={"application/json"},
+                )
+                summaries = json.loads(summary_response.content).get("result", {})
+            parsed_results = []
+            for uid in ids:
+                item = summaries.get(str(uid), {})
+                accession = str(item.get("accession") or item.get("Accession") or "").upper()
+                if not GSE_PATTERN.fullmatch(accession):
+                    continue
+                title = sanitize_untrusted_text(
+                    str(item.get("title") or ""), source_id=f"geo:{accession}:title"
+                )
+                summary = sanitize_untrusted_text(
+                    str(item.get("summary") or item.get("description") or ""),
+                    source_id=f"geo:{accession}:summary",
+                )
+                parsed_results.append(
+                    {
+                        "accession": accession,
+                        "title": title["untrusted_text"],
+                        "summary": summary["untrusted_text"],
+                        "organism": item.get("taxon") or item.get("taxa") or [],
+                        "study_type": item.get("gdstype") or item.get("entrytype") or "",
+                        "sample_count": int(item.get("n_samples") or item.get("samples") or 0),
+                        "source_url": f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={accession}",
+                        "prompt_injection_warnings": [
+                            *title["prompt_injection_warnings"],
+                            *summary["prompt_injection_warnings"],
+                        ],
+                    }
+                )
+            combined = {"search": search_json, "summaries": summaries}
+            combined_bytes = json.dumps(combined, sort_keys=True).encode()
+            response = ScientificResponse(
+                url=summary_response.url,
+                content=combined_bytes,
+                content_type="application/json",
+                status_code=200,
+                headers={"content-type": "application/json"},
+                retrieved_at=summary_response.retrieved_at,
+            )
+            return response, {"results": parsed_results}
+
+        parsed, artifact_id, cache_status, _url = self._cached_source(
+            "search_geo_series", args, invocation, retrieve, suffix="json"
+        )
+        return SearchGeoSeriesOutput(
+            results=parsed.get("results", []),
+            retrieval_timestamp=datetime.now(UTC),
+            source_artifact_id=artifact_id,
+            cache_status=cache_status,
+        )
+
+    def validate_geo_accession(
+        self, request: GeoAccessionInput, invocation: ToolInvocation
+    ) -> GeoValidationOutput:
+        parsed, artifact_id, cache_status, url = self._geo_soft(request.accession, invocation)
+        exists = parsed.get("accession") == request.accession.upper()
+        return GeoValidationOutput(
+            accession=request.accession.upper(),
+            exists=exists,
+            resolves=exists,
+            source_url=url,
+            source_artifact_id=artifact_id,
+            evidence_references=[f"artifact:{artifact_id}#Series_geo_accession"],
+            cache_status=cache_status,
+        )
+
+    def fetch_geo_series_metadata(
+        self, request: GeoAccessionInput, invocation: ToolInvocation
+    ) -> GeoSeriesMetadataOutput:
+        parsed, artifact_id, cache_status, url = self._geo_soft(request.accession, invocation)
+        if parsed.get("accession") != request.accession.upper():
+            raise SourceResponseError("GEO accession did not resolve to an official Series record.")
+
+        def reference(field: str) -> str:
+            return f"artifact:{artifact_id}#{field}"
+
+        return GeoSeriesMetadataOutput(
+            accession=parsed["accession"],
+            title=parsed.get("title", ""),
+            summary=parsed.get("summary", ""),
+            organism=parsed.get("organism", []),
+            study_type=parsed.get("study_type", []),
+            sample_metadata_summary=parsed.get("samples", []),
+            platform_ids=parsed.get("platform_ids", []),
+            sample_count=len(parsed.get("samples", [])),
+            related_publication_ids=parsed.get("publication_ids", []),
+            experimental_variables=parsed.get("experimental_variables", []),
+            source_links=[url],
+            raw_source_artifact_id=artifact_id,
+            evidence_references=[
+                reference("Series_geo_accession"),
+                reference("Series_title"),
+                reference("Series_summary"),
+                reference("Sample_records"),
+            ],
+            prompt_injection_warnings=parsed.get("prompt_injection_warnings", []),
+            cache_status=cache_status,
+        )
+
+    def inspect_geo_sample_design(
+        self, request: GeoAccessionInput, invocation: ToolInvocation
+    ) -> GeoSampleDesignOutput:
+        parsed, artifact_id, _cache_status, _url = self._geo_soft(request.accession, invocation)
+        samples = parsed.get("samples", [])
+        treatments: set[str] = set()
+        controls: set[str] = set()
+        contexts: set[str] = set()
+        doses: set[str] = set()
+        times: set[str] = set()
+        replicate_counts: dict[str, int] = {}
+        warnings = list(parsed.get("prompt_injection_warnings", []))
+        for sample in samples:
+            text = " ".join(str(value) for value in sample.values()).lower()
+            title = str(sample.get("title", "unknown"))
+            if any(token in text for token in ("control", "vehicle", "untreated", "mock")):
+                controls.add(title)
+            elif any(token in text for token in ("treated", "exposed", "dose", "compound")):
+                treatments.add(title)
+            contexts.update(sample.get("source", []))
+            for characteristic in sample.get("characteristics", []):
+                lower = characteristic.lower()
+                if "dose" in lower or "concentration" in lower:
+                    doses.add(characteristic)
+                if "time" in lower or "duration" in lower:
+                    times.add(characteristic)
+            normalized_group = re.sub(
+                r"\b(rep(licate)?\s*[0-9]+|[0-9]+)$", "", title, flags=re.I
+            ).strip()
+            replicate_counts[normalized_group or title] = (
+                replicate_counts.get(normalized_group or title, 0) + 1
+            )
+        missing = []
+        if not controls:
+            missing.append("No explicit control or vehicle group was detected.")
+        if not treatments:
+            missing.append("No explicit treatment group was detected.")
+        if not doses:
+            missing.append("Dose metadata was not detected.")
+        if not times:
+            missing.append("Time metadata was not detected.")
+        uncertainty = [
+            "Group detection is deterministic keyword extraction, not a scientific label decision.",
+            "A human scientist must verify ambiguous treatment and control labels.",
+        ]
+        return GeoSampleDesignOutput(
+            accession=request.accession.upper(),
+            likely_treatment_groups=sorted(treatments),
+            likely_control_groups=sorted(controls),
+            cell_lines_or_tissues=sorted(item for item in contexts if item),
+            dose_fields=sorted(doses),
+            time_fields=sorted(times),
+            replicate_counts=replicate_counts,
+            missing_metadata=missing,
+            evidence_references=[f"artifact:{artifact_id}#Sample_records"],
+            uncertainty=uncertainty,
+            prompt_injection_warnings=warnings,
+        )
+
+    def fetch_publication_metadata(
+        self, request: PublicationMetadataInput, invocation: ToolInvocation
+    ) -> PublicationMetadataOutput:
+        normalized = sorted({item for item in request.publication_ids if item.isdigit()})
+        if len(normalized) != len(set(request.publication_ids)):
+            raise SourceResponseError(
+                "Publication identifiers must be numeric dataset-linked PMIDs."
+            )
+
+        def retrieve() -> tuple[ScientificResponse, dict[str, Any]]:
+            response = self.client.get(
+                f"{EUTILS}/efetch.fcgi",
+                params={
+                    **self._eutils_params(),
+                    "db": "pubmed",
+                    "id": ",".join(normalized),
+                    "retmode": "xml",
+                },
+                accepted_types={"application/xml", "text/xml"},
+            )
+            root = ElementTree.fromstring(response.content)
+            publications = []
+            warnings: list[str] = []
+            for article in root.findall(".//PubmedArticle"):
+                pmid = "".join(article.findtext(".//PMID", default="")).strip()
+                title_data = sanitize_untrusted_text(
+                    "".join(article.find(".//ArticleTitle").itertext())
+                    if article.find(".//ArticleTitle") is not None
+                    else "",
+                    source_id=f"pubmed:{pmid}:title",
+                )
+                abstract_data = sanitize_untrusted_text(
+                    " ".join(
+                        "".join(node.itertext()) for node in article.findall(".//AbstractText")
+                    ),
+                    source_id=f"pubmed:{pmid}:abstract",
+                )
+                warnings.extend(title_data["prompt_injection_warnings"])
+                warnings.extend(abstract_data["prompt_injection_warnings"])
+                publications.append(
+                    {
+                        "pmid": pmid,
+                        "title": title_data["untrusted_text"],
+                        "abstract": abstract_data["untrusted_text"],
+                        "journal": article.findtext(".//Journal/Title", default=""),
+                        "source_url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                    }
+                )
+            return response, {"publications": publications, "warnings": warnings}
+
+        parsed, artifact_id, cache_status, _url = self._cached_source(
+            "fetch_publication_metadata",
+            {"publication_ids": normalized},
+            invocation,
+            retrieve,
+            suffix="xml",
+        )
+        return PublicationMetadataOutput(
+            publications=parsed.get("publications", []),
+            source_artifact_id=artifact_id,
+            evidence_references=[f"artifact:{artifact_id}#PubmedArticle"],
+            prompt_injection_warnings=parsed.get("warnings", []),
+            cache_status=cache_status,
+        )
+
+    @staticmethod
+    def compare_dataset_candidates(
+        request: CompareDatasetCandidatesInput, _invocation: ToolInvocation
+    ) -> CompareDatasetCandidatesOutput:
+        normalized = []
+        for candidate in request.candidates:
+            sample_count = int(candidate.get("sample_count") or 0)
+            control_evidence = bool(candidate.get("likely_control_groups"))
+            treatment_evidence = bool(candidate.get("likely_treatment_groups"))
+            metadata_score = (
+                min(sample_count, 100) + 25 * control_evidence + 25 * treatment_evidence
+            )
+            normalized.append({**candidate, "metadata_completeness_score": metadata_score})
+        normalized.sort(
+            key=lambda item: (
+                -int(item["metadata_completeness_score"]),
+                str(item.get("accession", "")),
+            )
+        )
+        return CompareDatasetCandidatesOutput(
+            candidates=normalized,
+            comparison_fields=[
+                "sample_count",
+                "organism",
+                "biological_context",
+                "treatment_evidence",
+                "control_evidence",
+                "dose_time_evidence",
+                "metadata_completeness_score",
+            ],
+        )
+
+    def _geo_soft(
+        self, accession: str, invocation: ToolInvocation
+    ) -> tuple[dict[str, Any], str, Literal["live", "cached"], str]:
+        accession = accession.upper()
+
+        def retrieve() -> tuple[ScientificResponse, dict[str, Any]]:
+            response = self.client.get(
+                GEO_SOFT,
+                params={"acc": accession, "targ": "self", "form": "text", "view": "full"},
+                accepted_types={"text/plain"},
+            )
+            return response, _parse_geo_soft(response.content.decode("utf-8", errors="replace"))
+
+        return self._cached_source(
+            "geo_series_soft", {"accession": accession}, invocation, retrieve, suffix="txt"
+        )
+
+    def _cached_source(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        invocation: ToolInvocation,
+        retrieve,
+        *,
+        suffix: str,
+    ) -> tuple[dict[str, Any], str, Literal["live", "cached"], str]:
+        mode = AgentRunMode(str(invocation.run_context.get("run_mode", "replay")))
+        refresh = bool(invocation.run_context.get("refresh_source_metadata", False))
+        cached = None if refresh else self.cache.get(tool_name, arguments)
+        if cached is not None:
+            descriptor, raw = self.artifacts.get(cached.raw_artifact_id)
+            current = self.artifacts.put_bytes(
+                workflow_id=_required(invocation.workflow_id, "workflow_id"),
+                step_id=invocation.step_id,
+                content=raw,
+                mime_type=descriptor.mime_type,
+                artifact_type="scientific_source_raw",
+                logical_name=f"source-{tool_name}-{cached.content_hash[:12]}.{suffix}",
+                producer=tool_name,
+                original_source=cached.source_url,
+                idempotency_key=f"{invocation.idempotency_key}:cached-source",
+            )
+            return cached.parsed_output, current.id, "cached", cached.source_url
+        if mode is not AgentRunMode.LIVE and not refresh:
+            raise SourceUnavailableError(
+                "Cached mode has no fresh source artifact; an explicit live refresh is required."
+            )
+        response, parsed = retrieve()
+        artifact = self.artifacts.put_bytes(
+            workflow_id=_required(invocation.workflow_id, "workflow_id"),
+            step_id=invocation.step_id,
+            content=response.content,
+            mime_type=response.content_type,
+            artifact_type="scientific_source_raw",
+            logical_name=f"source-{tool_name}-{response.sha256[:12]}.{suffix}",
+            producer=tool_name,
+            original_source=response.url,
+            idempotency_key=f"{invocation.idempotency_key}:live-source",
+        )
+        self.cache.put(
+            tool_name,
+            arguments,
+            source_url=response.url,
+            content_hash=response.sha256,
+            parsed_output=parsed,
+            raw_artifact_id=artifact.id,
+            http_metadata={"status_code": response.status_code, "headers": response.headers},
+        )
+        return parsed, artifact.id, "live", response.url
+
+    def _eutils_params(self) -> dict[str, str]:
+        values = {"tool": "endoscan_phase1"}
+        if self.ncbi_email:
+            values["email"] = self.ncbi_email
+        if self.ncbi_api_key:
+            values["api_key"] = self.ncbi_api_key
+        return values
+
+
+def _parse_geo_soft(value: str) -> dict[str, Any]:
+    fields: dict[str, list[str]] = {}
+    samples: list[dict[str, Any]] = []
+    current_sample: dict[str, Any] | None = None
+    warnings: list[str] = []
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        if line.startswith("^SAMPLE"):
+            if current_sample:
+                samples.append(current_sample)
+            current_sample = {
+                "accession": line.split("=", 1)[-1].strip(),
+                "characteristics": [],
+                "source": [],
+            }
+            continue
+        if not line.startswith("!") or "=" not in line:
+            continue
+        key, raw = (item.strip() for item in line[1:].split("=", 1))
+        cleaned = sanitize_untrusted_text(raw, source_id=f"geo-soft:{key}")
+        warnings.extend(cleaned["prompt_injection_warnings"])
+        text = cleaned["untrusted_text"]
+        if current_sample is not None and key.startswith("Sample_"):
+            short = key.removeprefix("Sample_").lower()
+            if short == "characteristics_ch1":
+                current_sample["characteristics"].append(text)
+            elif short == "source_name_ch1":
+                current_sample["source"].append(text)
+            elif short in {"title", "organism_ch1"}:
+                current_sample[short.replace("_ch1", "")] = text
+            continue
+        fields.setdefault(key, []).append(text)
+    if current_sample:
+        samples.append(current_sample)
+    accession = next(iter(fields.get("Series_geo_accession", [])), "").upper()
+    if accession and not GSE_PATTERN.fullmatch(accession):
+        accession = ""
+    variables = sorted(
+        {
+            characteristic.split(":", 1)[0].strip()
+            for sample in samples
+            for characteristic in sample.get("characteristics", [])
+            if ":" in characteristic
+        }
+    )
+    return {
+        "accession": accession,
+        "title": next(iter(fields.get("Series_title", [])), ""),
+        "summary": " ".join(fields.get("Series_summary", [])),
+        "organism": sorted(set(fields.get("Series_organism_ch1", []))),
+        "study_type": sorted(set(fields.get("Series_type", []))),
+        "platform_ids": sorted(set(fields.get("Series_platform_id", []))),
+        "publication_ids": sorted(set(fields.get("Series_pubmed_id", []))),
+        "experimental_variables": variables,
+        "samples": samples,
+        "prompt_injection_warnings": warnings,
+    }
+
+
+def _required(value: str | None, name: str) -> str:
+    if not value:
+        raise SourceResponseError(f"Tool invocation is missing required {name} context.")
+    return value

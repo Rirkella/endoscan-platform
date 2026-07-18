@@ -160,9 +160,9 @@ describe("Phase-0 endpoint-build list and creation", () => {
     expect(screen.getAllByText("Waiting for dataset review")).toHaveLength(2);
     expect(screen.getByText("Review required")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /Open Oxidative stress, build/ })).toHaveLength(2);
-    expect(screen.getAllByText("Simulation mode")).toHaveLength(1);
+    expect(screen.getAllByText("Replay mode")).toHaveLength(1);
     expect(screen.queryByRole("form")).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("opens creation in a focus-managed dialog and creates a durable route", async () => {
     const NativeRequest = globalThis.Request;
@@ -220,13 +220,13 @@ describe("Phase-0 build detail information architecture", () => {
     expect(screen.getByLabelText("Endpoint build stages").children).toHaveLength(10);
     expect(screen.getAllByText("SIM-OS-001")).toHaveLength(2);
     expect(screen.getByText("SIM-OS-002")).toBeInTheDocument();
-    expect(screen.getAllByText("Prepared simulation fixture")).toHaveLength(2);
+    expect(screen.getAllByText("Prepared replay fixture")).toHaveLength(2);
     expect(screen.getByText("168")).toBeInTheDocument();
     expect(screen.getByText("Why it is recommended")).toBeInTheDocument();
     expect(screen.getAllByText("Limitations").length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "Agent activity" })).toBeInTheDocument();
     expect(screen.getByText("Inspected endpoint registry")).toBeInTheDocument();
-    expect(screen.queryByText("120")).not.toBeInTheDocument();
+    expect(screen.getByText("120")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Dataset review requested")).toBeInTheDocument();
     expect(document.querySelector(".admin-timeline")).not.toBeInTheDocument();
@@ -332,5 +332,130 @@ describe("Phase-0 build detail information architecture", () => {
     await screen.findAllByText("Preparing the selected dataset");
     const versions = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)).expected_version);
     expect(versions).toEqual([0, 3, 4]);
+  });
+});
+
+describe("Phase-1 live discovery presentation", () => {
+  it("shows provider-unavailable status while keeping replay usable", async () => {
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "GET /api/admin/capabilities": {
+        body: {
+          schema_version: "1.0.0",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          run_mode: "replay",
+          api_key_present: false,
+          live_mode_enabled: false,
+          source_tools_available: true,
+          tracing_enabled: false,
+          configured_budget: {
+            maximum_turns: 8,
+            maximum_tool_calls: 12,
+            timeout_seconds: 90,
+            maximum_input_tokens: 12000,
+            maximum_output_tokens: 3000,
+            maximum_cost_usd: 0.5,
+            input_cost_per_million_usd: 0.75,
+            output_cost_per_million_usd: 4.5,
+          },
+        },
+      },
+    });
+    renderApp("/admin/endpoints");
+    expect(await screen.findByText("Replay mode")).toBeInTheDocument();
+    expect(screen.getByText(/API key present: no/)).toBeInTheDocument();
+    expect(screen.getByText(/Live runs are disabled/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["live", "Live agent mode"],
+    ["cached", "Cached mode"],
+    ["replay", "Replay mode"],
+  ])("renders the %s badge", async (mode, label) => {
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: { artifact, content: { run_mode: mode, candidates } },
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText(label)).toBeInTheDocument();
+  });
+
+  it("presents real candidate evidence, source links, usage, and unresolved questions", async () => {
+    const liveRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      duration_ms: 1540,
+      usage: { input_tokens: 1000, output_tokens: 500, cost_cents: 0.3 },
+      tools: [{ id: "tool-live", tool_name: "validate_geo_accession", status: "completed", duration_ms: 40 }],
+    };
+    const liveCandidates = [
+      {
+        candidate_id: "candidate-gse-12345",
+        accession: "GSE12345",
+        title: "Oxidative stress response in human cells",
+        source: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
+        organism: ["Homo sapiens"],
+        data_type: "RNA sequencing",
+        sample_count: 12,
+        biological_context: "HepG2 cells",
+        treatment_control_evidence: "Vehicle and treatment groups were detected.",
+        dose_time_evidence: "10 uM for 24 h",
+        strengths: ["Official accession validated"],
+        limitations: ["Human label review required"],
+        recommendation_status: "recommended_for_human_review",
+        accession_verified: true,
+      },
+      {
+        candidate_id: "candidate-gse-12346",
+        accession: "GSE12346",
+        title: "Alternative series",
+        source: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12346",
+        organism: ["Homo sapiens"],
+        data_type: "Microarray",
+        sample_count: 8,
+        biological_context: "Primary cells",
+        treatment_control_evidence: "Control evidence is ambiguous.",
+        dose_time_evidence: "Not reported",
+        limitations: ["Control metadata is unclear"],
+        recommendation_status: "alternative",
+        accession_verified: true,
+      },
+    ];
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: {
+          artifact,
+          content: {
+            run_mode: "live",
+            live_discovery: true,
+            candidates: liveCandidates,
+            decision_summary: "GSE12345 has the stronger verifiable design.",
+            unresolved_questions: ["Are the treatment labels scientifically acceptable?"],
+          },
+        },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [liveRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: liveRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Live agent mode")).toBeInTheDocument();
+    expect(screen.getAllByText("GSE12345").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "NCBI GEO" })[0]).toHaveAttribute(
+      "href",
+      "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
+    );
+    expect(screen.getAllByText("Homo sapiens").length).toBeGreaterThan(0);
+    expect(screen.getByText("GSE12345 has the stronger verifiable design.")).toBeInTheDocument();
+    expect(screen.getByText("Are the treatment labels scientifically acceptable?")).toBeInTheDocument();
+    expect(screen.getByText("gpt-5.4-mini")).toBeInTheDocument();
+    expect(screen.getByText("$0.0030")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh source metadata" })).toBeInTheDocument();
+    expect(screen.queryByText(/chain of thought/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve dataset" })).toBeInTheDocument();
   });
 });

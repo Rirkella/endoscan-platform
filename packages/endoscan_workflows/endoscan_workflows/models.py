@@ -200,4 +200,21 @@ class WorkflowErrorRow(Base):
     created_at: Mapped[str] = mapped_column(String(40))
 
 
+class SourceCacheRow(Base):
+    __tablename__ = "source_response_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tool_name: Mapped[str] = mapped_column(String(80), index=True)
+    normalized_arguments_json: Mapped[str] = mapped_column(Text)
+    policy_version: Mapped[str] = mapped_column(String(40))
+    source_version: Mapped[str | None] = mapped_column(String(120))
+    source_url: Mapped[str] = mapped_column(String(1000))
+    http_metadata_json: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    parsed_output_json: Mapped[str] = mapped_column(Text)
+    raw_artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"), index=True)
+    retrieved_at: Mapped[str] = mapped_column(String(40))
+    expires_at: Mapped[str] = mapped_column(String(40), index=True)
+
+
 Index("ix_build_status_updated", EndpointBuildRow.status, EndpointBuildRow.updated_at)

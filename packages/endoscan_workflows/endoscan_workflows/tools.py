@@ -82,12 +82,15 @@ class RegisteredTool:
         definition: ToolDefinition,
         input_model: type[BaseModel],
         output_model: type[BaseModel],
-        implementation: Callable[[BaseModel], BaseModel | dict],
+        implementation: Callable[..., BaseModel | dict],
+        *,
+        contextual: bool = False,
     ):
         self.definition = definition
         self.input_model = input_model
         self.output_model = output_model
         self.implementation = implementation
+        self.contextual = contextual
 
 
 class ToolRegistry:
@@ -136,7 +139,10 @@ class ToolRegistry:
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
         with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(tool.implementation, typed_input)
+            future = executor.submit(
+                tool.implementation,
+                *((typed_input, invocation) if tool.contextual else (typed_input,)),
+            )
             try:
                 raw = future.result(timeout=tool.definition.timeout_seconds)
                 output = tool.output_model.model_validate(raw).model_dump(mode="json")
@@ -330,6 +336,106 @@ def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
                 input_model,
                 output_model,
                 implementation,
+            )
+        )
+    return registry
+
+
+def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
+    """Phase-0 tools plus the six bounded Phase-1 scientific metadata tools."""
+    from .discovery_tools import (
+        CompareDatasetCandidatesInput,
+        CompareDatasetCandidatesOutput,
+        GeoAccessionInput,
+        GeoSampleDesignOutput,
+        GeoSeriesMetadataOutput,
+        GeoValidationOutput,
+        PublicationMetadataInput,
+        PublicationMetadataOutput,
+        SearchGeoSeriesInput,
+        SearchGeoSeriesOutput,
+    )
+
+    registry = phase0_tool_registry(repo_root)
+    discovery = [WorkflowState.DISCOVERING_DATA]
+    specs = [
+        (
+            "search_geo_series",
+            "Search official NCBI GEO Series metadata within bounded query and result limits.",
+            SearchGeoSeriesInput,
+            SearchGeoSeriesOutput,
+            discovery_service.search_geo_series,
+            ["source:geo:read"],
+            SideEffectClassification.EXTERNAL_READ,
+        ),
+        (
+            "fetch_geo_series_metadata",
+            "Fetch official GEO Series metadata for one validated GSE accession.",
+            GeoAccessionInput,
+            GeoSeriesMetadataOutput,
+            discovery_service.fetch_geo_series_metadata,
+            ["source:geo:read"],
+            SideEffectClassification.EXTERNAL_READ,
+        ),
+        (
+            "validate_geo_accession",
+            "Confirm that one GSE accession resolves through the official GEO source.",
+            GeoAccessionInput,
+            GeoValidationOutput,
+            discovery_service.validate_geo_accession,
+            ["source:geo:read"],
+            SideEffectClassification.EXTERNAL_READ,
+        ),
+        (
+            "inspect_geo_sample_design",
+            (
+                "Extract treatment, control, context, dose, time, replicate and "
+                "missing-metadata evidence."
+            ),
+            GeoAccessionInput,
+            GeoSampleDesignOutput,
+            discovery_service.inspect_geo_sample_design,
+            ["source:geo:read"],
+            SideEffectClassification.EXTERNAL_READ,
+        ),
+        (
+            "fetch_publication_metadata",
+            "Fetch bibliographic metadata only for dataset-linked PubMed identifiers.",
+            PublicationMetadataInput,
+            PublicationMetadataOutput,
+            discovery_service.fetch_publication_metadata,
+            ["source:pubmed:linked"],
+            SideEffectClassification.EXTERNAL_READ,
+        ),
+        (
+            "compare_dataset_candidates",
+            "Deterministically normalize and compare already retrieved candidate metadata.",
+            CompareDatasetCandidatesInput,
+            CompareDatasetCandidatesOutput,
+            discovery_service.compare_dataset_candidates,
+            ["source:metadata:compare"],
+            SideEffectClassification.NONE,
+        ),
+    ]
+    for name, description, input_model, output_model, implementation, permissions, effect in specs:
+        registry.register(
+            RegisteredTool(
+                ToolDefinition(
+                    name=name,
+                    description=description,
+                    input_schema_name=input_model.__name__,
+                    output_schema_name=output_model.__name__,
+                    required_permissions=permissions,
+                    side_effect=effect,
+                    idempotency=IdempotencyClassification.IDEMPOTENT_WITH_KEY,
+                    timeout_seconds=30.0,
+                    allowed_workflow_stages=discovery,
+                    implementation_version="phase1-v1",
+                ),
+                input_model,
+                output_model,
+                implementation,
+                contextual=True,
             )
         )
     return registry

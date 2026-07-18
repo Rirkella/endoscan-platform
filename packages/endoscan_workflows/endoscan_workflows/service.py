@@ -9,6 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from .artifacts import LocalArtifactStore
+from .config import AgentConfiguration
 from .contracts import (
     SCHEMA_VERSION,
     ActorType,
@@ -25,7 +26,7 @@ from .contracts import (
     WorkflowStatus,
 )
 from .database import WorkflowDatabase
-from .discovery import DiscoveryOutput, discovery_request
+from .discovery import DiscoveryOutput, discovery_request, validate_evidence_references
 from .errors import (
     GuardNotSatisfied,
     InvalidTransition,
@@ -96,6 +97,7 @@ class WorkflowService:
         *,
         repo_root: Path,
         harness: AgentHarness | None = None,
+        agent_configuration: AgentConfiguration | None = None,
         maximum_workflows: int = 100,
     ):
         self.database = database
@@ -103,6 +105,7 @@ class WorkflowService:
         self.graph = graph
         self.repo_root = Path(repo_root).resolve()
         self.harness = harness
+        self.agent_configuration = agent_configuration or AgentConfiguration()
         self.maximum_workflows = maximum_workflows
 
     def create_build(self, request: EndpointBuildCreate) -> WorkflowSnapshot:
@@ -242,7 +245,10 @@ class WorkflowService:
                 idempotency_key=f"{idempotency_key}:discovering",
                 initiator=ActorType.HUMAN,
                 initiator_id=actor,
-                reason="Administrator started prepared deterministic discovery simulation.",
+                reason=(
+                    "Administrator started "
+                    f"{self.agent_configuration.run_mode.value} dataset discovery."
+                ),
                 artifact_hashes=[definition.sha256],
             ),
         )
@@ -262,6 +268,7 @@ class WorkflowService:
         expected_version: int,
         actor: str,
         idempotency_key: str,
+        refresh_source_metadata: bool = False,
     ) -> WorkflowSnapshot:
         if self.harness is None:
             raise WorkflowConflict("No Phase-0 agent harness is configured.")
@@ -277,8 +284,9 @@ class WorkflowService:
             WorkflowState.DISCOVERING_DATA,
             idempotency_key=f"{idempotency_key}:step",
             input_payload={
-                "simulation": "prepared deterministic agent simulation",
-                "live_discovery": False,
+                "run_mode": self.agent_configuration.run_mode.value,
+                "provider": self.agent_configuration.provider,
+                "model": self.agent_configuration.model,
             },
         )
         request = discovery_request(
@@ -286,6 +294,8 @@ class WorkflowService:
             step_id=step.id,
             endpoint_name=snapshot.endpoint_name,
             biological_goal=snapshot.biological_goal,
+            configuration=self.agent_configuration,
+            refresh_source_metadata=refresh_source_metadata,
         )
         run_id, result = self.harness.run(request, DiscoveryOutput)
         if result.status.value != "completed" or result.output is None:
@@ -308,29 +318,78 @@ class WorkflowService:
                 ),
             )
         revision = step.attempt
+        available_artifact_ids = {
+            item.id for item in self.artifact_store.list_artifacts(workflow_id)
+        }
+        output = validate_evidence_references(
+            DiscoveryOutput.model_validate(result.output), available_artifact_ids
+        )
+        output_payload = output.model_dump(mode="json")
+        run_mode = output.run_mode
         candidate_artifact = self.artifact_store.put_json(
             workflow_id=workflow_id,
             step_id=step.id,
-            value={**result.output, "proposal_revision": revision, "agent_run_id": run_id},
+            value={**output_payload, "proposal_revision": revision, "agent_run_id": run_id},
             artifact_type="dataset_candidates",
-            logical_name=f"prepared-dataset-candidates-v{revision}.json",
-            producer="Dataset Discovery Agent",
-            original_source="phase0://prepared-fixture",
+            logical_name=f"dataset-candidates-{run_mode}-v{revision}.json",
+            producer="Dataset Discovery and Evaluation Agent",
+            original_source=(
+                "phase1://validated-replay"
+                if run_mode == "replay"
+                else "https://www.ncbi.nlm.nih.gov/geo/"
+            ),
             idempotency_key=f"{idempotency_key}:candidate-artifact",
+        )
+        strategy_artifact = self.artifact_store.put_json(
+            workflow_id=workflow_id,
+            step_id=step.id,
+            value={
+                "run_mode": run_mode,
+                "search_strategy": output.search_strategy,
+                "queries_executed": output.queries_executed,
+                "limitations": output.limitations,
+            },
+            artifact_type="search_strategy",
+            logical_name=f"search-strategy-{run_mode}-v{revision}.json",
+            producer="Dataset Discovery and Evaluation Agent",
+            original_source="endoscan://agent-output",
+            idempotency_key=f"{idempotency_key}:strategy-artifact",
+        )
+        recommendation_artifact = self.artifact_store.put_json(
+            workflow_id=workflow_id,
+            step_id=step.id,
+            value={
+                "run_mode": run_mode,
+                "recommended_candidate_id": output.recommended_candidate_id,
+                "recommendation": output.recommendation,
+                "decision_summary": output.decision_summary,
+                "unresolved_questions": output.unresolved_questions,
+                "requires_human_review": output.requires_human_review,
+                "confidence_category": output.confidence_category,
+                "evidence_references": [
+                    item.model_dump(mode="json") for item in output.evidence_references
+                ],
+            },
+            artifact_type="agent_recommendation",
+            logical_name=f"agent-recommendation-{run_mode}-v{revision}.json",
+            producer="Dataset Discovery and Evaluation Agent",
+            original_source="endoscan://agent-output",
+            idempotency_key=f"{idempotency_key}:recommendation-artifact",
         )
         trace_artifact = self.artifact_store.put_json(
             workflow_id=workflow_id,
             step_id=step.id,
             value={
-                "simulation_label": "Prepared deterministic agent simulation",
-                "live_discovery": False,
+                "run_mode": run_mode,
+                "provider": request.model.provider,
+                "model": request.model.model_identifier,
                 "agent_run_id": run_id,
                 "events": [event.model_dump(mode="json") for event in result.trace],
             },
             artifact_type="search_trace",
-            logical_name=f"prepared-search-trace-v{revision}.json",
+            logical_name=f"internal-agent-trace-{run_mode}-v{revision}.json",
             producer="agent-harness",
-            original_source="phase0://prepared-fixture",
+            original_source="endoscan://immutable-trace",
             idempotency_key=f"{idempotency_key}:trace-artifact",
         )
         self.complete_step(
@@ -338,6 +397,8 @@ class WorkflowService:
             output_payload={
                 "agent_run_id": run_id,
                 "candidate_artifact_id": candidate_artifact.id,
+                "strategy_artifact_id": strategy_artifact.id,
+                "recommendation_artifact_id": recommendation_artifact.id,
                 "trace_artifact_id": trace_artifact.id,
             },
             idempotency_key=f"{idempotency_key}:step-complete",
@@ -350,21 +411,29 @@ class WorkflowService:
                 idempotency_key=f"{idempotency_key}:awaiting-approval",
                 initiator=ActorType.ORCHESTRATOR,
                 initiator_id="workflow-service",
-                reason="Prepared candidates are ready for human dataset review.",
-                artifact_hashes=[candidate_artifact.sha256, trace_artifact.sha256],
+                reason=f"{run_mode.title()} candidates are ready for human dataset review.",
+                artifact_hashes=[
+                    candidate_artifact.sha256,
+                    strategy_artifact.sha256,
+                    recommendation_artifact.sha256,
+                    trace_artifact.sha256,
+                ],
             ),
         )
-        output = DiscoveryOutput.model_validate(result.output)
         approval = ApprovalRequest(
             workflow_id=workflow_id,
             stage=WorkflowState.AWAITING_DATASET_APPROVAL,
             approval_type=ApprovalType.DATASET_SELECTION,
-            proposed_decision=f"Select one prepared candidate from proposal revision {revision}.",
-            evidence_summary=output.summary,
+            proposed_decision=f"Select one {run_mode} candidate from proposal revision {revision}.",
+            evidence_summary=output.decision_summary,
             source_references=[candidate.source for candidate in output.candidates],
             limitations=output.limitations,
-            artifact_hashes=[candidate_artifact.sha256],
-            agent_recommendation=output.recommendation or "No recommendation",
+            artifact_hashes=[
+                candidate_artifact.sha256,
+                strategy_artifact.sha256,
+                recommendation_artifact.sha256,
+            ],
+            agent_recommendation=output.recommendation,
             requested_action="Approve, reject, request revision, or choose an alternative.",
         )
         self.create_approval(

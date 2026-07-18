@@ -522,8 +522,16 @@ class AgentHarness:
             ToolInvocation(
                 tool_name=tool_request.tool_name,
                 arguments=tool_request.arguments,
+                workflow_id=request.workflow_id,
+                step_id=request.step_id,
                 workflow_stage=WorkflowState(request.context["workflow_stage"]),
                 permission_scope=request.context.get("permission_scope", []),
+                run_context={
+                    "run_mode": request.context.get("run_mode", "replay"),
+                    "refresh_source_metadata": bool(
+                        request.context.get("refresh_source_metadata", False)
+                    ),
+                },
                 idempotency_key=key,
             )
         )

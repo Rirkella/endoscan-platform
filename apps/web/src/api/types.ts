@@ -103,6 +103,29 @@ export interface AdminAgentRun {
   tool_calls?: Array<Record<string, unknown>>;
 }
 
+export interface AdminAgentCapabilities {
+  schema_version: "1.0.0";
+  provider: string;
+  model: string;
+  run_mode: "live" | "cached" | "replay";
+  api_key_present: boolean;
+  live_mode_enabled: boolean;
+  source_tools_available: boolean;
+  tracing_enabled: boolean;
+  configured_budget: {
+    maximum_turns: number;
+    maximum_tool_calls: number;
+    timeout_seconds: number;
+    maximum_input_tokens: number;
+    maximum_output_tokens: number;
+    maximum_cost_usd: number;
+    input_cost_per_million_usd: number;
+    output_cost_per_million_usd: number;
+  };
+  label?: string;
+  live_unavailable_reason?: string | null;
+}
+
 export interface AdminWorkflowError {
   schema_version: "1.0.0";
   id: string;

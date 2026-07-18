@@ -65,6 +65,7 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
         "tool_calls",
         "human_decisions",
         "workflow_errors",
+        "source_response_cache",
         "alembic_version",
     }.issubset(tables)
     assert database.capability() == {
@@ -108,6 +109,8 @@ def test_discovery_reaches_persisted_dataset_approval(workflow_runtime) -> None:
     assert {item.artifact_type for item in store.list_artifacts(started.id)} == {
         "endpoint_definition",
         "dataset_candidates",
+        "search_strategy",
+        "agent_recommendation",
         "search_trace",
     }
     assert service.agent_runs(started.id)[0]["provider"] == "fake"

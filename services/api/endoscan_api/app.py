@@ -18,12 +18,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from endoscan_core.inference import ModelArtifactUnavailableError
 from endoscan_core.registry import find_repo_root, list_endpoints
 from endoscan_workflows.artifacts import LocalArtifactStore
+from endoscan_workflows.config import AgentConfiguration
 from endoscan_workflows.database import WorkflowDatabase
+from endoscan_workflows.discovery_tools import DiscoveryToolService
 from endoscan_workflows.harness import AgentHarness
+from endoscan_workflows.openai_provider import OpenAIAgentProvider
 from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
 from endoscan_workflows.service import WorkflowService
+from endoscan_workflows.source_cache import SourceResponseCache
+from endoscan_workflows.source_security import ScientificSourceClient
 from endoscan_workflows.state_machine import WorkflowGraph
-from endoscan_workflows.tools import phase0_tool_registry
+from endoscan_workflows.tools import phase1_tool_registry
 
 from .admin.auth import AdminMutationLimiter
 from .admin.routes import router as admin_router
@@ -163,35 +168,67 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     workflow_database = WorkflowDatabase(workflow_db_path)
     workflow_database.migrate()
     artifact_store = LocalArtifactStore(workflow_database, artifact_root)
+    agent_configuration = AgentConfiguration.from_env()
+    source_cache = SourceResponseCache(
+        workflow_database, ttl_seconds=agent_configuration.source_cache_ttl_seconds
+    )
+    source_client = ScientificSourceClient(
+        timeout_seconds=agent_configuration.source_request_timeout_seconds,
+        maximum_bytes=agent_configuration.source_response_maximum_bytes,
+        requests_per_second=agent_configuration.source_requests_per_second,
+    )
+    discovery_tools = DiscoveryToolService(
+        source_cache,
+        artifact_store,
+        source_client,
+        ncbi_email=agent_configuration.ncbi_email,
+        ncbi_api_key=(
+            agent_configuration.ncbi_api_key.get_secret_value()
+            if agent_configuration.ncbi_api_key
+            else None
+        ),
+    )
+    tool_registry = phase1_tool_registry(root, discovery_tools)
     provider_registry = ProviderRegistry()
     provider_registry.register("fake", FakeAgentProvider)
-    harness = AgentHarness(workflow_database, provider_registry, phase0_tool_registry(root))
+    provider_registry.register(
+        "openai", lambda: OpenAIAgentProvider(agent_configuration, tool_registry)
+    )
+    harness = AgentHarness(workflow_database, provider_registry, tool_registry)
     workflow_service = WorkflowService(
         workflow_database,
         artifact_store,
         WorkflowGraph(_workflow_state_machine_path(root)),
         repo_root=root,
         harness=harness,
+        agent_configuration=agent_configuration,
     )
     recovered = workflow_service.recover_interrupted()
     app.state.workflow_database = workflow_database
     app.state.artifact_store = artifact_store
     app.state.provider_registry = provider_registry
+    app.state.agent_configuration = agent_configuration
+    app.state.source_cache = source_cache
+    app.state.source_client = source_client
     app.state.workflow_service = workflow_service
     app.state.admin_development_mode = (
         os.environ.get("ENDOSCAN_ADMIN_MODE", "disabled").strip().lower() == "development"
     )
     app.state.admin_mutation_limiter = AdminMutationLimiter()
     app.state.agent_capabilities = {
-        "schema_version": "1.0.0",
-        "provider": "fake",
-        "label": "Prepared deterministic agent simulation",
-        "live_llm_calls": False,
-        "live_dataset_discovery": False,
+        **agent_configuration.public_status(),
+        "available_modes": ["live", "cached", "replay"],
+        "label": f"{agent_configuration.run_mode.value.title()} agent mode",
+        "live_llm_calls": (
+            agent_configuration.live_enabled
+            and agent_configuration.run_mode.value in {"live", "cached"}
+        ),
+        "live_dataset_discovery": agent_configuration.run_mode.value == "live",
         "rag": False,
         "registry_publication": False,
         "recovered_interrupted_steps": recovered,
     }
+    app.router.add_event_handler("shutdown", source_client.close)
     app.router.add_event_handler("shutdown", workflow_database.dispose)
 
     # CORS: explicit allow-list only (browser cross-origin fetch fix for the local demo /

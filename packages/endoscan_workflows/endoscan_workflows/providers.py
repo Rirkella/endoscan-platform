@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Protocol
 
 from .contracts import (
@@ -142,26 +144,19 @@ class FakeAgentProvider:
                 tool_request=sequence[len(history)],
                 usage=self._usage(len(history)),
             )
-        candidates = history[-1].get("output", {}).get("candidates", []) if history else []
+        endpoint_name = str(request.context.get("endpoint_name", "Oxidative stress"))
+        fixture_path = Path(__file__).with_name("fixtures") / "phase1_oxidative_stress_replay.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        output = fixture["output"]
+        output["endpoint_name"] = endpoint_name
+        output["endpoint_definition_summary"] = str(request.context.get("biological_goal", ""))
+        for index, candidate in enumerate(output["candidates"], start=1):
+            candidate["title"] = (
+                f"Prepared metadata candidate {chr(64 + index)} for {endpoint_name}"
+            )
         return ProviderTurn(
             kind="output",
-            output={
-                "schema_version": "1.0.0",
-                "simulation_label": "Prepared deterministic agent simulation",
-                "live_discovery": False,
-                "summary": (
-                    "Prepared Phase-0 candidates demonstrate governed discovery orchestration; "
-                    "they are not live scientific findings."
-                ),
-                "candidates": candidates,
-                "recommendation": candidates[0]["candidate_id"] if candidates else None,
-                "limitations": [
-                    "Candidate metadata is a deterministic audit fixture.",
-                    "No GEO, PubMed, OpenAI, Anthropic, or other network request occurred.",
-                    "A future live discovery stage must independently verify accessions "
-                    "and licences.",
-                ],
-            },
+            output=output,
             usage=self._usage(len(history)),
         )
 

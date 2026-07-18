@@ -61,7 +61,13 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
         health = client.get("/health").json()
         assert health["workflow_database"]["journal_mode"] == "wal"
         assert health["workflow_database"]["foreign_keys"] is True
-        assert health["agent_provider"]["configured"] == ["fake"]
+        assert health["agent_provider"]["configured"] == ["fake", "openai"]
+        capabilities = client.get("/admin/capabilities", headers=ADMIN).json()
+        assert capabilities["provider"] == "fake"
+        assert capabilities["run_mode"] == "replay"
+        assert capabilities["api_key_present"] is False
+        assert capabilities["source_tools_available"] is True
+        assert "api_key" not in capabilities
         assert health["agent_provider"]["live_model_api"] is False
         assert health["admin"]["development_mode"] is True
 

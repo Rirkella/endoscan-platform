@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, Request
 
-from endoscan_workflows.contracts import ApprovalDecision, EndpointBuildCreate, WorkflowState
+from endoscan_workflows.contracts import (
+    ApprovalDecision,
+    ApprovalDecisionValue,
+    EndpointBuildCreate,
+    WorkflowState,
+)
 
 from .auth import (
     require_development_admin,
@@ -88,6 +93,51 @@ def cancel(build_id: str, body: WorkflowCommandBody, request: Request, key: str 
 @router.post("/endpoint-builds/{build_id}/retry", dependencies=[Depends(require_mutation_budget)])
 def retry(build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)):
     return _command("retry_failed", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/refresh-source-metadata",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def refresh_source_metadata(
+    build_id: str,
+    body: WorkflowCommandBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    service = _service(request)
+    build_id = validate_resource_id(build_id, "Endpoint build")
+    build = service.get_build(build_id)
+    if build.current_stage is not WorkflowState.AWAITING_DATASET_APPROVAL:
+        return service.run_discovery(
+            build_id,
+            expected_version=body.expected_version,
+            actor=body.actor,
+            idempotency_key=f"{key}:refresh",
+            refresh_source_metadata=True,
+        )
+    pending = service.list_approvals(build_id, pending_only=True)
+    if not pending:
+        return build
+    request_payload = pending[-1]["request"]
+    revised = service.decide_approval(
+        pending[-1]["id"],
+        ApprovalDecision(
+            decision=ApprovalDecisionValue.REQUEST_REVISION,
+            reviewer_id=body.actor,
+            reviewer_comment="Administrator requested an explicit scientific source refresh.",
+            expected_version=body.expected_version,
+            idempotency_key=f"{key}:revision",
+            artifact_hashes=request_payload["artifact_hashes"],
+        ),
+    )
+    return service.run_discovery(
+        build_id,
+        expected_version=revised.version,
+        actor=body.actor,
+        idempotency_key=f"{key}:refresh",
+        refresh_source_metadata=True,
+    )
 
 
 @router.post(

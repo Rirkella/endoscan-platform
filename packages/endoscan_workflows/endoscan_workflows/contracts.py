@@ -297,8 +297,11 @@ class ToolDefinition(StrictContract):
 class ToolInvocation(StrictContract):
     tool_name: str
     arguments: dict[str, Any]
+    workflow_id: str | None = None
+    step_id: str | None = None
     workflow_stage: WorkflowState
     permission_scope: list[str] = Field(default_factory=list)
+    run_context: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str | None = Field(default=None, max_length=160)
 
 

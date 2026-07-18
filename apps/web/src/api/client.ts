@@ -6,6 +6,7 @@
 import type {
   AnalyzeResponse,
   AdminAgentRun,
+  AdminAgentCapabilities,
   AdminApproval,
   AdminArtifact,
   AdminBuild,
@@ -218,6 +219,7 @@ export const api = {
   },
 
   adminListBuilds: () => adminGet<AdminBuild[]>("/admin/endpoint-builds"),
+  adminCapabilities: () => adminGet<AdminAgentCapabilities>("/admin/capabilities"),
   adminGetBuild: (id: string) =>
     adminGet<AdminBuild>(`/admin/endpoint-builds/${encodeURIComponent(id)}`),
   adminCreateBuild: (payload: {
@@ -235,6 +237,12 @@ export const api = {
       `/admin/endpoint-builds/${encodeURIComponent(id)}/${action}`,
       { expected_version: version, actor: "local-admin" },
       action,
+    ),
+  adminRefreshSourceMetadata: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/refresh-source-metadata`,
+      { expected_version: version, actor: "local-admin" },
+      "refresh-source-metadata",
     ),
   adminTimeline: (id: string) =>
     adminGet<AdminTimelineEvent[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/timeline`),
