@@ -7,6 +7,111 @@ export interface Health {
   explain_available: boolean;
   explanation_capabilities: Record<string, ExplanationCapabilityStatus>;
   pubmed: { configured: boolean; available: boolean; reason: string | null };
+  workflow_database?: Record<string, string | boolean>;
+  artifact_store?: Record<string, string | boolean | number>;
+  agent_provider?: Record<string, unknown>;
+  admin?: Record<string, unknown>;
+}
+
+export interface AdminBuild {
+  schema_version: "1.0.0";
+  id: string;
+  endpoint_name: string;
+  endpoint_slug: string;
+  biological_goal: string;
+  state: string;
+  status: string;
+  current_stage: string;
+  version: number;
+  progress: number;
+  pending_approval_id: string | null;
+  paused_from_state: string | null;
+  failed_from_state: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  paused_at: string | null;
+  cancelled_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AdminArtifact {
+  schema_version: "1.0.0";
+  id: string;
+  workflow_id: string;
+  step_id: string | null;
+  sha256: string;
+  size_bytes: number;
+  mime_type: string;
+  artifact_type: string;
+  logical_name: string;
+  producer: string;
+  original_source: string | null;
+  created_at: string;
+}
+
+export interface AdminApproval {
+  schema_version: "1.0.0";
+  id: string;
+  workflow_id: string;
+  stage: string;
+  approval_type: string;
+  status: string;
+  proposal_hash: string;
+  request: {
+    proposed_decision: string;
+    evidence_summary: string;
+    source_references: string[];
+    limitations: string[];
+    artifact_hashes: string[];
+    agent_recommendation: string;
+    requested_action: string;
+  };
+  decision: Record<string, unknown> | null;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface AdminTimelineEvent {
+  schema_version: "1.0.0";
+  id: string;
+  sequence: number;
+  event_type: string;
+  actor_type: string;
+  actor_id: string;
+  from_state: string | null;
+  to_state: string | null;
+  payload: Record<string, unknown>;
+  event_hash: string;
+  created_at: string;
+}
+
+export interface AdminAgentRun {
+  schema_version: "1.0.0";
+  id: string;
+  workflow_id: string;
+  step_id: string;
+  agent_name: string;
+  provider: string;
+  model_identifier: string;
+  status: string;
+  turns: number;
+  duration_ms: number;
+  usage: Record<string, unknown>;
+  tools: Array<{ id: string; tool_name: string; status: string; duration_ms: number }>;
+  trace?: { events?: Array<Record<string, unknown>> };
+  tool_calls?: Array<Record<string, unknown>>;
+}
+
+export interface AdminWorkflowError {
+  schema_version: "1.0.0";
+  id: string;
+  step_id: string | null;
+  code: string;
+  category: string;
+  retryable: boolean;
+  safe_message: string;
+  created_at: string;
 }
 
 export interface ExplanationCapabilityStatus {

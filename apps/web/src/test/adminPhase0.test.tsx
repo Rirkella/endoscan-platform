@@ -1,0 +1,336 @@
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type {
+  AdminAgentRun,
+  AdminApproval,
+  AdminArtifact,
+  AdminBuild,
+  AdminTimelineEvent,
+  AdminWorkflowError,
+} from "../api/types";
+import { installFetchMock } from "./mockApi";
+import { renderApp } from "./renderApp";
+
+const buildId = "build-00000000-0000-4000-8000-000000000001";
+const artifactId = "art-00000000-0000-4000-8000-000000000002";
+const approvalId = "approval-00000000-0000-4000-8000-000000000003";
+const runId = "run-00000000-0000-4000-8000-000000000004";
+const now = "2026-07-17T10:00:00Z";
+
+function build(stage = "AWAITING_DATASET_APPROVAL", version = 3, overrides: Partial<AdminBuild> = {}): AdminBuild {
+  return {
+    schema_version: "1.0.0",
+    id: buildId,
+    endpoint_name: "Oxidative stress",
+    endpoint_slug: "oxidative-stress",
+    biological_goal: "Evaluate a response-defined oxidative-stress endpoint.",
+    state: stage,
+    status: stage === "PAUSED" ? "paused" : stage === "FAILED" ? "failed" : stage === "COMPLETED" ? "completed" : stage.startsWith("AWAITING") ? "waiting" : "active",
+    current_stage: stage,
+    version,
+    progress: stage === "COMPLETED" ? 100 : 15,
+    pending_approval_id: stage === "AWAITING_DATASET_APPROVAL" ? approvalId : null,
+    paused_from_state: stage === "PAUSED" ? "CURATING_DATA" : null,
+    failed_from_state: stage === "FAILED" ? "CURATING_DATA" : null,
+    created_by: "local-admin",
+    created_at: now,
+    updated_at: now,
+    paused_at: stage === "PAUSED" ? now : null,
+    cancelled_at: null,
+    completed_at: stage === "COMPLETED" ? now : null,
+    ...overrides,
+  };
+}
+
+const artifact: AdminArtifact = {
+  schema_version: "1.0.0",
+  id: artifactId,
+  workflow_id: buildId,
+  step_id: "step-discovery",
+  sha256: "a".repeat(64),
+  size_bytes: 1024,
+  mime_type: "application/json",
+  artifact_type: "dataset_candidates",
+  logical_name: "phase-0-dataset-candidates.json",
+  producer: "dataset-discovery-agent",
+  original_source: "prepared-phase-0-fixtures",
+  created_at: now,
+};
+
+const approval: AdminApproval = {
+  schema_version: "1.0.0",
+  id: approvalId,
+  workflow_id: buildId,
+  stage: "AWAITING_DATASET_APPROVAL",
+  approval_type: "dataset_selection",
+  status: "pending",
+  proposal_hash: "b".repeat(64),
+  request: {
+    proposed_decision: "Select one prepared candidate for the Phase-0 demonstration.",
+    evidence_summary: "Two deterministic candidate fixtures were compared.",
+    source_references: ["prepared://phase-0/candidate-a"],
+    limitations: ["Prepared fixture; not a live scientific discovery."],
+    artifact_hashes: [artifact.sha256],
+    agent_recommendation: "Candidate A is the deterministic default.",
+    requested_action: "Approve, reject, request revision, or choose an alternative.",
+  },
+  decision: null,
+  created_at: now,
+  decided_at: null,
+};
+
+const events: AdminTimelineEvent[] = [
+  {
+    schema_version: "1.0.0", id: "event-1", sequence: 1, event_type: "workflow.created",
+    actor_type: "human", actor_id: "local-admin", from_state: null, to_state: "DRAFT",
+    payload: {}, event_hash: "c".repeat(64), created_at: now,
+  },
+  {
+    schema_version: "1.0.0", id: "event-2", sequence: 2, event_type: "approval.created",
+    actor_type: "agent", actor_id: "dataset-discovery-agent", from_state: "DISCOVERING_DATA",
+    to_state: "AWAITING_DATASET_APPROVAL", payload: {}, event_hash: "d".repeat(64), created_at: now,
+  },
+];
+
+const run: AdminAgentRun = {
+  schema_version: "1.0.0", id: runId, workflow_id: buildId, step_id: "step-discovery",
+  agent_name: "Dataset Discovery Agent", provider: "fake", model_identifier: "fake-phase0-v1",
+  status: "approval_required", turns: 2, duration_ms: 18,
+  usage: { input_tokens: 120, output_tokens: 80, estimated_cost_usd: 0 },
+  tools: [
+    { id: "tool-1", tool_name: "inspect_endpoint_registry", status: "completed", duration_ms: 2 },
+    { id: "tool-2", tool_name: "create_dataset_candidate_artifact", status: "completed", duration_ms: 3 },
+  ],
+  trace: { events: [{ event_type: "agent.run.started" }, { event_type: "approval.requested" }] },
+};
+
+const workflowErrors: AdminWorkflowError[] = [{
+  schema_version: "1.0.0", id: "error-1", step_id: "step-curation",
+  code: "phase0_controlled_failure", category: "controlled_demo", retryable: true,
+  safe_message: "A controlled retryable Phase-0 failure was recorded.", created_at: now,
+}];
+
+const candidates = [
+  {
+    candidate_id: "candidate-a", title: "Prepared oxidative-stress fixture A",
+    source: "Prepared Phase-0 fixture", recommendation: "preferred",
+    limitations: ["Not retrieved live"], sample_count: 168, controls_available: true,
+    data_type: "Transcriptomic", context: "One prepared cell model",
+  },
+  {
+    candidate_id: "candidate-b", title: "Prepared oxidative-stress fixture B",
+    source: "Prepared Phase-0 fixture", recommendation: "alternative",
+    limitations: ["Not retrieved live"], controls_available: false,
+  },
+];
+
+function detailRoutes(
+  current: () => AdminBuild,
+  errors: AdminWorkflowError[] = [],
+) {
+  return {
+    [`GET /api/admin/endpoint-builds/${buildId}`]: () => ({ body: current() }),
+    [`GET /api/admin/endpoint-builds/${buildId}/timeline`]: { body: events },
+    [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [artifact] },
+    [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [approval] },
+    [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [run] },
+    [`GET /api/admin/endpoint-builds/${buildId}/errors`]: { body: errors },
+    [`GET /api/admin/artifacts/${artifactId}/preview`]: { body: { artifact, content: { live_discovery: false, candidates } } },
+    [`GET /api/admin/agent-runs/${runId}`]: { body: run },
+  };
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+describe("Phase-0 endpoint-build list and creation", () => {
+  it("puts sorted persisted builds first and keeps duplicate names distinguishable", async () => {
+    const older = build("AWAITING_DATASET_APPROVAL", 3, { id: `${buildId}-old`, updated_at: "2026-07-16T10:00:00Z" });
+    const newer = build("FUTURE_SCIENCE_REVIEW", 4, { id: `${buildId}-new`, updated_at: "2026-07-18T10:00:00Z", pending_approval_id: null });
+    installFetchMock({ "GET /api/admin/endpoint-builds": { body: [older, newer] } });
+    renderApp("/admin/endpoints");
+
+    const cards = await screen.findAllByRole("article");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toHaveTextContent("Future science review");
+    expect(within(cards[0]).getByText(/Build 00000000/)).toBeInTheDocument();
+    expect(screen.getAllByText("Waiting for dataset review")).toHaveLength(2);
+    expect(screen.getByText("Review required")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Open Oxidative stress, build/ })).toHaveLength(2);
+    expect(screen.getAllByText("Simulation mode")).toHaveLength(1);
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+  });
+
+  it("opens creation in a focus-managed dialog and creates a durable route", async () => {
+    const NativeRequest = globalThis.Request;
+    class NavigationRequest extends NativeRequest {
+      constructor(input: RequestInfo | URL, init?: RequestInit) { super(input, init ? { ...init, signal: undefined } : init); }
+    }
+    vi.stubGlobal("Request", NavigationRequest);
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "POST /api/admin/endpoint-builds": { body: build("DRAFT", 0) },
+      ...detailRoutes(() => build("DRAFT", 0)),
+    });
+    renderApp("/admin/endpoints");
+
+    await screen.findByText("No endpoint builds yet.");
+    const open = screen.getAllByRole("button", { name: "+ New endpoint" })[0];
+    await userEvent.click(open);
+    const dialog = screen.getByRole("dialog", { name: "Create endpoint draft" });
+    expect(within(dialog).getByLabelText("Endpoint name")).toHaveFocus();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+    expect(open).toHaveFocus();
+    await userEvent.click(open);
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Create endpoint" }));
+    expect(await screen.findByRole("heading", { name: "Oxidative stress", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start workflow" })).toBeInTheDocument();
+  });
+
+  it("searches and filters builds", async () => {
+    installFetchMock({ "GET /api/admin/endpoint-builds": { body: [build(), build("FAILED", 4, { id: `${buildId}-failed`, endpoint_name: "Metabolic stress" })] } });
+    renderApp("/admin/endpoints");
+    await screen.findByText("Metabolic stress");
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search builds" }), "Oxidative");
+    expect(screen.queryByText("Metabolic stress")).not.toBeInTheDocument();
+    await userEvent.clear(screen.getByRole("searchbox", { name: "Search builds" }));
+    await userEvent.click(screen.getByRole("button", { name: "Failed" }));
+    expect(screen.getByText("Metabolic stress")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for dataset review")).not.toBeInTheDocument();
+  });
+
+  it("shows a calm actionable backend error", async () => {
+    installFetchMock({ "GET /api/admin/endpoint-builds": { status: 503, body: { error: "workflow_unavailable", detail: "raw backend exception" } } });
+    renderApp("/admin/endpoints");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Check the local service and try again");
+    expect(screen.queryByText("raw backend exception")).not.toBeInTheDocument();
+  });
+});
+
+describe("Phase-0 build detail information architecture", () => {
+  it("leads with the stepper and decision, compares fixtures, and keeps machine detail secondary", async () => {
+    installFetchMock(detailRoutes(() => build(), workflowErrors));
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByRole("heading", { name: "Dataset review required" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Workflow progress" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Endpoint build stages").children).toHaveLength(10);
+    expect(screen.getAllByText("SIM-OS-001")).toHaveLength(2);
+    expect(screen.getByText("SIM-OS-002")).toBeInTheDocument();
+    expect(screen.getAllByText("Prepared simulation fixture")).toHaveLength(2);
+    expect(screen.getByText("168")).toBeInTheDocument();
+    expect(screen.getByText("Why it is recommended")).toBeInTheDocument();
+    expect(screen.getAllByText("Limitations").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Agent activity" })).toBeInTheDocument();
+    expect(screen.getByText("Inspected endpoint registry")).toBeInTheDocument();
+    expect(screen.queryByText("120")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Dataset review requested")).toBeInTheDocument();
+    expect(document.querySelector(".admin-timeline")).not.toBeInTheDocument();
+
+    const technical = screen.getByText("Technical details").closest("details");
+    expect(technical).not.toHaveAttribute("open");
+    expect(within(technical!).getByText("AWAITING_DATASET_APPROVAL")).toBeInTheDocument();
+    const developer = screen.getByText(/Developer tools/).closest("details");
+    expect(developer).not.toHaveAttribute("open");
+    expect(within(developer!).getByRole("button", { name: "Trigger controlled failure" })).toBeInTheDocument();
+  });
+
+  it("separates readable activity from the complete immutable technical log", async () => {
+    installFetchMock(detailRoutes(() => build()));
+    renderApp(`/admin/endpoints/${buildId}`);
+    await screen.findByText("Dataset review requested");
+    expect(screen.queryByText("approval.created")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Technical audit log" }));
+    expect(screen.getByText("approval.created")).toBeInTheDocument();
+    expect(screen.getByText("workflow.created")).toBeInTheDocument();
+    expect(screen.getByText("d".repeat(64))).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "audit-tab");
+  });
+
+  it("supports keyboard navigation between Activity and Technical audit log", async () => {
+    installFetchMock(detailRoutes(() => build()));
+    renderApp(`/admin/endpoints/${buildId}`);
+    const activity = await screen.findByRole("tab", { name: "Activity" });
+    activity.focus();
+    fireEvent.keyDown(activity, { key: "ArrowRight" });
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Technical audit log" })).toHaveFocus());
+    expect(screen.getByRole("tab", { name: "Technical audit log" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("confirms approval scope before preserving the existing immutable decision request", async () => {
+    let payload: Record<string, unknown> | null = null;
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`POST /api/admin/approvals/${approvalId}/decisions`]: (body) => { payload = body as Record<string, unknown>; return { body: build("CURATING_DATA", 4) }; },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve dataset" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm dataset approval" });
+    expect(dialog).toHaveTextContent("SIM-OS-001");
+    expect(dialog).toHaveTextContent("Current immutable candidate artifact");
+    expect(dialog).toHaveTextContent("Dataset selection for this build only");
+    expect(dialog).toHaveTextContent("Prepare the selected dataset");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm decision" }));
+    await waitFor(() => expect(payload).toMatchObject({ decision: "approve", expected_version: 3 }));
+  });
+
+  it("requires a comment and confirms revision and alternative decisions", async () => {
+    const decisions: Array<Record<string, unknown>> = [];
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`POST /api/admin/approvals/${approvalId}/decisions`]: (body) => { decisions.push(body as Record<string, unknown>); return { body: build("DISCOVERING_DATA", 4) }; },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    const revision = await screen.findByRole("button", { name: "Request revision" });
+    expect(revision).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Reviewer comment"), { target: { value: "Clarify the fixture limits." } });
+    await userEvent.click(revision);
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm decision" }));
+    await waitFor(() => expect(decisions[0]).toMatchObject({ decision: "request_revision", reviewer_comment: "Clarify the fixture limits." }));
+  });
+
+  it.each([
+    { action: "Reject", decision: "reject", selectAlternative: false },
+    { action: "Select another candidate", decision: "choose_alternative", selectAlternative: true },
+  ])("records $decision only after comment and confirmation", async ({ action, decision, selectAlternative }) => {
+    let payload: Record<string, unknown> | null = null;
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`POST /api/admin/approvals/${approvalId}/decisions`]: (body) => { payload = body as Record<string, unknown>; return { body: build("DISCOVERING_DATA", 4) }; },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    await screen.findByRole("heading", { name: "Dataset review required" });
+    if (selectAlternative) await userEvent.click(screen.getByLabelText("Select SIM-OS-002"));
+    await userEvent.type(screen.getByLabelText("Reviewer comment"), "Reviewer evidence comment.");
+    await userEvent.click(screen.getByRole("button", { name: action }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm decision" }));
+    await waitFor(() => expect(payload).toMatchObject({
+      decision,
+      reviewer_comment: "Reviewer evidence comment.",
+      ...(selectAlternative ? { selected_alternative_id: "candidate-b" } : {}),
+    }));
+  });
+
+  it("maps workflow controls to human language without changing versioned commands", async () => {
+    let current = build("DRAFT", 0);
+    installFetchMock({
+      ...detailRoutes(() => current),
+      [`POST /api/admin/endpoint-builds/${buildId}/start`]: () => { current = build("AWAITING_DATASET_APPROVAL", 3); return { body: current }; },
+      [`POST /api/admin/endpoint-builds/${buildId}/pause`]: () => { current = build("PAUSED", 4); return { body: current }; },
+      [`POST /api/admin/endpoint-builds/${buildId}/resume`]: () => { current = build("CURATING_DATA", 5); return { body: current }; },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    await userEvent.click(await screen.findByRole("button", { name: "Start workflow" }));
+    await screen.findAllByText("Waiting for dataset review");
+    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await screen.findAllByText("Paused");
+    await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await screen.findAllByText("Preparing the selected dataset");
+    const versions = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)).expected_version);
+    expect(versions).toEqual([0, 3, 4]);
+  });
+});

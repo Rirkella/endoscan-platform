@@ -19,4 +19,15 @@ def health(request: Request) -> HealthResponse:
         explain_available=bool(state.explain_available),
         explanation_capabilities=dict(state.explanation_capabilities),
         pubmed=dict(state.pubmed_capability),
+        workflow_database=dict(state.workflow_database.capability()),
+        artifact_store=dict(state.artifact_store.capability()),
+        agent_provider={
+            "configured": list(state.provider_registry.configured()),
+            "live_model_api": False,
+            "label": "Prepared deterministic agent simulation",
+        },
+        admin={
+            "development_mode": bool(state.admin_development_mode),
+            "production_authorization_implemented": False,
+        },
     )

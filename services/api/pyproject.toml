@@ -7,6 +7,7 @@ description = "EndoScan thin read-only serving API (FastAPI over endoscan_core).
 requires-python = ">=3.11"
 dependencies = [
     "endoscan-core",
+    "endoscan-workflows",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     # Required for multipart/form-data signature uploads.
@@ -26,3 +27,4 @@ packages = ["endoscan_api"]
 
 [tool.uv.sources]
 endoscan-core = { workspace = true }
+endoscan-workflows = { workspace = true }

@@ -5,6 +5,9 @@ import { RouterProvider, createBrowserRouter } from "react-router-dom";
 import App from "./App";
 import "./index.css";
 import "./prototype.css"; // ported prototype-v2 visual system (shell, landing, analyze, cards)
+import "./admin.css";
+import { AdminEndpointDetail } from "./pages/AdminEndpointDetail";
+import { AdminEndpoints } from "./pages/AdminEndpoints";
 import { Analyze } from "./pages/Analyze";
 import { Explore } from "./pages/Explore";
 import { Landing } from "./pages/Landing";
@@ -25,6 +28,8 @@ const router = createBrowserRouter([
       { path: "/library", element: <ModelLibrary /> },
       { path: "/library/:id", element: <ModelEvidence /> },
       { path: "/explore", element: <Explore /> },
+      { path: "/admin/endpoints", element: <AdminEndpoints /> },
+      { path: "/admin/endpoints/:buildId", element: <AdminEndpointDetail /> },
     ],
   },
 ]);

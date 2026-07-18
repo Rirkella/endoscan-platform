@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from endoscan_core.inference import ModelArtifactUnavailableError, SignatureValidationError
 from endoscan_core.registry import EndpointNotFoundError
+from endoscan_workflows.errors import WorkflowError
 
 from .catalogue_store import CatalogueCorruptError, CatalogueNotFoundError
 from .explore_store import (
@@ -40,6 +41,17 @@ def error_payload(
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(WorkflowError)
+    async def _workflow_error(request: Request, exc: WorkflowError) -> JSONResponse:
+        logger.info(
+            "workflow request rejected request_id=%s code=%s",
+            request_id(request),
+            exc.code,
+        )
+        payload = error_payload(request, exc.code, exc.safe_message)
+        payload["context"] = exc.detail
+        return JSONResponse(status_code=exc.status_code, content=payload)
+
     @app.exception_handler(EndpointNotFoundError)
     async def _not_found(request: Request, exc: EndpointNotFoundError) -> JSONResponse:
         logger.info("unknown endpoint request_id=%s error=%s", request_id(request), exc)

@@ -79,3 +79,6 @@ node_modules/
 
 # Job-runner local storage root (LocalStorage default; persistent disk on the server)
 /.endoscan-data/
+
+# Phase-0 durable workflow database and content-addressed local artifacts.
+/.endoscan/

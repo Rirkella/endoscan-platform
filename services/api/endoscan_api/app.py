@@ -17,7 +17,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from endoscan_core.inference import ModelArtifactUnavailableError
 from endoscan_core.registry import find_repo_root, list_endpoints
+from endoscan_workflows.artifacts import LocalArtifactStore
+from endoscan_workflows.database import WorkflowDatabase
+from endoscan_workflows.harness import AgentHarness
+from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
+from endoscan_workflows.service import WorkflowService
+from endoscan_workflows.state_machine import WorkflowGraph
+from endoscan_workflows.tools import phase0_tool_registry
 
+from .admin.auth import AdminMutationLimiter
+from .admin.routes import router as admin_router
 from .deps import get_cached_model
 from .errors import register_exception_handlers
 from .middleware import RequestContextMiddleware
@@ -57,6 +66,18 @@ def _cors_origins() -> list[str]:
         if parsed:
             return parsed
     return list(DEFAULT_CORS_ORIGINS)
+
+
+def _workflow_state_machine_path(data_root: Path) -> Path:
+    """Resolve canonical workflow policy independently of synthetic data roots."""
+    supplied = data_root / "docs" / "agents" / "workflow-state-machine.json"
+    if supplied.is_file():
+        return supplied
+    repository = Path(__file__).resolve().parents[3]
+    canonical = repository / "docs" / "agents" / "workflow-state-machine.json"
+    if canonical.is_file():
+        return canonical
+    raise RuntimeError("The canonical workflow state-machine document is unavailable.")
 
 
 def _estimator(model):
@@ -133,6 +154,45 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             None if ncbi_email else "NCBI_EMAIL is not configured; PubMed integration is disabled."
         ),
     }
+    workflow_db_path = Path(
+        os.environ.get("ENDOSCAN_WORKFLOW_DB", str(root / ".endoscan" / "workflows.db"))
+    )
+    artifact_root = Path(
+        os.environ.get("ENDOSCAN_ARTIFACT_ROOT", str(root / ".endoscan" / "artifacts"))
+    )
+    workflow_database = WorkflowDatabase(workflow_db_path)
+    workflow_database.migrate()
+    artifact_store = LocalArtifactStore(workflow_database, artifact_root)
+    provider_registry = ProviderRegistry()
+    provider_registry.register("fake", FakeAgentProvider)
+    harness = AgentHarness(workflow_database, provider_registry, phase0_tool_registry(root))
+    workflow_service = WorkflowService(
+        workflow_database,
+        artifact_store,
+        WorkflowGraph(_workflow_state_machine_path(root)),
+        repo_root=root,
+        harness=harness,
+    )
+    recovered = workflow_service.recover_interrupted()
+    app.state.workflow_database = workflow_database
+    app.state.artifact_store = artifact_store
+    app.state.provider_registry = provider_registry
+    app.state.workflow_service = workflow_service
+    app.state.admin_development_mode = (
+        os.environ.get("ENDOSCAN_ADMIN_MODE", "disabled").strip().lower() == "development"
+    )
+    app.state.admin_mutation_limiter = AdminMutationLimiter()
+    app.state.agent_capabilities = {
+        "schema_version": "1.0.0",
+        "provider": "fake",
+        "label": "Prepared deterministic agent simulation",
+        "live_llm_calls": False,
+        "live_dataset_discovery": False,
+        "rag": False,
+        "registry_publication": False,
+        "recovered_interrupted_steps": recovered,
+    }
+    app.router.add_event_handler("shutdown", workflow_database.dispose)
 
     # CORS: explicit allow-list only (browser cross-origin fetch fix for the local demo /
     # deployment). Minimal surface — the GET/POST routes + OPTIONS preflight, Content-Type only,
@@ -141,7 +201,12 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=app.state.cors_origins,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", "X-Request-ID"],
+        allow_headers=[
+            "Content-Type",
+            "X-Request-ID",
+            "X-EndoScan-Admin",
+            "Idempotency-Key",
+        ],
         expose_headers=["X-Request-ID"],
         allow_credentials=False,
     )
@@ -156,4 +221,5 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.include_router(catalogue.router)
     app.include_router(explore.router)
     app.include_router(interpret.router)
+    app.include_router(admin_router)
     return app
