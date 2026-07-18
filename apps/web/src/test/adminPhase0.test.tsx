@@ -645,51 +645,40 @@ describe("Phase-1 live discovery presentation", () => {
     expect(screen.getByText(/"cell_tissue_terms":\[\]/)).toBeInTheDocument();
   });
 
-  it("shows a no-candidate review without a false dataset approval action", async () => {
+  it("shows a structured no-candidate outcome without a dataset approval action", async () => {
     const noCandidateRun: AdminAgentRun = {
       ...run,
       provider: "openai",
       model_identifier: "gpt-5.4-mini",
       run_mode: "live",
-      status: "approval_required",
+      status: "completed",
       turns: 3,
       tools: [
         { id: "tool-search-1", tool_name: "search_geo_series", status: "completed", duration_ms: 20 },
         { id: "tool-search-2", tool_name: "search_geo_series", status: "completed", duration_ms: 20 },
       ],
     };
-    const noCandidateApproval: AdminApproval = {
-      ...approval,
-      request: {
-        ...approval.request,
-        proposed_decision: "Review the no-candidate search outcome.",
-        evidence_summary: "All bounded GEO searches returned zero suitable candidates.",
-        limitations: ["No candidate found under the current strategy."],
-        agent_recommendation: "No dataset recommendation.",
-        requested_action: "Request a revised bounded search or cancel.",
-      },
-    };
     installFetchMock({
-      ...detailRoutes(() => build()),
+      ...detailRoutes(() => build("FAILED", 4)),
       [`GET /api/admin/artifacts/${artifactId}/preview`]: {
         body: {
           artifact,
           content: {
             run_mode: "live",
             live_discovery: true,
-            candidates,
+            candidates: [],
             recommended_candidate_id: null,
           },
         },
       },
-      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [noCandidateApproval] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
       [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [noCandidateRun] },
       [`GET /api/admin/agent-runs/${runId}`]: { body: noCandidateRun },
     });
     renderApp(`/admin/endpoints/${buildId}`);
-    expect(await screen.findByText("Search review required")).toBeInTheDocument();
+    expect(await screen.findByText("No review required")).toBeInTheDocument();
     expect(screen.getByText("Bounded GEO searches found no suitable candidate")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Request revised search" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request revised search" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
     expect(screen.queryByText("Completed for review")).not.toBeInTheDocument();
   });
@@ -745,5 +734,66 @@ describe("Phase-1 live discovery presentation", () => {
     expect(within(activity).getByText("Provider retries").parentElement).toHaveTextContent("0");
     expect(within(activity).getByText("Tool calls").parentElement).toHaveTextContent("0");
     expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("1");
+  });
+
+  it("renders only allowlisted scientific-source diagnostics", async () => {
+    const sourceDiagnostic = {
+      tool_name: "validate_geo_accessions",
+      source_host: "www.ncbi.nlm.nih.gov",
+      safe_url_path: "/geo/query/acc.cgi",
+      http_method: "GET" as const,
+      http_status: 200,
+      final_approved_host: "www.ncbi.nlm.nih.gov",
+      content_type: "text/html",
+      response_byte_count: 512,
+      exception_class: "SourceFormatError",
+      source_error_category: "unexpected_content_type",
+      retryable: false,
+      attempt_number: 1,
+      request_duration_ms: 562,
+      developer_message: "Expected a machine-readable GEO response.",
+    };
+    const failedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "failed",
+      turns: 1,
+      tools: [{
+        id: "tool-source-failure",
+        tool_name: "validate_geo_accessions",
+        status: "failed",
+        duration_ms: 562,
+      }],
+      tool_calls: [{
+        tool_name: "validate_geo_accessions",
+        result: { source_diagnostic: sourceDiagnostic },
+      }],
+    };
+    const sourceError: AdminWorkflowError = {
+      ...workflowErrors[0],
+      code: "source_unexpected_content_type",
+      category: "source_tool",
+      retryable: false,
+      safe_message: "Scientific source returned an unexpected content type.",
+      detail: { source_diagnostic: sourceDiagnostic },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("FAILED", 4), [sourceError]),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [failedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: failedRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Scientific-source diagnostics")).toBeInTheDocument();
+    expect(screen.getAllByText("www.ncbi.nlm.nih.gov/geo/query/acc.cgi")).toHaveLength(2);
+    expect(screen.getAllByText(/GET.*200/)).toHaveLength(2);
+    expect(screen.getAllByText(/text\/html.*512 bytes/)).toHaveLength(2);
+    expect(screen.getAllByText("SourceFormatError")).toHaveLength(2);
+    expect(screen.getAllByText("Expected a machine-readable GEO response.")).toHaveLength(2);
+    expect(document.body).not.toHaveTextContent("do-not-store");
+    expect(document.body).not.toHaveTextContent("Authorization");
   });
 });

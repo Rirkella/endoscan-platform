@@ -9,6 +9,7 @@ import type {
   AdminBuild,
   AdminTimelineEvent,
   AdminWorkflowError,
+  AdminSourceToolDiagnostic,
 } from "../api/types";
 import {
   WORKFLOW_STAGES,
@@ -42,6 +43,7 @@ type Candidate = {
   treatment_control_evidence?: string;
   dose_time_evidence?: string;
   accession_verified?: boolean;
+  geo_validation_status?: string | null;
   description?: string;
 };
 
@@ -158,11 +160,55 @@ function safeDeveloperDiagnostic(run: AdminAgentRun): string | null {
   for (const event of [...events].reverse()) {
     const detail = event.detail;
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-      const message = (detail as Record<string, unknown>).developer_message;
+      const direct = (detail as Record<string, unknown>).developer_message;
+      const nested = (detail as Record<string, unknown>).source_diagnostic;
+      const message = typeof direct === "string"
+        ? direct
+        : nested && typeof nested === "object" && !Array.isArray(nested)
+          ? (nested as Record<string, unknown>).developer_message
+          : null;
       if (typeof message === "string" && message.length > 0) return message;
     }
   }
   return null;
+}
+
+function sourceDiagnostics(run: AdminAgentRun): AdminSourceToolDiagnostic[] {
+  return (run.tool_calls ?? []).flatMap((call) => {
+    const result = call.result;
+    if (!result || typeof result !== "object" || Array.isArray(result)) return [];
+    const diagnostic = (result as Record<string, unknown>).source_diagnostic;
+    const output = (result as Record<string, unknown>).output;
+    const candidateDiagnostics = output && typeof output === "object" && !Array.isArray(output)
+      && Array.isArray((output as Record<string, unknown>).results)
+      ? ((output as Record<string, unknown>).results as Array<Record<string, unknown>>).flatMap((item) => {
+        const itemDiagnostic = item?.source_diagnostic;
+        return itemDiagnostic && typeof itemDiagnostic === "object" && !Array.isArray(itemDiagnostic)
+          ? [itemDiagnostic as AdminSourceToolDiagnostic]
+          : [];
+      })
+      : [];
+    return [
+      ...(diagnostic && typeof diagnostic === "object" && !Array.isArray(diagnostic)
+        ? [diagnostic as AdminSourceToolDiagnostic]
+        : []),
+      ...candidateDiagnostics,
+    ];
+  });
+}
+
+function SourceDiagnosticDetails({ diagnostic }: { diagnostic: AdminSourceToolDiagnostic }) {
+  return <dl className="admin-source-diagnostic">
+    <div><dt>Source</dt><dd>{diagnostic.source_host}{diagnostic.safe_url_path}</dd></div>
+    <div><dt>HTTP</dt><dd>{diagnostic.http_method} · {diagnostic.http_status ?? "not received"}</dd></div>
+    <div><dt>Final host</dt><dd>{diagnostic.final_approved_host ?? "not reached"}</dd></div>
+    <div><dt>Response</dt><dd>{diagnostic.content_type ?? "unknown"} · {diagnostic.response_byte_count ?? 0} bytes</dd></div>
+    <div><dt>Category</dt><dd>{humanizeMachineValue(diagnostic.source_error_category)}</dd></div>
+    <div><dt>Exception</dt><dd>{diagnostic.exception_class ?? "none"}</dd></div>
+    <div><dt>Attempt</dt><dd>{diagnostic.attempt_number} · {diagnostic.request_duration_ms} ms</dd></div>
+    <div><dt>Retry policy</dt><dd>{diagnostic.retryable ? "Retryable" : "Terminal"}</dd></div>
+    {diagnostic.developer_message && <div><dt>Developer note</dt><dd>{diagnostic.developer_message}</dd></div>}
+  </dl>;
 }
 
 export function AdminEndpointDetail() {
@@ -316,6 +362,7 @@ export function AdminEndpointDetail() {
   const selectedIndex = Math.max(0, candidates.findIndex((candidate) => candidate.candidate_id === selected));
   const selectedCandidate = candidates[selectedIndex];
   const developerDiagnostic = trace ? safeDeveloperDiagnostic(trace) : null;
+  const scientificSourceDiagnostics = trace ? sourceDiagnostics(trace) : [];
   const providerRetries = trace ? traceEventCount(trace, "provider.retry") : 0;
   const geoSearches = trace ? geoSearchSummaries(trace) : [];
   const normalizationSummaries = trace ? toolNormalizationSummaries(trace) : [];
@@ -451,6 +498,14 @@ export function AdminEndpointDetail() {
                   <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>
                 </div>
               </div>
+            ) : hasCompletedOutput && candidates.length === 0 ? (
+              <div className="admin-approval-card admin-no-candidate-review">
+                <div className="admin-recommendation">
+                  <span>No dataset recommendation</span>
+                  <h3>Bounded GEO searches found no suitable candidate</h3>
+                  <p>{decisionSummary || "The bounded discovery completed without a public_valid recommendation."}</p>
+                </div>
+              </div>
             ) : <div className="admin-empty">The next workflow action is shown below.</div>}
           </section>
 
@@ -541,6 +596,7 @@ export function AdminEndpointDetail() {
                 {geoSearches.length > 0 && <div className="admin-trace-summary"><h4>Rendered GEO queries</h4><ol>{geoSearches.map((search, index) => <li key={`${search.renderedQuery}-${index}`}><strong>{search.strategyReason}</strong><code>{search.renderedQuery}</code><span>{search.resultCount} results / {search.cacheStatus}</span></li>)}</ol></div>}
                 {normalizationWarningCount > 0 && <p className="admin-secondary-note">{emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
                 {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
+                {scientificSourceDiagnostics.length > 0 && <div className="admin-trace-summary"><h4>Scientific-source diagnostics</h4>{scientificSourceDiagnostics.map((diagnostic, index) => <SourceDiagnosticDetails diagnostic={diagnostic} key={`${diagnostic.tool_name}-${index}`} />)}</div>}
                 <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
                 <div className="admin-inline-actions">
                   <button className="admin-link-button" onClick={() => setShowTrace((value) => !value)}>{showTrace ? "Hide trace" : "View trace"}</button>
@@ -589,7 +645,7 @@ export function AdminEndpointDetail() {
             </dl>
           </details>
 
-          {errors.length > 0 && <section className="admin-panel admin-errors-panel"><div className="admin-panel-heading"><h2>Workflow errors</h2><span>{errors.length}</span></div>{errors.map((item) => <article className="admin-error-row" key={item.id}><strong>{humanizeMachineValue(item.code)}</strong><p>{item.safe_message}</p><span>{item.retryable ? "Retryable" : "Terminal"}</span></article>)}</section>}
+          {errors.length > 0 && <section className="admin-panel admin-errors-panel"><div className="admin-panel-heading"><h2>Workflow errors</h2><span>{errors.length}</span></div>{errors.map((item) => <article className="admin-error-row" key={item.id}><strong>{humanizeMachineValue(item.code)}</strong><p>{item.safe_message}</p><span>{item.retryable ? "Retryable" : "Terminal"}</span>{item.detail?.source_diagnostic && <SourceDiagnosticDetails diagnostic={item.detail.source_diagnostic} />}</article>)}</section>}
 
           {import.meta.env.DEV && (
             <details className="admin-panel admin-developer-tools">

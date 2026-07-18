@@ -18,6 +18,7 @@ from endoscan_workflows.contracts import (
 from endoscan_workflows.discovery_tools import (
     DiscoveryToolService,
     GeoAccessionInput,
+    GeoAccessionsInput,
     SearchGeoSeriesInput,
     _parse_geo_soft,
     render_geo_query,
@@ -28,13 +29,13 @@ from endoscan_workflows.source_security import (
     SourcePolicyError,
     SourceRateLimitError,
     SourceTimeoutError,
-    SourceUnavailableError,
     sanitize_untrusted_text,
 )
 from endoscan_workflows.tools import normalize_geo_search_arguments, phase1_tool_registry
 
 GEO_SOFT_FIXTURE = """^SERIES = GSE12345
 !Series_geo_accession = GSE12345
+!Series_status = Public on Jul 18 2026
 !Series_title = Oxidative stress response in human cells
 !Series_summary = Transcriptomic response to a defined exposure.
 !Series_organism_ch1 = Homo sapiens
@@ -258,6 +259,37 @@ def test_disallowed_domain_and_private_network_are_rejected() -> None:
     client.close()
 
 
+def test_scientific_response_url_drops_secret_query_parameters() -> None:
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"ok": True},
+                headers={"content-type": "application/json"},
+                request=request,
+            )
+        ),
+        sleep=lambda _seconds: None,
+    )
+    response = client.get(
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+        params={
+            "db": "gds",
+            "term": "GSE314406[Accession]",
+            "api_key": "do-not-store",
+            "email": "private@example.test",
+        },
+        accepted_types={"application/json"},
+    )
+    assert "db=gds" in response.url
+    assert "term=" in response.url
+    assert "do-not-store" not in response.url
+    assert "private%40example" not in response.url
+    assert "api_key" not in response.url
+    assert "email" not in response.url
+    client.close()
+
+
 def test_oversized_response_is_rejected() -> None:
     transport = httpx.MockTransport(
         lambda request: httpx.Response(
@@ -345,8 +377,8 @@ def test_live_geo_validation_then_cached_lookup_uses_one_http_request(
         GeoAccessionInput(accession="GSE12345"),
         invocation(workflow_id, mode=AgentRunMode.CACHED, key="cached"),
     )
-    assert live.exists is True and live.cache_status == "live"
-    assert cached.exists is True and cached.cache_status == "cached"
+    assert live.status == "public_valid" and live.cache_status == "live"
+    assert cached.status == "public_valid" and cached.cache_status == "cached"
     assert calls == 1
     assert live.source_artifact_id == cached.source_artifact_id
     client.close()
@@ -364,12 +396,363 @@ def test_cached_mode_refuses_external_request_on_cache_miss(workflow_runtime) ->
 
     client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
     service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
-    with pytest.raises(SourceUnavailableError, match="no fresh source artifact"):
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.CACHED),
+    )
+    assert result.status == "temporarily_unavailable"
+    assert result.retryable is True
+    assert called is False
+    client.close()
+
+
+def test_geo_batch_deduplicates_and_preserves_order() -> None:
+    request = GeoAccessionsInput(
+        accessions=[" gse12345 ", "GSE22222", "GSE12345", "GSE33333"]
+    )
+    assert request.accessions == ["GSE12345", "GSE22222", "GSE33333"]
+    with pytest.raises(ValidationError):
+        GeoAccessionsInput(
+            accessions=["GSE11111", "GSE22222", "GSE33333", "GSE44444", "GSE55555", "GSE66666"]
+        )
+
+
+def test_geo_batch_registry_enforces_stage_permission_and_maximum() -> None:
+    class ForbiddenExecutionService:
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("Prohibited batch tool must not execute")
+            )
+
+    registry = phase1_tool_registry(Path.cwd(), ForbiddenExecutionService())
+    base = {
+        "tool_name": "validate_geo_accessions",
+        "arguments": {"accessions": ["GSE12345"]},
+        "workflow_id": "build-batch-policy",
+        "step_id": "step-batch-policy",
+        "permission_scope": ["source:geo:read"],
+        "run_context": {"run_mode": "replay"},
+        "idempotency_key": "batch-policy",
+    }
+    wrong_stage = registry.invoke(
+        ToolInvocation(**base, workflow_stage=WorkflowState.TRAINING)
+    )
+    missing_permission = registry.invoke(
+        ToolInvocation(
+            **{**base, "permission_scope": []},
+            workflow_stage=WorkflowState.DISCOVERING_DATA,
+        )
+    )
+    too_many = registry.invoke(
+        ToolInvocation(
+            **{
+                **base,
+                "arguments": {
+                    "accessions": [
+                        "GSE11111",
+                        "GSE22222",
+                        "GSE33333",
+                        "GSE44444",
+                        "GSE55555",
+                        "GSE66666",
+                    ]
+                },
+            },
+            workflow_stage=WorkflowState.DISCOVERING_DATA,
+        )
+    )
+    assert wrong_stage.status is ToolCallStatus.PROHIBITED
+    assert missing_permission.status is ToolCallStatus.PROHIBITED
+    assert too_many.status is ToolCallStatus.FAILED
+    assert too_many.error and too_many.error.code == "tool_input_invalid"
+
+
+def test_geo_batch_rejects_arbitrary_url_before_network() -> None:
+    with pytest.raises(ValidationError):
+        GeoAccessionsInput(accessions=["https://example.com/GSE12345"])
+
+
+def test_geo_validation_accession_mismatch_is_structured(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    mismatched = GEO_SOFT_FIXTURE.replace("GSE12345", "GSE54321")
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                text=mismatched,
+                headers={"content-type": "text/plain"},
+                request=request,
+            )
+        ),
+        sleep=lambda _: None,
+    )
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert result.status == "unexpected_source_format"
+    assert result.safe_warning_or_error_category == "accession_mismatch"
+    assert result.public_record_available is False
+    client.close()
+
+
+def test_geo_malformed_text_document_is_structured(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                text="machine-readable text without a GEO Series record",
+                headers={"content-type": "text/plain"},
+                request=request,
+            )
+        ),
+        sleep=lambda _seconds: None,
+    )
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert result.status == "unexpected_source_format"
+    assert result.safe_warning_or_error_category == "malformed_geo_record"
+    assert result.public_record_available is False
+    client.close()
+
+
+@pytest.mark.parametrize(
+    ("status_code", "index_ids", "expected"),
+    [
+        (404, [], "not_found"),
+        (404, ["20012345"], "indexed_but_record_unavailable"),
+        (403, [], "not_public"),
+    ],
+)
+def test_geo_negative_http_outcomes_are_structured(
+    workflow_runtime, status_code: int, index_ids: list[str], expected: str
+) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("acc.cgi"):
+            return httpx.Response(
+                status_code,
+                text="record unavailable",
+                headers={"content-type": "text/plain"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={"esearchresult": {"idlist": index_ids}},
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert result.status == expected
+    assert result.public_record_available is False
+    assert result.source_diagnostic is not None
+    assert result.source_diagnostic.http_status == status_code
+    client.close()
+
+
+def test_geo_generic_search_form_is_not_persisted_as_a_record(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    body = "<html><form>GEO Accession Display search</form></html>"
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                text=body,
+                headers={"content-type": "text/plain"},
+                request=request,
+            )
+        ),
+        sleep=lambda _: None,
+    )
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert result.status == "unexpected_source_format"
+    assert result.source_artifact_id is None
+    assert result.source_diagnostic is not None
+    assert result.source_diagnostic.source_error_category == "generic_geo_page"
+    assert body not in result.model_dump_json()
+    client.close()
+
+
+def test_geo_unexpected_content_type_retains_safe_diagnostic(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    secret_body = "<html>secret-token=do-not-store</html>"
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                text=secret_body,
+                headers={"content-type": "text/html"},
+                request=request,
+            )
+        ),
+        sleep=lambda _: None,
+    )
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    diagnostic = result.source_diagnostic
+    assert result.status == "unexpected_source_format"
+    assert diagnostic is not None
+    assert diagnostic.http_status == 200
+    assert diagnostic.content_type == "text/html"
+    assert diagnostic.response_byte_count == len(secret_body)
+    assert diagnostic.exception_class == "SourceFormatError"
+    assert diagnostic.safe_url_path == "/geo/query/acc.cgi"
+    assert "secret-token" not in result.model_dump_json()
+    client.close()
+
+
+def test_geo_approved_redirect_is_followed_and_record_validated(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                302,
+                headers={"location": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            text=GEO_SOFT_FIXTURE,
+            headers={"content-type": "text/plain"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert result.status == "public_valid"
+    assert result.source_diagnostic is not None
+    assert result.source_diagnostic.final_approved_host == "www.ncbi.nlm.nih.gov"
+    assert calls == 2
+    client.close()
+
+
+def test_geo_redirect_to_unapproved_host_is_terminal(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                302,
+                headers={"location": "https://example.com/private"},
+                request=request,
+            )
+        ),
+        sleep=lambda _: None,
+    )
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    with pytest.raises(SourcePolicyError) as raised:
         service.validate_geo_accession(
             GeoAccessionInput(accession="GSE12345"),
-            invocation(workflow_id, mode=AgentRunMode.CACHED),
+            invocation(workflow_id, mode=AgentRunMode.LIVE),
         )
-    assert called is False
+    assert raised.value.diagnostic is not None
+    assert raised.value.diagnostic.source_error_category == "redirect_not_approved"
+    client.close()
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_category"),
+    [("timeout", "timeout"), ("429", "rate_limited"), ("500", "source_server_error")],
+)
+def test_geo_transient_source_failures_are_candidate_level(
+    workflow_runtime, kind: str, expected_category: str
+) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if kind == "timeout":
+            raise httpx.ReadTimeout("raw-private-detail", request=request)
+        return httpx.Response(
+            int(kind), headers={"content-type": "text/plain"}, request=request
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    result = service.validate_geo_accession(
+        GeoAccessionInput(accession="GSE12345"),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert result.status == "temporarily_unavailable"
+    assert result.retryable is True
+    assert result.source_diagnostic is not None
+    assert result.source_diagnostic.source_error_category == expected_category
+    assert result.source_diagnostic.attempt_number == 3
+    assert "raw-private-detail" not in result.model_dump_json()
+    client.close()
+
+
+def test_geo_batch_isolates_bad_candidate_and_keeps_successes(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        accession = request.url.params.get("acc")
+        if accession == "GSE314406":
+            return httpx.Response(
+                200,
+                text="<html><form>GEO search</form></html>",
+                headers={"content-type": "text/plain"},
+                request=request,
+            )
+        fixture = GEO_SOFT_FIXTURE.replace("GSE12345", str(accession))
+        return httpx.Response(
+            200,
+            text=fixture,
+            headers={"content-type": "text/plain"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    accessions = ["GSE330744", "GSE338134", "GSE314573", "GSE314406", "GSE301422"]
+    result = service.validate_geo_accessions(
+        GeoAccessionsInput(accessions=accessions),
+        invocation(workflow_id, mode=AgentRunMode.LIVE),
+    )
+    assert [item.accession for item in result.results] == accessions
+    assert [item.status for item in result.results] == [
+        "public_valid",
+        "public_valid",
+        "public_valid",
+        "unexpected_source_format",
+        "public_valid",
+    ]
+    assert result.public_valid_count == 4
+    assert len(result.source_artifact_references) == 4
     client.close()
 
 

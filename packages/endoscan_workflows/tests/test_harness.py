@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -732,7 +733,7 @@ def test_zero_first_geo_result_triggers_one_bounded_alternative_and_structured_o
         }
     )
     try:
-        _run_id, result = harness.run(bounded, DiscoveryOutput)
+        run_id, result = harness.run(bounded, DiscoveryOutput)
     finally:
         source_client.close()
     assert result.status is AgentRunStatus.COMPLETED
@@ -742,6 +743,152 @@ def test_zero_first_geo_result_triggers_one_bounded_alternative_and_structured_o
     assert result.output["recommended_candidate_id"] is None
     assert provider.calls == 3
     assert source_requests == 2
+
+
+def test_one_geo_parser_failure_does_not_terminally_fail_discovery(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, _service = workflow_runtime
+    _build, _discovering, _step, request, _default, _service2 = harness_context(
+        workflow_runtime
+    )
+    accessions = ["GSE330744", "GSE338134", "GSE314573", "GSE314406", "GSE301422"]
+
+    def geo(request: httpx.Request) -> httpx.Response:
+        accession = str(request.url.params.get("acc"))
+        if accession == "GSE314406":
+            body = "<html><form>GEO accession search</form></html>"
+        else:
+            body = "\n".join(
+                [
+                    f"^SERIES = {accession}",
+                    f"!Series_geo_accession = {accession}",
+                    "!Series_status = Public on Jul 18 2026",
+                    f"!Series_title = Official fixture {accession}",
+                    "!Series_type = Expression profiling by high throughput sequencing",
+                    "!Series_sample_organism_ch1 = Homo sapiens",
+                ]
+            )
+        return httpx.Response(
+            200,
+            text=body,
+            headers={"content-type": "text/plain"},
+            request=request,
+        )
+
+    source_client = ScientificSourceClient(
+        transport=httpx.MockTransport(geo), sleep=lambda _seconds: None
+    )
+    discovery_tools = DiscoveryToolService(
+        SourceResponseCache(database), store, source_client
+    )
+
+    class CandidateIsolationProvider:
+        name = "candidate-isolation"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs) -> ProviderTurn:
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="validate_geo_accessions",
+                        arguments={"accessions": accessions},
+                        idempotency_key="candidate-isolation-batch",
+                    ),
+                )
+            return ProviderTurn(
+                kind="output",
+                output={
+                    "endpoint_name": "Oxidative stress",
+                    "endpoint_definition_summary": "Transcriptomic oxidative-stress response.",
+                    "run_mode": "live",
+                    "simulation_label": None,
+                    "live_discovery": True,
+                    "search_strategy": "Validate the bounded candidate set.",
+                    "queries_executed": ["prior official GEO search"],
+                    "search_strategy_steps": [],
+                    "candidates": [
+                        {
+                            "candidate_id": "candidate-GSE330744",
+                            "accession": "GSE330744",
+                            "title": "Official fixture GSE330744",
+                            "source": "NCBI GEO",
+                            "organism": ["Homo sapiens"],
+                            "data_type": "Transcriptomic series",
+                            "sample_count": 0,
+                            "biological_context": "Metadata review required.",
+                            "treatment_control_evidence": "Not yet inspected.",
+                            "dose_time_evidence": "Not yet inspected.",
+                            "strengths": ["Public GEO record"],
+                            "limitations": ["Sample design not yet inspected."],
+                            "exclusion_reasons": [],
+                            "recommendation_status": "recommended_for_human_review",
+                            "evidence_references": [],
+                            "accession_verified": True,
+                            "license_verified": False,
+                            "geo_validation_status": "public_valid",
+                        }
+                    ],
+                    "recommended_candidate_id": "candidate-GSE330744",
+                    "recommendation": "Review the verified public candidate.",
+                    "decision_summary": "One parser failure did not erase valid candidates.",
+                    "rejected_candidates": [
+                        {
+                            "accession": "GSE314406",
+                            "reason": "Unexpected source format.",
+                        }
+                    ],
+                    "unresolved_questions": ["Is the sample design suitable?"],
+                    "requires_human_review": True,
+                    "evidence_references": [],
+                    "limitations": ["Detailed metadata was intentionally deferred."],
+                    "confidence_category": "moderate",
+                },
+            )
+
+    provider = CandidateIsolationProvider()
+    providers = ProviderRegistry()
+    providers.register("candidate-isolation", lambda: provider)
+    harness = AgentHarness(
+        database,
+        providers,
+        phase1_tool_registry(REPO_ROOT, discovery_tools),
+    )
+    bounded = request.model_copy(
+        update={
+            "model": request.model.model_copy(update={"provider": "candidate-isolation"}),
+            "available_tools": ["validate_geo_accessions"],
+            "context": {
+                **request.context,
+                "run_mode": "live",
+                "permission_scope": ["source:geo:read"],
+            },
+        }
+    )
+    try:
+        run_id, result = harness.run(bounded, DiscoveryOutput)
+    finally:
+        source_client.close()
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.turns == 2
+    assert result.tool_calls == 1
+    stored = _service.agent_run(run_id)
+    statuses = [
+        item["status"]
+        for item in stored["tool_calls"][0]["result"]["output"]["results"]
+    ]
+    assert statuses == [
+        "public_valid",
+        "public_valid",
+        "public_valid",
+        "unexpected_source_format",
+        "public_valid",
+    ]
+    assert result.output["recommended_candidate_id"] == "candidate-GSE330744"
 
 
 def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
@@ -883,6 +1030,120 @@ def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
             "original_index": 0,
         }
     ]
+
+
+def test_terminal_source_failure_persists_safe_diagnostic_and_failed_trace(
+    workflow_runtime, caplog
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+
+    def prohibited_redirect(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302,
+            headers={"location": "https://example.com/private?secret=do-not-store"},
+            request=request,
+        )
+
+    source_client = ScientificSourceClient(
+        transport=httpx.MockTransport(prohibited_redirect), sleep=lambda _seconds: None
+    )
+    discovery_tools = DiscoveryToolService(
+        SourceResponseCache(database), store, source_client
+    )
+
+    class TerminalSourceProvider:
+        name = "terminal-source-test"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs) -> ProviderTurn:
+            self.calls += 1
+            return ProviderTurn(
+                kind="tool",
+                tool_request=ProviderToolRequest(
+                    tool_name="validate_geo_accessions",
+                    arguments={"accessions": ["GSE314406"]},
+                    idempotency_key="terminal-source-call",
+                ),
+            )
+
+    provider = TerminalSourceProvider()
+    providers = ProviderRegistry()
+    providers.register("terminal-source-test", lambda: provider)
+    real_harness = AgentHarness(
+        database,
+        providers,
+        phase1_tool_registry(REPO_ROOT, discovery_tools),
+    )
+
+    class RequestOverrideHarness:
+        def run(self, request, output_schema):
+            return real_harness.run(
+                request.model_copy(
+                    update={
+                        "model": request.model.model_copy(
+                            update={"provider": "terminal-source-test"}
+                        ),
+                        "context": {
+                            **request.context,
+                            "run_mode": "live",
+                            "permission_scope": ["source:geo:read"],
+                        },
+                        "available_tools": ["validate_geo_accessions"],
+                    }
+                ),
+                output_schema,
+            )
+
+    service.harness = RequestOverrideHarness()
+    created = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Terminal source diagnostic",
+            endpoint_slug="terminal-source-diagnostic",
+            biological_goal="Verify safe source diagnostics on a terminal redirect failure.",
+            created_by="test-admin",
+            idempotency_key="terminal-source-build",
+        )
+    )
+    caplog.set_level(
+        logging.WARNING, logger="uvicorn.error.endoscan.workflow.source_tool"
+    )
+    try:
+        finished = service.start_build(
+            created.id,
+            expected_version=created.version,
+            actor="test-admin",
+            idempotency_key="terminal-source-start",
+        )
+    finally:
+        source_client.close()
+
+    assert finished.current_stage is WorkflowState.FAILED
+    assert provider.calls == 1
+    run = service.agent_run(service.agent_runs(created.id)[0]["id"])
+    assert run["status"] == "failed"
+    tool_result = run["tool_calls"][0]["result"]
+    assert tool_result["source_diagnostic"] is not None, tool_result
+    diagnostic = tool_result["source_diagnostic"]
+    assert diagnostic["source_host"] == "www.ncbi.nlm.nih.gov"
+    assert diagnostic["safe_url_path"] == "/geo/query/acc.cgi"
+    assert diagnostic["http_status"] == 302
+    assert diagnostic["source_error_category"] == "redirect_not_approved"
+    errors = service.errors(created.id)
+    assert errors[0]["detail"]["source_diagnostic"] == diagnostic
+    trace_artifact = next(
+        item for item in store.list_artifacts(created.id) if item.artifact_type == "search_trace"
+    )
+    _descriptor, raw_trace = store.get(trace_artifact.id)
+    trace = json.loads(raw_trace)
+    assert trace["status"] == "failed"
+    assert trace["tool_calls"][0]["source_diagnostic"] == diagnostic
+    persisted = json.dumps({"run": run, "errors": errors, "trace": trace})
+    assert "do-not-store" not in persisted
+    assert "example.com/private" not in persisted
+    assert "redirect_not_approved" in caplog.text
+    assert "do-not-store" not in caplog.text
 
 
 def test_approval_interruption_is_typed(workflow_runtime) -> None:

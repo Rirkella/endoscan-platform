@@ -28,6 +28,7 @@ from endoscan_workflows.preflight import ProviderAccessPreflight
 from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
 from endoscan_workflows.service import WorkflowService
 from endoscan_workflows.source_cache import SourceResponseCache
+from endoscan_workflows.source_probe import GeoValidationProbe
 from endoscan_workflows.source_security import ScientificSourceClient
 from endoscan_workflows.state_machine import WorkflowGraph
 from endoscan_workflows.tools import phase1_tool_registry
@@ -190,6 +191,17 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             else None
         ),
     )
+    geo_validation_probe = GeoValidationProbe(
+        artifact_root=artifact_root,
+        source_client=source_client,
+        ttl_seconds=agent_configuration.source_cache_ttl_seconds,
+        ncbi_email=agent_configuration.ncbi_email,
+        ncbi_api_key=(
+            agent_configuration.ncbi_api_key.get_secret_value()
+            if agent_configuration.ncbi_api_key
+            else None
+        ),
+    )
     tool_registry = phase1_tool_registry(root, discovery_tools)
     provider_registry = ProviderRegistry()
     provider_registry.register("fake", FakeAgentProvider)
@@ -214,6 +226,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.state.adapter_boundary_probe = AdapterBoundaryProbe(agent_configuration, tool_registry)
     app.state.source_cache = source_cache
     app.state.source_client = source_client
+    app.state.geo_validation_probe = geo_validation_probe
     app.state.workflow_service = workflow_service
     app.state.admin_development_mode = (
         os.environ.get("ENDOSCAN_ADMIN_MODE", "disabled").strip().lower() == "development"

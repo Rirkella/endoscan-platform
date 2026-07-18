@@ -152,7 +152,27 @@ export interface AdminWorkflowError {
   category: string;
   retryable: boolean;
   safe_message: string;
+  detail?: {
+    source_diagnostic?: AdminSourceToolDiagnostic | null;
+  };
   created_at: string;
+}
+
+export interface AdminSourceToolDiagnostic {
+  tool_name: string;
+  source_host: string;
+  safe_url_path: string;
+  http_method: "GET";
+  http_status: number | null;
+  final_approved_host: string | null;
+  content_type: string | null;
+  response_byte_count: number | null;
+  exception_class: string | null;
+  source_error_category: string;
+  retryable: boolean;
+  attempt_number: number;
+  request_duration_ms: number;
+  developer_message: string | null;
 }
 
 export interface ExplanationCapabilityStatus {

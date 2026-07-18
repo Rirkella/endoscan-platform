@@ -5,19 +5,24 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .artifacts import LocalArtifactStore
 from .config import AgentRunMode
-from .contracts import ToolInvocation
+from .contracts import SourceToolDiagnostic, ToolInvocation
 from .source_cache import SourceResponseCache
 from .source_security import (
     ScientificResponse,
     ScientificSourceClient,
+    SourceFormatError,
+    SourceRateLimitError,
     SourceResponseError,
+    SourceTimeoutError,
+    SourceToolError,
     SourceUnavailableError,
     sanitize_untrusted_text,
 )
@@ -222,15 +227,71 @@ class GeoAccessionInput(ToolContract):
     accession: str = Field(pattern=r"^GSE[1-9][0-9]{1,8}$")
 
 
+GeoValidationStatus = Literal[
+    "public_valid",
+    "indexed_but_record_unavailable",
+    "not_public",
+    "not_found",
+    "invalid_accession",
+    "temporarily_unavailable",
+    "unexpected_source_format",
+]
+
+
+class GeoAccessionsInput(ToolContract):
+    accessions: list[Annotated[str, Field(pattern=r"^GSE[1-9][0-9]{1,8}$")]] = Field(
+        min_length=1,
+        max_length=5,
+        description=(
+            "One to five explicit GEO Series accessions. Supply GSE identifiers only; "
+            "never supply URLs. Duplicates are removed while preserving first order."
+        ),
+    )
+
+    @field_validator("accessions", mode="before")
+    @classmethod
+    def normalize_accessions(cls, values: Any) -> Any:
+        if not isinstance(values, list):
+            return values
+        normalized: list[str] = []
+        for value in values:
+            if not isinstance(value, str):
+                return values
+            accession = value.strip().upper()
+            if accession not in normalized:
+                normalized.append(accession)
+        return normalized
+
+
 class GeoValidationOutput(ToolContract):
     schema_version: str = "1.0.0"
     accession: str
-    exists: bool
-    resolves: bool
-    source_url: str
-    source_artifact_id: str
-    evidence_references: list[str]
-    cache_status: Literal["live", "cached"]
+    status: GeoValidationStatus
+    exists_in_geo_index: bool
+    public_record_available: bool
+    title: str | None = None
+    organism: list[str] = Field(default_factory=list)
+    study_type: list[str] = Field(default_factory=list)
+    source_reference: str
+    source_artifact_id: str | None = None
+    source_artifact_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    evidence_references: list[str] = Field(default_factory=list)
+    validation_timestamp: datetime
+    safe_warning_or_error_category: str | None = None
+    retryable: bool = False
+    cache_status: Literal["live", "cached", "not_available"]
+    source_diagnostic: SourceToolDiagnostic | None = None
+
+
+class GeoValidationBatchOutput(ToolContract):
+    results: list[GeoValidationOutput]
+    public_valid_count: int = Field(ge=0, le=5)
+    unavailable_count: int = Field(ge=0, le=5)
+    invalid_count: int = Field(ge=0, le=5)
+    source_artifact_references: list[str] = Field(default_factory=list, max_length=5)
+    cache_states: list[Literal["live", "cached", "not_available"]] = Field(
+        default_factory=list, max_length=5
+    )
 
 
 class GeoSeriesMetadataOutput(ToolContract):
@@ -367,6 +428,7 @@ class DiscoveryToolService:
             common = self._eutils_params()
             search = self.client.get(
                 f"{EUTILS}/esearch.fcgi",
+                tool_name="search_geo_series",
                 params={
                     **common,
                     "db": "gds",
@@ -383,6 +445,7 @@ class DiscoveryToolService:
             if ids:
                 summary_response = self.client.get(
                     f"{EUTILS}/esummary.fcgi",
+                    tool_name="search_geo_series",
                     params={**common, "db": "gds", "id": ",".join(ids), "retmode": "json"},
                     accepted_types={"application/json"},
                 )
@@ -433,6 +496,7 @@ class DiscoveryToolService:
                 status_code=200,
                 headers={"content-type": "application/json"},
                 retrieved_at=summary_response.retrieved_at,
+                diagnostic=summary_response.diagnostic,
             )
             return response, {
                 "results": parsed_results,
@@ -442,7 +506,7 @@ class DiscoveryToolService:
                 ).isoformat(),
             }
 
-        parsed, artifact_id, cache_status, _url = self._cached_source(
+        parsed, artifact_id, cache_status, _url, _diagnostic, _sha256 = self._cached_source(
             "search_geo_series", cache_args, invocation, retrieve, suffix="json"
         )
         new_results = [
@@ -495,22 +559,216 @@ class DiscoveryToolService:
     def validate_geo_accession(
         self, request: GeoAccessionInput, invocation: ToolInvocation
     ) -> GeoValidationOutput:
-        parsed, artifact_id, cache_status, url = self._geo_soft(request.accession, invocation)
-        exists = parsed.get("accession") == request.accession.upper()
-        return GeoValidationOutput(
-            accession=request.accession.upper(),
-            exists=exists,
-            resolves=exists,
-            source_url=url,
-            source_artifact_id=artifact_id,
-            evidence_references=[f"artifact:{artifact_id}#Series_geo_accession"],
-            cache_status=cache_status,
+        """Compatibility wrapper over the production bounded batch validator."""
+
+        return self.validate_geo_accessions(
+            GeoAccessionsInput(accessions=[request.accession]), invocation
+        ).results[0]
+
+    def validate_geo_accessions(
+        self, request: GeoAccessionsInput, invocation: ToolInvocation
+    ) -> GeoValidationBatchOutput:
+        results: list[GeoValidationOutput] = []
+        for accession in request.accessions:
+            results.append(self._validate_geo_candidate(accession, invocation))
+        valid = sum(item.status == "public_valid" for item in results)
+        unavailable = sum(
+            item.status in {"indexed_but_record_unavailable", "temporarily_unavailable"}
+            for item in results
         )
+        return GeoValidationBatchOutput(
+            results=results,
+            public_valid_count=valid,
+            unavailable_count=unavailable,
+            invalid_count=len(results) - valid - unavailable,
+            source_artifact_references=[
+                f"artifact:{item.source_artifact_id}"
+                for item in results
+                if item.source_artifact_id
+            ],
+            cache_states=[item.cache_status for item in results],
+        )
+
+    def _validate_geo_candidate(
+        self, accession: str, invocation: ToolInvocation
+    ) -> GeoValidationOutput:
+        requested = accession.upper()
+        source_reference = f"{GEO_SOFT}?acc={requested}"
+        now = datetime.now(UTC)
+        if not GSE_PATTERN.fullmatch(requested):
+            return GeoValidationOutput(
+                accession=requested,
+                status="invalid_accession",
+                exists_in_geo_index=False,
+                public_record_available=False,
+                source_reference=source_reference,
+                validation_timestamp=now,
+                safe_warning_or_error_category="invalid_accession",
+                cache_status="not_available",
+            )
+        try:
+            parsed, artifact_id, cache_status, url, diagnostic, sha256 = self._geo_brief(
+                requested, invocation
+            )
+        except SourceFormatError as exc:
+            return self._negative_validation(
+                requested,
+                "unexpected_source_format",
+                source_reference,
+                now,
+                exc,
+            )
+        except SourceResponseError as exc:
+            status = exc.diagnostic.http_status if exc.diagnostic else None
+            if status in {401, 403}:
+                outcome: GeoValidationStatus = "not_public"
+                indexed = True
+            elif status in {404, 410}:
+                indexed = self._geo_index_exists(requested)
+                outcome = "indexed_but_record_unavailable" if indexed else "not_found"
+            else:
+                indexed = False
+                outcome = "unexpected_source_format"
+            return self._negative_validation(
+                requested,
+                outcome,
+                source_reference,
+                now,
+                exc,
+                exists_in_geo_index=indexed,
+            )
+        except (SourceTimeoutError, SourceRateLimitError, SourceUnavailableError) as exc:
+            return self._negative_validation(
+                requested,
+                "temporarily_unavailable",
+                source_reference,
+                now,
+                exc,
+                retryable=True,
+            )
+        returned = str(parsed.get("accession") or "").upper()
+        record_type = str(parsed.get("record_type") or "")
+        record_status = str(parsed.get("record_status") or "").casefold()
+        if returned != requested or record_type != "Series":
+            return GeoValidationOutput(
+                accession=requested,
+                status="unexpected_source_format",
+                exists_in_geo_index=bool(returned),
+                public_record_available=False,
+                source_reference=url,
+                source_artifact_id=artifact_id,
+                source_artifact_sha256=sha256,
+                evidence_references=[f"artifact:{artifact_id}#Series_geo_accession"],
+                validation_timestamp=now,
+                safe_warning_or_error_category=(
+                    "accession_mismatch"
+                    if returned and returned != requested
+                    else "record_type_mismatch"
+                ),
+                cache_status=cache_status,
+                source_diagnostic=diagnostic,
+            )
+        if not record_status:
+            return GeoValidationOutput(
+                accession=requested,
+                status="unexpected_source_format",
+                exists_in_geo_index=True,
+                public_record_available=False,
+                source_reference=url,
+                source_artifact_id=artifact_id,
+                source_artifact_sha256=sha256,
+                evidence_references=[f"artifact:{artifact_id}#Series_geo_accession"],
+                validation_timestamp=now,
+                safe_warning_or_error_category="record_status_missing",
+                cache_status=cache_status,
+                source_diagnostic=diagnostic,
+            )
+        if any(marker in record_status for marker in ("private", "suppressed", "on hold")):
+            return GeoValidationOutput(
+                accession=requested,
+                status="not_public",
+                exists_in_geo_index=True,
+                public_record_available=False,
+                source_reference=url,
+                source_artifact_id=artifact_id,
+                source_artifact_sha256=sha256,
+                evidence_references=[f"artifact:{artifact_id}#Series_status"],
+                validation_timestamp=now,
+                safe_warning_or_error_category="record_not_public",
+                cache_status=cache_status,
+                source_diagnostic=diagnostic,
+            )
+        return GeoValidationOutput(
+            accession=requested,
+            status="public_valid",
+            exists_in_geo_index=True,
+            public_record_available=True,
+            title=parsed.get("title") or None,
+            organism=parsed.get("organism", []),
+            study_type=parsed.get("study_type", []),
+            source_reference=url,
+            source_artifact_id=artifact_id,
+            source_artifact_sha256=sha256,
+            evidence_references=[
+                f"artifact:{artifact_id}#Series_geo_accession",
+                f"artifact:{artifact_id}#Series_title",
+            ],
+            validation_timestamp=now,
+            cache_status=cache_status,
+            source_diagnostic=diagnostic,
+        )
+
+    @staticmethod
+    def _negative_validation(
+        accession: str,
+        status: GeoValidationStatus,
+        source_reference: str,
+        timestamp: datetime,
+        exc: SourceToolError,
+        *,
+        exists_in_geo_index: bool = False,
+        retryable: bool | None = None,
+    ) -> GeoValidationOutput:
+        return GeoValidationOutput(
+            accession=accession,
+            status=status,
+            exists_in_geo_index=exists_in_geo_index,
+            public_record_available=False,
+            source_reference=source_reference,
+            validation_timestamp=timestamp,
+            safe_warning_or_error_category=(
+                exc.diagnostic.source_error_category if exc.diagnostic else status
+            ),
+            retryable=exc.retryable if retryable is None else retryable,
+            cache_status="not_available",
+            source_diagnostic=exc.diagnostic,
+        )
+
+    def _geo_index_exists(self, accession: str) -> bool:
+        try:
+            response = self.client.get(
+                f"{EUTILS}/esearch.fcgi",
+                tool_name="validate_geo_accessions",
+                params={
+                    **self._eutils_params(),
+                    "db": "gds",
+                    "term": f'"{accession}"[Accession] AND gse[Entry Type]',
+                    "retmax": 1,
+                    "retmode": "json",
+                },
+                accepted_types={"application/json"},
+            )
+            payload = json.loads(response.content)
+            return bool(payload.get("esearchresult", {}).get("idlist", []))
+        except (SourceToolError, json.JSONDecodeError):
+            return False
 
     def fetch_geo_series_metadata(
         self, request: GeoAccessionInput, invocation: ToolInvocation
     ) -> GeoSeriesMetadataOutput:
-        parsed, artifact_id, cache_status, url = self._geo_soft(request.accession, invocation)
+        parsed, artifact_id, cache_status, url, _diagnostic, _sha256 = self._geo_soft(
+            request.accession, invocation
+        )
         if parsed.get("accession") != request.accession.upper():
             raise SourceResponseError("GEO accession did not resolve to an official Series record.")
 
@@ -543,7 +801,9 @@ class DiscoveryToolService:
     def inspect_geo_sample_design(
         self, request: GeoAccessionInput, invocation: ToolInvocation
     ) -> GeoSampleDesignOutput:
-        parsed, artifact_id, _cache_status, _url = self._geo_soft(request.accession, invocation)
+        parsed, artifact_id, _cache_status, _url, _diagnostic, _sha256 = self._geo_soft(
+            request.accession, invocation
+        )
         samples = parsed.get("samples", [])
         treatments: set[str] = set()
         controls: set[str] = set()
@@ -611,6 +871,7 @@ class DiscoveryToolService:
         def retrieve() -> tuple[ScientificResponse, dict[str, Any]]:
             response = self.client.get(
                 f"{EUTILS}/efetch.fcgi",
+                tool_name="fetch_publication_metadata",
                 params={
                     **self._eutils_params(),
                     "db": "pubmed",
@@ -649,7 +910,7 @@ class DiscoveryToolService:
                 )
             return response, {"publications": publications, "warnings": warnings}
 
-        parsed, artifact_id, cache_status, _url = self._cached_source(
+        parsed, artifact_id, cache_status, _url, _diagnostic, _sha256 = self._cached_source(
             "fetch_publication_metadata",
             {"publication_ids": normalized},
             invocation,
@@ -699,12 +960,20 @@ class DiscoveryToolService:
 
     def _geo_soft(
         self, accession: str, invocation: ToolInvocation
-    ) -> tuple[dict[str, Any], str, Literal["live", "cached"], str]:
+    ) -> tuple[
+        dict[str, Any],
+        str,
+        Literal["live", "cached"],
+        str,
+        SourceToolDiagnostic,
+        str,
+    ]:
         accession = accession.upper()
 
         def retrieve() -> tuple[ScientificResponse, dict[str, Any]]:
             response = self.client.get(
                 GEO_SOFT,
+                tool_name=invocation.tool_name,
                 params={"acc": accession, "targ": "self", "form": "text", "view": "full"},
                 accepted_types={"text/plain"},
             )
@@ -712,6 +981,66 @@ class DiscoveryToolService:
 
         return self._cached_source(
             "geo_series_soft", {"accession": accession}, invocation, retrieve, suffix="txt"
+        )
+
+    def _geo_brief(
+        self, accession: str, invocation: ToolInvocation
+    ) -> tuple[
+        dict[str, Any],
+        str,
+        Literal["live", "cached"],
+        str,
+        SourceToolDiagnostic,
+        str,
+    ]:
+        accession = accession.upper()
+
+        def retrieve() -> tuple[ScientificResponse, dict[str, Any]]:
+            response = self.client.get(
+                GEO_SOFT,
+                tool_name="validate_geo_accessions",
+                params={"acc": accession, "targ": "self", "view": "brief", "form": "text"},
+                accepted_types={"text/plain"},
+            )
+            text = response.content.decode("utf-8", errors="replace")
+            if _looks_like_html_or_search_form(text):
+                diagnostic = response.diagnostic.model_copy(
+                    update={
+                        "source_error_category": "generic_geo_page",
+                        "exception_class": "SourceFormatError",
+                        "developer_message": (
+                            "GEO Accession Display returned a generic HTML/search document "
+                            "instead of a machine-readable Series record."
+                        ),
+                    }
+                ) if response.diagnostic else None
+                raise SourceFormatError(
+                    "GEO returned a generic page instead of a Series record.",
+                    diagnostic=diagnostic,
+                )
+            parsed = _parse_geo_soft(text)
+            if not parsed.get("record_accession") and not parsed.get("accession"):
+                diagnostic = response.diagnostic.model_copy(
+                    update={
+                        "source_error_category": "malformed_geo_record",
+                        "exception_class": "SourceFormatError",
+                        "developer_message": (
+                            "GEO text response did not contain a Series record marker or accession."
+                        ),
+                    }
+                ) if response.diagnostic else None
+                raise SourceFormatError(
+                    "GEO returned an unrecognized machine-readable record.",
+                    diagnostic=diagnostic,
+                )
+            return response, parsed
+
+        return self._cached_source(
+            "validate_geo_accession",
+            {"accession": accession, "view": "brief"},
+            invocation,
+            retrieve,
+            suffix="txt",
         )
 
     def _cached_source(
@@ -722,7 +1051,14 @@ class DiscoveryToolService:
         retrieve,
         *,
         suffix: str,
-    ) -> tuple[dict[str, Any], str, Literal["live", "cached"], str]:
+    ) -> tuple[
+        dict[str, Any],
+        str,
+        Literal["live", "cached"],
+        str,
+        SourceToolDiagnostic,
+        str,
+    ]:
         mode = AgentRunMode(str(invocation.run_context.get("run_mode", "replay")))
         refresh = bool(invocation.run_context.get("refresh_source_metadata", False))
         cached = None if refresh else self.cache.get(tool_name, arguments)
@@ -739,7 +1075,33 @@ class DiscoveryToolService:
                 original_source=cached.source_url,
                 idempotency_key=f"{invocation.idempotency_key}:cached-source",
             )
-            return cached.parsed_output, current.id, "cached", cached.source_url
+            diagnostic_payload = cached.http_metadata.get("diagnostic")
+            if isinstance(diagnostic_payload, dict):
+                diagnostic = SourceToolDiagnostic.model_validate(diagnostic_payload)
+            else:
+                parsed_url = urlparse(cached.source_url)
+                headers = cached.http_metadata.get("headers", {})
+                diagnostic = SourceToolDiagnostic(
+                    tool_name=tool_name,
+                    source_host=(parsed_url.hostname or "unknown").lower().rstrip("."),
+                    safe_url_path=parsed_url.path or "/",
+                    http_status=cached.http_metadata.get("status_code"),
+                    final_approved_host=(parsed_url.hostname or "unknown").lower().rstrip("."),
+                    content_type=(
+                        headers.get("content-type") if isinstance(headers, dict) else None
+                    ),
+                    response_byte_count=len(raw),
+                    source_error_category="none",
+                    request_duration_ms=0,
+                )
+            return (
+                cached.parsed_output,
+                current.id,
+                "cached",
+                cached.source_url,
+                diagnostic,
+                cached.content_hash,
+            )
         if mode is not AgentRunMode.LIVE and not refresh:
             raise SourceUnavailableError(
                 "Cached mode has no fresh source artifact; an explicit live refresh is required."
@@ -763,9 +1125,28 @@ class DiscoveryToolService:
             content_hash=response.sha256,
             parsed_output=parsed,
             raw_artifact_id=artifact.id,
-            http_metadata={"status_code": response.status_code, "headers": response.headers},
+            http_metadata={
+                "status_code": response.status_code,
+                "headers": response.headers,
+                "diagnostic": (
+                    response.diagnostic.model_dump(mode="json") if response.diagnostic else None
+                ),
+            },
         )
-        return parsed, artifact.id, "live", response.url
+        diagnostic = response.diagnostic
+        if diagnostic is None:
+            parsed_url = urlparse(response.url)
+            diagnostic = SourceToolDiagnostic(
+                tool_name=tool_name,
+                source_host=(parsed_url.hostname or "unknown").lower().rstrip("."),
+                safe_url_path=parsed_url.path or "/",
+                http_status=response.status_code,
+                final_approved_host=(parsed_url.hostname or "unknown").lower().rstrip("."),
+                content_type=response.content_type,
+                response_byte_count=len(response.content),
+                source_error_category="none",
+            )
+        return parsed, artifact.id, "live", response.url, diagnostic, response.sha256
 
     def _eutils_params(self) -> dict[str, str]:
         values = {"tool": "endoscan_phase1"}
@@ -776,13 +1157,27 @@ class DiscoveryToolService:
         return values
 
 
+def _looks_like_html_or_search_form(value: str) -> bool:
+    head = value[:4_000].casefold()
+    return any(
+        marker in head
+        for marker in ("<!doctype html", "<html", "<form", "geo accession display")
+    ) and "^series" not in head
+
+
 def _parse_geo_soft(value: str) -> dict[str, Any]:
     fields: dict[str, list[str]] = {}
     samples: list[dict[str, Any]] = []
     current_sample: dict[str, Any] | None = None
     warnings: list[str] = []
+    record_type = ""
+    record_accession = ""
     for raw_line in value.splitlines():
         line = raw_line.strip()
+        if line.startswith("^SERIES") and "=" in line:
+            record_type = "Series"
+            record_accession = line.split("=", 1)[-1].strip().upper()
+            continue
         if line.startswith("^SAMPLE"):
             if current_sample:
                 samples.append(current_sample)
@@ -810,7 +1205,7 @@ def _parse_geo_soft(value: str) -> dict[str, Any]:
         fields.setdefault(key, []).append(text)
     if current_sample:
         samples.append(current_sample)
-    accession = next(iter(fields.get("Series_geo_accession", [])), "").upper()
+    accession = next(iter(fields.get("Series_geo_accession", [])), record_accession).upper()
     if accession and not GSE_PATTERN.fullmatch(accession):
         accession = ""
     variables = sorted(
@@ -823,9 +1218,19 @@ def _parse_geo_soft(value: str) -> dict[str, Any]:
     )
     return {
         "accession": accession,
+        "record_accession": record_accession,
+        "record_type": record_type,
+        "record_status": next(iter(fields.get("Series_status", [])), ""),
         "title": next(iter(fields.get("Series_title", [])), ""),
         "summary": " ".join(fields.get("Series_summary", [])),
-        "organism": sorted(set(fields.get("Series_organism_ch1", []))),
+        "organism": sorted(
+            {
+                item
+                for key, values in fields.items()
+                if key.endswith("organism_ch1")
+                for item in values
+            }
+        ),
         "study_type": sorted(set(fields.get("Series_type", []))),
         "platform_ids": sorted(set(fields.get("Series_platform_id", []))),
         "publication_ids": sorted(set(fields.get("Series_pubmed_id", []))),

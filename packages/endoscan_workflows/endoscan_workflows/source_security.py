@@ -10,9 +10,11 @@ import time
 from dataclasses import dataclass
 from html import unescape
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
+
+from .contracts import SourceToolDiagnostic
 
 APPROVED_SOURCE_HOSTS = frozenset(
     {
@@ -36,11 +38,21 @@ INJECTION_PATTERNS = (
 )
 
 
-class SourcePolicyError(RuntimeError):
+class SourceToolError(RuntimeError):
+    retryable = False
+
+    def __init__(
+        self, safe_message: str, *, diagnostic: SourceToolDiagnostic | None = None
+    ) -> None:
+        super().__init__(safe_message)
+        self.diagnostic = diagnostic
+
+
+class SourcePolicyError(SourceToolError):
     retryable = False
 
 
-class SourceUnavailableError(RuntimeError):
+class SourceUnavailableError(SourceToolError):
     retryable = True
 
 
@@ -56,6 +68,10 @@ class SourceResponseError(SourceUnavailableError):
     retryable = False
 
 
+class SourceFormatError(SourceResponseError):
+    pass
+
+
 @dataclass(frozen=True)
 class ScientificResponse:
     url: str
@@ -64,6 +80,7 @@ class ScientificResponse:
     status_code: int
     headers: dict[str, str]
     retrieved_at: float
+    diagnostic: SourceToolDiagnostic | None = None
 
     @property
     def sha256(self) -> str:
@@ -120,49 +137,140 @@ class ScientificSourceClient:
         self,
         url: str,
         *,
+        tool_name: str = "scientific_source",
         params: dict[str, str | int] | None = None,
         accepted_types: set[str] | frozenset[str] = ALLOWED_CONTENT_TYPES,
     ) -> ScientificResponse:
-        self._validate_url(url)
-        last_error: Exception | None = None
-        for attempt in range(3):
+        try:
+            self._validate_url(url)
+        except SourcePolicyError as exc:
+            raise SourcePolicyError(
+                str(exc),
+                diagnostic=self._diagnostic(
+                    tool_name=tool_name,
+                    url=url,
+                    category="source_url_policy",
+                    exception_class=type(exc).__name__,
+                    developer_message=str(exc),
+                ),
+            ) from exc
+        last_error: SourceToolError | None = None
+        for attempt_index in range(3):
+            attempt_number = attempt_index + 1
             self._rate_limit()
+            started = time.monotonic()
             try:
-                response = self.client.get(url, params=params)
-            except httpx.TimeoutException:
-                last_error = SourceTimeoutError("Official scientific source timed out.")
-            except httpx.HTTPError:
-                last_error = SourceUnavailableError("Official scientific source is unavailable.")
+                response = self._get_with_approved_redirects(
+                    url,
+                    params=params,
+                    tool_name=tool_name,
+                    attempt_number=attempt_number,
+                    started=started,
+                )
+            except httpx.TimeoutException as exc:
+                last_error = SourceTimeoutError(
+                    "Official scientific source timed out.",
+                    diagnostic=self._diagnostic(
+                        tool_name=tool_name,
+                        url=url,
+                        category="timeout",
+                        retryable=True,
+                        attempt_number=attempt_number,
+                        duration_ms=self._elapsed_ms(started),
+                        exception_class=type(exc).__name__,
+                    ),
+                )
+            except httpx.HTTPError as exc:
+                last_error = SourceUnavailableError(
+                    "Official scientific source is unavailable.",
+                    diagnostic=self._diagnostic(
+                        tool_name=tool_name,
+                        url=url,
+                        category="network_unavailable",
+                        retryable=True,
+                        attempt_number=attempt_number,
+                        duration_ms=self._elapsed_ms(started),
+                        exception_class=type(exc).__name__,
+                    ),
+                )
+            except SourceToolError:
+                raise
             else:
-                if response.is_redirect:
-                    location = response.headers.get("location", "")
-                    if not location:
-                        raise SourcePolicyError("Scientific source returned an invalid redirect.")
-                    self._validate_url(str(response.url.join(location)))
-                    raise SourcePolicyError("Redirects are disabled for scientific source tools.")
+                content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                response_bytes = len(response.content)
+                final_host = (response.url.host or "").lower().rstrip(".")
+                base_diagnostic = dict(
+                    tool_name=tool_name,
+                    url=str(response.url),
+                    http_status=response.status_code,
+                    final_host=final_host,
+                    content_type=content_type or None,
+                    response_byte_count=response_bytes,
+                    attempt_number=attempt_number,
+                    duration_ms=self._elapsed_ms(started),
+                )
                 if response.status_code == 429:
                     last_error = SourceRateLimitError(
-                        "Official scientific source rate limit reached."
+                        "Official scientific source rate limit reached.",
+                        diagnostic=self._diagnostic(
+                            **base_diagnostic,
+                            category="rate_limited",
+                            retryable=True,
+                            exception_class="SourceRateLimitError",
+                        ),
                     )
                 elif 500 <= response.status_code < 600:
                     last_error = SourceUnavailableError(
-                        "Official scientific source returned a server error."
+                        "Official scientific source returned a server error.",
+                        diagnostic=self._diagnostic(
+                            **base_diagnostic,
+                            category="source_server_error",
+                            retryable=True,
+                            exception_class="SourceUnavailableError",
+                        ),
                     )
                 elif response.status_code >= 400:
-                    raise SourceResponseError("Official scientific source rejected the request.")
+                    raise SourceResponseError(
+                        "Official scientific source rejected the request.",
+                        diagnostic=self._diagnostic(
+                            **base_diagnostic,
+                            category="source_client_error",
+                            retryable=False,
+                            exception_class="SourceResponseError",
+                        ),
+                    )
                 else:
-                    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
                     if content_type not in accepted_types:
-                        raise SourcePolicyError(
-                            "Scientific source returned an unexpected content type."
+                        raise SourceFormatError(
+                            "Scientific source returned an unexpected content type.",
+                            diagnostic=self._diagnostic(
+                                **base_diagnostic,
+                                category="unexpected_content_type",
+                                retryable=False,
+                                exception_class="SourceFormatError",
+                                developer_message=(
+                                    "Expected a machine-readable GEO/NCBI response content type."
+                                ),
+                            ),
                         )
                     declared = int(response.headers.get("content-length", "0") or 0)
-                    if declared > self.maximum_bytes or len(response.content) > self.maximum_bytes:
+                    if declared > self.maximum_bytes or response_bytes > self.maximum_bytes:
                         raise SourcePolicyError(
-                            "Scientific source response exceeded the configured limit."
+                            "Scientific source response exceeded the configured limit.",
+                            diagnostic=self._diagnostic(
+                                **base_diagnostic,
+                                category="response_too_large",
+                                retryable=False,
+                                exception_class="SourcePolicyError",
+                            ),
                         )
+                    diagnostic = self._diagnostic(
+                        **base_diagnostic,
+                        category="none",
+                        retryable=False,
+                    )
                     return ScientificResponse(
-                        url=str(response.url),
+                        url=self._safe_source_url(str(response.url)),
                         content=response.content,
                         content_type=content_type,
                         status_code=response.status_code,
@@ -173,12 +281,131 @@ class ScientificSourceClient:
                             in {"content-type", "content-length", "etag", "last-modified"}
                         },
                         retrieved_at=time.time(),
+                        diagnostic=diagnostic,
                     )
-            if attempt < 2:
-                self.sleep(min(0.25 * (2**attempt), 1.0))
+            if attempt_index < 2:
+                self.sleep(min(0.25 * (2**attempt_index), 1.0))
         if last_error:
             raise last_error
         raise SourceUnavailableError("Official scientific source is unavailable.")
+
+    def _get_with_approved_redirects(
+        self,
+        url: str,
+        *,
+        params: dict[str, str | int] | None,
+        tool_name: str,
+        attempt_number: int,
+        started: float,
+    ) -> httpx.Response:
+        current_url = url
+        current_params = params
+        for _redirect_number in range(3):
+            response = self.client.get(current_url, params=current_params)
+            if not response.is_redirect:
+                return response
+            location = response.headers.get("location", "")
+            if not location:
+                raise SourcePolicyError(
+                    "Scientific source returned an invalid redirect.",
+                    diagnostic=self._diagnostic(
+                        tool_name=tool_name,
+                        url=str(response.url),
+                        category="invalid_redirect",
+                        retryable=False,
+                        attempt_number=attempt_number,
+                        duration_ms=self._elapsed_ms(started),
+                        http_status=response.status_code,
+                        final_host=(response.url.host or "").lower().rstrip(".") or None,
+                        exception_class="SourcePolicyError",
+                    ),
+                )
+            redirected = str(response.url.join(location))
+            try:
+                self._validate_url(redirected)
+            except SourcePolicyError as exc:
+                raise SourcePolicyError(
+                    "Scientific source redirected to a prohibited destination.",
+                    diagnostic=self._diagnostic(
+                        tool_name=tool_name,
+                        url=str(response.url),
+                        category="redirect_not_approved",
+                        retryable=False,
+                        attempt_number=attempt_number,
+                        duration_ms=self._elapsed_ms(started),
+                        http_status=response.status_code,
+                        final_host=(response.url.host or "").lower().rstrip(".") or None,
+                        exception_class=type(exc).__name__,
+                        developer_message=(
+                            "Redirect target host failed the scientific-source allowlist."
+                        ),
+                    ),
+                ) from exc
+            current_url = redirected
+            current_params = None
+        raise SourcePolicyError(
+            "Scientific source exceeded the approved redirect limit.",
+            diagnostic=self._diagnostic(
+                tool_name=tool_name,
+                url=current_url,
+                category="redirect_limit_exceeded",
+                retryable=False,
+                attempt_number=attempt_number,
+                duration_ms=self._elapsed_ms(started),
+                exception_class="SourcePolicyError",
+            ),
+        )
+
+    @staticmethod
+    def _elapsed_ms(started: float) -> int:
+        return max(0, int((time.monotonic() - started) * 1000))
+
+    @staticmethod
+    def _safe_source_url(url: str) -> str:
+        """Retain reproducible public parameters while dropping credentials and PII."""
+        parsed = urlparse(url)
+        sensitive = {"api_key", "access_token", "token", "key", "email"}
+        query = urlencode(
+            [
+                (name, value)
+                for name, value in parse_qsl(parsed.query)
+                if name.casefold() not in sensitive
+            ]
+        )
+        return urlunparse(parsed._replace(query=query, fragment=""))
+
+    @staticmethod
+    def _diagnostic(
+        *,
+        tool_name: str,
+        url: str,
+        category: str,
+        retryable: bool = False,
+        attempt_number: int = 1,
+        duration_ms: int = 0,
+        http_status: int | None = None,
+        final_host: str | None = None,
+        content_type: str | None = None,
+        response_byte_count: int | None = None,
+        exception_class: str | None = None,
+        developer_message: str | None = None,
+    ) -> SourceToolDiagnostic:
+        parsed = urlparse(url)
+        return SourceToolDiagnostic(
+            tool_name=tool_name,
+            source_host=(parsed.hostname or "unknown").lower().rstrip("."),
+            safe_url_path=parsed.path or "/",
+            http_status=http_status,
+            final_approved_host=final_host,
+            content_type=content_type,
+            response_byte_count=response_byte_count,
+            exception_class=exception_class,
+            source_error_category=category,
+            retryable=retryable,
+            attempt_number=attempt_number,
+            request_duration_ms=duration_ms,
+            developer_message=developer_message,
+        )
 
     @staticmethod
     def _validate_url(url: str) -> None:

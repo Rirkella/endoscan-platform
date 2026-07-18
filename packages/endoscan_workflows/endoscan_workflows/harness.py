@@ -333,6 +333,17 @@ class AgentHarness:
                     )
                 else:
                     call_id, tool_result = self._invoke_tool(run_id, request, requested, tool_calls)
+                source_diagnostics = []
+                if tool_result.source_diagnostic:
+                    source_diagnostics.append(
+                        tool_result.source_diagnostic.model_dump(mode="json")
+                    )
+                if isinstance(tool_result.output, dict):
+                    for candidate_result in tool_result.output.get("results", []):
+                        if isinstance(candidate_result, dict) and isinstance(
+                            candidate_result.get("source_diagnostic"), dict
+                        ):
+                            source_diagnostics.append(candidate_result["source_diagnostic"])
                 emit(
                     "tool_call.completed",
                     tool_result.status.value,
@@ -345,6 +356,12 @@ class AgentHarness:
                     normalization_warning_codes=[
                         warning.code for warning in tool_result.normalization_warnings
                     ],
+                    source_diagnostic=(
+                        tool_result.source_diagnostic.model_dump(mode="json")
+                        if tool_result.source_diagnostic
+                        else None
+                    ),
+                    source_diagnostics=source_diagnostics,
                 )
                 history.append(
                     {
@@ -354,6 +371,11 @@ class AgentHarness:
                         "error": tool_result.error.model_dump(mode="json")
                         if tool_result.error
                         else None,
+                        "source_diagnostic": (
+                            tool_result.source_diagnostic.model_dump(mode="json")
+                            if tool_result.source_diagnostic
+                            else None
+                        ),
                     }
                 )
                 if tool_result.status is not ToolCallStatus.COMPLETED:
@@ -368,6 +390,13 @@ class AgentHarness:
                         turns,
                         tool_calls,
                         started,
+                        retryable=(
+                            tool_result.error.retryable if tool_result.error else False
+                        ),
+                        category=(
+                            tool_result.error.category if tool_result.error else "agent_runtime"
+                        ),
+                        source_diagnostic=tool_result.source_diagnostic,
                     )
                 continue
             if turn.kind == "approval":
@@ -544,7 +573,16 @@ class AgentHarness:
                         category=result.error.category,
                         retryable=int(result.error.retryable),
                         safe_message=result.error.safe_message,
-                        detail_json=canonical_json(versioned_payload(agent_run_id=run_id)),
+                        detail_json=canonical_json(
+                            versioned_payload(
+                                agent_run_id=run_id,
+                                source_diagnostic=(
+                                    result.error.source_diagnostic.model_dump(mode="json")
+                                    if result.error.source_diagnostic
+                                    else None
+                                ),
+                            )
+                        ),
                         created_at=utc_text(),
                     )
                 )
@@ -684,6 +722,17 @@ class AgentHarness:
                     "normalization_warning_codes": [
                         warning["code"] for warning in normalization_warnings
                     ],
+                    "source_diagnostic": (
+                        result.source_diagnostic.model_dump(mode="json")
+                        if result.source_diagnostic
+                        else None
+                    ),
+                    "source_diagnostics": [
+                        item.get("source_diagnostic")
+                        for item in (result.output or {}).get("results", [])
+                        if isinstance(item, dict)
+                        and isinstance(item.get("source_diagnostic"), dict)
+                    ],
                 },
                 from_state=build.current_stage,
                 to_state=build.current_stage,
@@ -805,6 +854,8 @@ class AgentHarness:
         started,
         *,
         retryable: bool | None = None,
+        category: str = "agent_runtime",
+        source_diagnostic=None,
     ):
         return AgentRunResult(
             status=status,
@@ -818,7 +869,8 @@ class AgentHarness:
                     if retryable is not None
                     else code in {"provider_timeout", "provider_failure", "tool_timeout"}
                 ),
-                category="agent_runtime",
+                category=category,
+                source_diagnostic=source_diagnostic,
             ),
             turns=turns,
             tool_calls=tool_calls,

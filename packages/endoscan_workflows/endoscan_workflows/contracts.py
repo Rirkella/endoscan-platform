@@ -236,11 +236,31 @@ class UsageReport(StrictContract):
     provider_request_ids: list[str] = Field(default_factory=list)
 
 
+class SourceToolDiagnostic(StrictContract):
+    """Allowlisted scientific-source diagnostics safe for durable admin traces."""
+
+    tool_name: str = Field(pattern=r"^[a-z][a-z0-9_]{2,79}$")
+    source_host: str = Field(min_length=1, max_length=253)
+    safe_url_path: str = Field(pattern=r"^/", max_length=500)
+    http_method: Literal["GET"] = "GET"
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    final_approved_host: str | None = Field(default=None, max_length=253)
+    content_type: str | None = Field(default=None, max_length=160)
+    response_byte_count: int | None = Field(default=None, ge=0)
+    exception_class: str | None = Field(default=None, max_length=160)
+    source_error_category: str = Field(min_length=1, max_length=120)
+    retryable: bool = False
+    attempt_number: int = Field(default=1, ge=1, le=10)
+    request_duration_ms: int = Field(default=0, ge=0)
+    developer_message: str | None = Field(default=None, max_length=500)
+
+
 class NormalizedAgentError(StrictContract):
     code: str = Field(min_length=1, max_length=120)
     safe_message: str = Field(min_length=1, max_length=2000)
     retryable: bool = False
     category: str = Field(default="provider", max_length=80)
+    source_diagnostic: SourceToolDiagnostic | None = None
 
 
 class ProviderPreflightResult(StrictContract):
@@ -348,6 +368,7 @@ class ToolResult(StrictContract):
     original_arguments: dict[str, Any] | None = None
     normalized_arguments: dict[str, Any] | None = None
     normalization_warnings: list[ToolNormalizationWarning] = Field(default_factory=list)
+    source_diagnostic: SourceToolDiagnostic | None = None
 
 
 class ProviderToolRequest(StrictContract):

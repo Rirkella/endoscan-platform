@@ -4,6 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from endoscan_workflows.benchmark import (
     BENCHMARK_CASES,
     deterministic_fixture_observations,
@@ -41,6 +44,7 @@ def candidate(*, evidence: list[EvidenceReference], status: str = "recommended_f
         recommendation_status=status,
         evidence_references=evidence,
         accession_verified=True,
+        geo_validation_status="public_valid",
     )
 
 
@@ -168,7 +172,7 @@ def test_all_zero_searches_have_a_valid_no_candidate_contract() -> None:
     assert parsed.requires_human_review is True
 
 
-def test_no_candidate_output_reaches_human_review_without_dataset_approval_claim(
+def test_no_candidate_output_fails_without_creating_dataset_approval(
     workflow_runtime,
 ) -> None:
     _database, store, _providers, _harness, service = workflow_runtime
@@ -213,12 +217,11 @@ def test_no_candidate_output_reaches_human_review_without_dataset_approval_claim
         actor="test-admin",
         idempotency_key="no-candidate-review-start",
     )
-    assert started.current_stage is WorkflowState.AWAITING_DATASET_APPROVAL
-    approval = next(
-        item for item in service.list_approvals(started.id) if item["status"] == "pending"
-    )
-    assert approval["request"]["requested_action"] == (
-        "Request a revised bounded search or cancel the workflow."
+    assert started.current_stage is WorkflowState.FAILED
+    assert started.pending_approval_id is None
+    assert not any(
+        item["approval_type"] == "dataset_selection"
+        for item in service.list_approvals(started.id)
     )
     candidate_artifact = next(
         item
@@ -227,6 +230,35 @@ def test_no_candidate_output_reaches_human_review_without_dataset_approval_claim
     )
     _descriptor, raw = store.get(candidate_artifact.id)
     assert json.loads(raw)["recommended_candidate_id"] is None
+
+
+def test_only_public_valid_geo_candidate_may_be_recommended() -> None:
+    evidence = [
+        EvidenceReference(
+            source_artifact_id="stored-artifact",
+            field_path="Series_title",
+            supports_claim="Candidate title",
+        )
+    ]
+    invalid = candidate(evidence=evidence).model_copy(
+        update={"geo_validation_status": "not_public"}
+    )
+    with pytest.raises(ValidationError, match="Only a public_valid GEO candidate"):
+        DiscoveryOutput(
+            endpoint_name="Oxidative stress",
+            endpoint_definition_summary="Response-defined endpoint",
+            run_mode="live",
+            live_discovery=True,
+            search_strategy="Search and validate GEO series.",
+            candidates=[invalid],
+            recommended_candidate_id=invalid.candidate_id,
+            recommendation="Review candidate-1.",
+            decision_summary="Candidate appears relevant but is not public.",
+            unresolved_questions=["Can the record be made public?"],
+            evidence_references=evidence,
+            limitations=["The record is not publicly retrievable."],
+            confidence_category="low",
+        )
 
 
 def test_replay_workflow_stops_at_dataset_approval_with_phase1_artifacts(

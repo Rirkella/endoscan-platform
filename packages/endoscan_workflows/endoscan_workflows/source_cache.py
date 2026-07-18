@@ -27,6 +27,7 @@ class CachedSourceResponse:
     retrieved_at: datetime
     expires_at: datetime
     fresh: bool
+    http_metadata: dict[str, Any]
 
 
 class SourceResponseCache:
@@ -78,6 +79,7 @@ class SourceResponseCache:
                 retrieved_at=parse_utc(row.retrieved_at),
                 expires_at=expires_at,
                 fresh=fresh,
+                http_metadata=json.loads(row.http_metadata_json),
             )
 
     def put(
@@ -125,6 +127,7 @@ class SourceResponseCache:
             retrieved_at=retrieved,
             expires_at=expires,
             fresh=True,
+            http_metadata=http_metadata,
         )
 
     def invalidate(self, *, tool_name: str | None = None) -> int:

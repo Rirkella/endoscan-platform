@@ -299,6 +299,14 @@ class WorkflowService:
         )
         run_id, result = self.harness.run(request, DiscoveryOutput)
         if result.status.value != "completed" or result.output is None:
+            trace_artifact = self._persist_terminal_trace_artifact(
+                workflow_id=workflow_id,
+                step=step,
+                run_id=run_id,
+                request=request,
+                result=result,
+                idempotency_key=f"{idempotency_key}:trace-artifact",
+            )
             with self.database.session() as session:
                 stored_step = session.get(WorkflowStepRow, step.id)
                 if stored_step and stored_step.status == StepStatus.RUNNING.value:
@@ -308,6 +316,9 @@ class WorkflowService:
                     )
                     if result.error:
                         stored_step.error_id = deterministic_id("err", run_id, result.error.code)
+                    stored_step.output_json = canonical_json(
+                        versioned_payload(trace_artifact_id=trace_artifact.id)
+                    )
                     stored_step.completed_at = utc_text()
             return self.transition(
                 workflow_id,
@@ -320,6 +331,7 @@ class WorkflowService:
                     reason=result.error.safe_message
                     if result.error
                     else "Discovery failed safely.",
+                    artifact_hashes=[trace_artifact.sha256],
                 ),
             )
         revision = step.attempt
@@ -411,6 +423,25 @@ class WorkflowService:
             },
             idempotency_key=f"{idempotency_key}:step-complete",
         )
+        artifact_hashes = [
+            candidate_artifact.sha256,
+            strategy_artifact.sha256,
+            recommendation_artifact.sha256,
+            trace_artifact.sha256,
+        ]
+        if output.recommended_candidate_id is None:
+            return self.transition(
+                workflow_id,
+                TransitionRequest(
+                    target_state=WorkflowState.FAILED,
+                    expected_version=expected_version,
+                    idempotency_key=f"{idempotency_key}:no-valid-candidate",
+                    initiator=ActorType.ORCHESTRATOR,
+                    initiator_id="workflow-service",
+                    reason="Discovery completed without a public_valid dataset recommendation.",
+                    artifact_hashes=artifact_hashes,
+                ),
+            )
         self.transition(
             workflow_id,
             TransitionRequest(
@@ -420,23 +451,14 @@ class WorkflowService:
                 initiator=ActorType.ORCHESTRATOR,
                 initiator_id="workflow-service",
                 reason=f"{run_mode.title()} candidates are ready for human dataset review.",
-                artifact_hashes=[
-                    candidate_artifact.sha256,
-                    strategy_artifact.sha256,
-                    recommendation_artifact.sha256,
-                    trace_artifact.sha256,
-                ],
+                artifact_hashes=artifact_hashes,
             ),
         )
         approval = ApprovalRequest(
             workflow_id=workflow_id,
             stage=WorkflowState.AWAITING_DATASET_APPROVAL,
             approval_type=ApprovalType.DATASET_SELECTION,
-            proposed_decision=(
-                f"Select one {run_mode} candidate from proposal revision {revision}."
-                if output.recommended_candidate_id
-                else f"Review the no-candidate search outcome for proposal revision {revision}."
-            ),
+            proposed_decision=f"Select one {run_mode} candidate from proposal revision {revision}.",
             evidence_summary=output.decision_summary,
             source_references=[candidate.source for candidate in output.candidates],
             limitations=output.limitations,
@@ -446,16 +468,118 @@ class WorkflowService:
                 recommendation_artifact.sha256,
             ],
             agent_recommendation=output.recommendation,
-            requested_action=(
-                "Approve, reject, request revision, or choose an alternative."
-                if output.recommended_candidate_id
-                else "Request a revised bounded search or cancel the workflow."
-            ),
+            requested_action="Approve, reject, request revision, or choose an alternative.",
         )
         self.create_approval(
             approval, idempotency_key=f"{idempotency_key}:dataset-approval-v{revision}"
         )
         return self.get_build(workflow_id)
+
+    def _persist_terminal_trace_artifact(
+        self,
+        *,
+        workflow_id: str,
+        step,
+        run_id: str,
+        request,
+        result,
+        idempotency_key: str,
+    ):
+        stored_run = self.agent_run(run_id)
+        tool_summaries = []
+        for call in stored_run.get("tool_calls", []):
+            result_payload = call.get("result") or {}
+            output = result_payload.get("output") or {}
+            bounded_output: dict = {}
+            if call.get("tool_name") == "search_geo_series":
+                bounded_output = {
+                    "rendered_query": output.get("rendered_query"),
+                    "result_count": output.get("result_count"),
+                    "accessions": [
+                        item.get("accession")
+                        for item in output.get("results", [])
+                        if isinstance(item, dict) and item.get("accession")
+                    ][:10],
+                    "source_artifact_id": output.get("source_artifact_id"),
+                    "cache_status": output.get("cache_status"),
+                }
+            elif call.get("tool_name") in {
+                "validate_geo_accession",
+                "validate_geo_accessions",
+            }:
+                validation_results = output.get("results") if isinstance(output, dict) else None
+                if not isinstance(validation_results, list):
+                    validation_results = [output] if isinstance(output, dict) else []
+                bounded_output = {
+                    "results": [
+                        {
+                            key: item.get(key)
+                            for key in (
+                                "accession",
+                                "status",
+                                "source_artifact_id",
+                                "source_artifact_sha256",
+                                "cache_status",
+                                "safe_warning_or_error_category",
+                                "retryable",
+                            )
+                        }
+                        for item in validation_results[:5]
+                        if isinstance(item, dict)
+                    ]
+                }
+            tool_summaries.append(
+                {
+                    "id": call.get("id"),
+                    "tool_name": call.get("tool_name"),
+                    "status": call.get("status"),
+                    "duration_ms": call.get("duration_ms"),
+                    "original_arguments": result_payload.get("original_arguments"),
+                    "normalized_arguments": result_payload.get("normalized_arguments"),
+                    "normalization_warnings": result_payload.get(
+                        "normalization_warnings", []
+                    ),
+                    "source_diagnostic": result_payload.get("source_diagnostic"),
+                    "error": result_payload.get("error"),
+                    "bounded_output": bounded_output,
+                }
+            )
+        artifact_references = [
+            {
+                "id": item.id,
+                "sha256": item.sha256,
+                "artifact_type": item.artifact_type,
+                "logical_name": item.logical_name,
+            }
+            for item in self.artifact_store.list_artifacts(workflow_id)
+        ]
+        return self.artifact_store.put_json(
+            workflow_id=workflow_id,
+            step_id=step.id,
+            value={
+                "run_mode": request.context.get("run_mode", "replay"),
+                "provider": request.model.provider,
+                "model": request.model.model_identifier,
+                "agent_run_id": run_id,
+                "status": result.status.value,
+                "turns": result.turns,
+                "usage": result.usage.model_dump(mode="json"),
+                "termination_reason": (
+                    result.error.model_dump(mode="json") if result.error else None
+                ),
+                "events": [event.model_dump(mode="json") for event in result.trace],
+                "tool_calls": tool_summaries,
+                "artifact_references": artifact_references,
+            },
+            artifact_type="search_trace",
+            logical_name=(
+                f"internal-agent-trace-{request.context.get('run_mode', 'replay')}-"
+                f"v{step.attempt}.json"
+            ),
+            producer="agent-harness",
+            original_source="endoscan://immutable-trace",
+            idempotency_key=idempotency_key,
+        )
 
     def transition(self, workflow_id: str, request: TransitionRequest) -> WorkflowSnapshot:
         with self.database.session() as session:
@@ -665,6 +789,7 @@ class WorkflowService:
                     "category": row.category,
                     "retryable": bool(row.retryable),
                     "safe_message": row.safe_message,
+                    "detail": load_versioned_json(row.detail_json),
                     "created_at": row.created_at,
                 }
                 for row in rows

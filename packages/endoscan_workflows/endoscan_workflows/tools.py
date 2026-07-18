@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +26,9 @@ from .contracts import (
     WorkflowState,
 )
 from .errors import AgentPolicyError
+from .source_security import SourceTimeoutError, SourceToolError
+
+logger = logging.getLogger("uvicorn.error.endoscan.workflow.source_tool")
 
 
 class ToolInput(BaseModel):
@@ -272,7 +276,58 @@ class ToolRegistry:
                     normalized_arguments=normalized.arguments,
                     normalization_warnings=list(normalized.warnings),
                 )
-            except Exception:
+            except SourceToolError as exc:
+                diagnostic = exc.diagnostic
+                logger.warning(
+                    "source_tool_failure tool_name=%s source_host=%s safe_url_path=%s "
+                    "http_method=%s http_status=%s final_approved_host=%s content_type=%s "
+                    "response_byte_count=%s exception_class=%s source_error_category=%s "
+                    "retryable=%s attempt_number=%s request_duration_ms=%s developer_message=%s",
+                    invocation.tool_name,
+                    diagnostic.source_host if diagnostic else None,
+                    diagnostic.safe_url_path if diagnostic else None,
+                    diagnostic.http_method if diagnostic else "GET",
+                    diagnostic.http_status if diagnostic else None,
+                    diagnostic.final_approved_host if diagnostic else None,
+                    diagnostic.content_type if diagnostic else None,
+                    diagnostic.response_byte_count if diagnostic else None,
+                    diagnostic.exception_class if diagnostic else type(exc).__name__,
+                    diagnostic.source_error_category if diagnostic else "source_tool_failure",
+                    exc.retryable,
+                    diagnostic.attempt_number if diagnostic else 1,
+                    diagnostic.request_duration_ms if diagnostic else 0,
+                    diagnostic.developer_message if diagnostic else None,
+                )
+                return ToolResult(
+                    tool_name=invocation.tool_name,
+                    status=(
+                        ToolCallStatus.TIMED_OUT
+                        if isinstance(exc, SourceTimeoutError)
+                        else ToolCallStatus.FAILED
+                    ),
+                    error=NormalizedAgentError(
+                        code=(
+                            f"source_{diagnostic.source_error_category}"
+                            if diagnostic
+                            else "source_tool_failure"
+                        ),
+                        safe_message=str(exc),
+                        retryable=exc.retryable,
+                        category="source_tool",
+                        source_diagnostic=diagnostic,
+                    ),
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    original_arguments=original_arguments,
+                    normalized_arguments=normalized.arguments,
+                    normalization_warnings=list(normalized.warnings),
+                    source_diagnostic=diagnostic,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "tool_failure tool_name=%s exception_class=%s retryable=false",
+                    invocation.tool_name,
+                    type(exc).__name__,
+                )
                 return ToolResult(
                     tool_name=invocation.tool_name,
                     status=ToolCallStatus.FAILED,
@@ -454,9 +509,10 @@ def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
         CompareDatasetCandidatesInput,
         CompareDatasetCandidatesOutput,
         GeoAccessionInput,
+        GeoAccessionsInput,
         GeoSampleDesignOutput,
         GeoSeriesMetadataOutput,
-        GeoValidationOutput,
+        GeoValidationBatchOutput,
         PublicationMetadataInput,
         PublicationMetadataOutput,
         SearchGeoSeriesInput,
@@ -491,11 +547,15 @@ def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
             SideEffectClassification.EXTERNAL_READ,
         ),
         (
-            "validate_geo_accession",
-            "Confirm that one GSE accession resolves through the official GEO source.",
-            GeoAccessionInput,
-            GeoValidationOutput,
-            discovery_service.validate_geo_accession,
+            "validate_geo_accessions",
+            (
+                "Validate one to five explicit GSE accessions independently through the official "
+                "GEO Accession Display machine-readable text contract. Use this bounded batch "
+                "immediately after search_geo_series. Only public_valid results may be recommended."
+            ),
+            GeoAccessionsInput,
+            GeoValidationBatchOutput,
+            discovery_service.validate_geo_accessions,
             ["source:geo:read"],
             SideEffectClassification.EXTERNAL_READ,
         ),

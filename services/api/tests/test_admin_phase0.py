@@ -3,11 +3,14 @@ from __future__ import annotations
 import hashlib
 from types import SimpleNamespace
 
+import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from endoscan_api import create_app
 from endoscan_workflows.preflight import ProviderAccessPreflight
+from endoscan_workflows.source_probe import GeoValidationProbe
+from endoscan_workflows.source_security import ScientificSourceClient
 
 ADMIN = {"X-EndoScan-Admin": "local-development"}
 
@@ -191,6 +194,106 @@ def test_adapter_boundary_probe_reaches_model_boundary_without_state_or_network(
             "network_requests": 0,
         }
         assert client.get("/admin/endpoint-builds", headers=ADMIN).json() == []
+
+
+def test_geo_validation_probe_uses_production_validator_without_agent_state(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+    captured: list[tuple[str, dict[str, str]]] = []
+    soft = "\n".join(
+        [
+            "^SERIES = GSE314406",
+            "!Series_geo_accession = GSE314406",
+            "!Series_status = Public on Jul 18 2026",
+            "!Series_title = Official probe fixture",
+            "!Series_type = Expression profiling by high throughput sequencing",
+            "!Series_sample_organism_ch1 = Homo sapiens",
+        ]
+    )
+
+    def official_geo(request: httpx.Request) -> httpx.Response:
+        captured.append((request.url.path, dict(request.url.params)))
+        return httpx.Response(
+            200,
+            text=soft,
+            headers={"content-type": "text/plain"},
+            request=request,
+        )
+
+    source_client = ScientificSourceClient(
+        transport=httpx.MockTransport(official_geo), sleep=lambda _seconds: None
+    )
+    app = create_app(repo_root)
+    app.state.geo_validation_probe = GeoValidationProbe(
+        artifact_root=tmp_path.parents[1] / f"probe-{tmp_path.name[-8:]}",
+        source_client=source_client,
+        ttl_seconds=86_400,
+    )
+    try:
+        with TestClient(app) as client:
+            with app.state.workflow_database.session() as session:
+                before = {
+                    "builds": session.execute(
+                        text("select count(*) from endpoint_builds")
+                    ).scalar_one(),
+                    "runs": session.execute(text("select count(*) from agent_runs")).scalar_one(),
+                }
+            response = post(
+                client,
+                "/admin/source-tools/geo-validation-probe",
+                {"accessions": ["GSE314406"]},
+                "geo-validation-probe",
+            )
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            assert payload["openai_calls"] == 0
+            assert payload["workflow_builds_created"] == 0
+            assert payload["agent_runs_created"] == 0
+            assert payload["results"][0]["status"] == "public_valid"
+            assert payload["results"][0]["title"] == "Official probe fixture"
+            with app.state.workflow_database.session() as session:
+                after = {
+                    "builds": session.execute(
+                        text("select count(*) from endpoint_builds")
+                    ).scalar_one(),
+                    "runs": session.execute(text("select count(*) from agent_runs")).scalar_one(),
+                }
+            assert after == before == {"builds": 0, "runs": 0}
+            assert captured == [
+                (
+                    "/geo/query/acc.cgi",
+                    {
+                        "acc": "GSE314406",
+                        "targ": "self",
+                        "view": "brief",
+                        "form": "text",
+                    },
+                )
+            ]
+    finally:
+        source_client.close()
+
+
+def test_geo_validation_probe_rejects_arbitrary_url_before_execution(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+    app = create_app(repo_root)
+
+    class ForbiddenProbe:
+        def run(self, _accessions):
+            raise AssertionError("Invalid probe input must not reach the source validator")
+
+    app.state.geo_validation_probe = ForbiddenProbe()
+    with TestClient(app) as client:
+        response = post(
+            client,
+            "/admin/source-tools/geo-validation-probe",
+            {"accessions": ["https://example.com/GSE314406"]},
+            "invalid-geo-probe",
+        )
+    assert response.status_code == 422
 
 
 def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:

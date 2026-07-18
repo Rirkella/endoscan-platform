@@ -16,7 +16,12 @@ from .auth import (
     require_mutation_budget,
     validate_resource_id,
 )
-from .schemas import ApprovalDecisionBody, CreateBuildBody, WorkflowCommandBody
+from .schemas import (
+    ApprovalDecisionBody,
+    CreateBuildBody,
+    GeoValidationProbeBody,
+    WorkflowCommandBody,
+)
 
 router = APIRouter(
     prefix="/admin",
@@ -46,6 +51,11 @@ def provider_preflight(request: Request):
 @router.post("/agent-provider/boundary-probe", dependencies=[Depends(require_mutation_budget)])
 def adapter_boundary_probe(request: Request):
     return request.app.state.adapter_boundary_probe.check()
+
+
+@router.post("/source-tools/geo-validation-probe", dependencies=[Depends(require_mutation_budget)])
+def geo_validation_probe(body: GeoValidationProbeBody, request: Request):
+    return request.app.state.geo_validation_probe.run(body.accessions)
 
 
 @router.post("/endpoint-builds", dependencies=[Depends(require_mutation_budget)])

@@ -36,9 +36,9 @@ class ToolCallModel(Model):
         return ModelResponse(
             output=[
                 ResponseFunctionToolCall(
-                    arguments='{"accession":"GSE12345"}',
+                    arguments='{"accessions":["GSE12345"]}',
                     call_id="call-offline-tool",
-                    name="validate_geo_accession",
+                    name="validate_geo_accessions",
                     type="function_call",
                 )
             ],
@@ -98,14 +98,14 @@ def test_production_agent_tools_and_output_schema_are_strict_sdk_inputs() -> Non
 
 def test_function_tool_proxy_uses_supported_signature_and_string_result() -> None:
     adapter = OpenAIAgentProvider(AgentConfiguration(), registry())
-    tool = adapter._proxy_tool("validate_geo_accession")
-    raw = asyncio.run(tool.on_invoke_tool(None, '{"accession":"GSE12345"}'))
+    tool = adapter._proxy_tool("validate_geo_accessions")
+    raw = asyncio.run(tool.on_invoke_tool(None, '{"accessions":["GSE12345"]}'))
     payload = json.loads(raw)
     assert isinstance(raw, str)
     assert payload == {
         TOOL_ENVELOPE: True,
-        "arguments": {"accession": "GSE12345"},
-        "tool_name": "validate_geo_accession",
+        "arguments": {"accessions": ["GSE12345"]},
+        "tool_name": "validate_geo_accessions",
     }
 
 
@@ -132,5 +132,5 @@ def test_sdk_stop_on_first_tool_returns_proxy_envelope_to_endoscan_harness() -> 
     )
     turn = adapter._translate_result(result)
     assert turn.kind == "tool"
-    assert turn.tool_request.tool_name == "validate_geo_accession"
-    assert turn.tool_request.arguments == {"accession": "GSE12345"}
+    assert turn.tool_request.tool_name == "validate_geo_accessions"
+    assert turn.tool_request.arguments == {"accessions": ["GSE12345"]}

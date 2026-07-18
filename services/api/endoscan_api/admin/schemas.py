@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from endoscan_workflows.contracts import ApprovalDecisionValue
@@ -21,6 +23,12 @@ class CreateBuildBody(AdminRequest):
 class WorkflowCommandBody(AdminRequest):
     expected_version: int = Field(ge=0)
     actor: str = Field(default="local-admin", min_length=2, max_length=120)
+
+
+class GeoValidationProbeBody(AdminRequest):
+    accessions: list[Annotated[str, Field(pattern=r"^GSE[1-9][0-9]{1,8}$")]] = Field(
+        min_length=1, max_length=5
+    )
 
 
 class ApprovalDecisionBody(AdminRequest):
