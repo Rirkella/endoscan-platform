@@ -4,8 +4,10 @@ import hashlib
 import logging
 from pathlib import Path
 
+import httpx
 import pytest
 
+from endoscan_workflows.config import AgentConfiguration, AgentRunMode
 from endoscan_workflows.contracts import (
     ActorType,
     AgentRunStatus,
@@ -21,7 +23,9 @@ from endoscan_workflows.discovery import DiscoveryOutput, discovery_request
 from endoscan_workflows.errors import GuardNotSatisfied
 from endoscan_workflows.harness import AgentHarness
 from endoscan_workflows.providers import FakeAgentProvider, ProviderFailure, ProviderRegistry
+from endoscan_workflows.source_security import ScientificSourceClient
 from endoscan_workflows.testing import phase0_test_tool_registry
+from endoscan_workflows.tools import EchoOutput
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -348,11 +352,11 @@ def test_local_sdk_diagnostic_is_internal_and_does_not_store_request_prompt(
 
 
 @pytest.mark.parametrize(
-    ("retryable", "expected_step_status", "expected_calls"),
-    [(False, "failed", 1), (True, "failed_retryable", 2)],
+    ("retryable", "expected_step_status"),
+    [(False, "failed"), (True, "failed_retryable")],
 )
-def test_provider_retryability_agrees_across_result_error_and_step(
-    workflow_runtime, retryable: bool, expected_step_status: str, expected_calls: int
+def test_live_provider_failure_is_never_automatically_retried(
+    workflow_runtime, retryable: bool, expected_step_status: str
 ) -> None:
     database, _store, _providers, _harness, service = workflow_runtime
 
@@ -371,8 +375,13 @@ def test_provider_retryability_agrees_across_result_error_and_step(
 
     provider = ClassifiedFailureProvider()
     registry = ProviderRegistry()
-    registry.register("fake", lambda: provider)
+    registry.register("openai", lambda: provider)
     service.harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    service.agent_configuration = AgentConfiguration(
+        provider="openai",
+        run_mode=AgentRunMode.LIVE,
+        api_key="test-only-placeholder",
+    )
     created = service.create_build(
         EndpointBuildCreate(
             endpoint_name="Retryability test",
@@ -389,12 +398,18 @@ def test_provider_retryability_agrees_across_result_error_and_step(
         idempotency_key=f"retryability-start-{retryable}",
     )
     assert failed.current_stage is WorkflowState.FAILED
-    assert provider.calls == expected_calls
+    assert provider.calls == 1
     error = service.errors(created.id)[-1]
     step = service.steps(created.id)[-1]
     assert error["retryable"] is retryable
     assert step["status"] == expected_step_status
     assert step["error_id"] == error["id"]
+    run = service.agent_run(service.agent_runs(created.id)[-1]["id"])
+    assert run["request"]["budget"]["retry_count"] == 0
+    assert (
+        sum(event["event_type"] == "provider.turn.started" for event in run["trace"]["events"]) == 1
+    )
+    assert not any(event["event_type"] == "provider.retry" for event in run["trace"]["events"])
     if not retryable:
         with pytest.raises(GuardNotSatisfied, match="not retryable"):
             service.retry_failed(
@@ -407,9 +422,86 @@ def test_provider_retryability_agrees_across_result_error_and_step(
 
 def test_transient_provider_failure_retries(workflow_runtime) -> None:
     _build, _discovering, _step, request, harness, _service = harness_context(workflow_runtime)
-    _run_id, result = harness.run(with_mode(request, "transient_failure"), DiscoveryOutput)
+    retrying = with_mode(request, "transient_failure").model_copy(
+        update={"budget": request.budget.model_copy(update={"retry_count": 1})}
+    )
+    _run_id, result = harness.run(retrying, DiscoveryOutput)
     assert result.status is AgentRunStatus.COMPLETED
     assert any(event.event_type == "provider.retry" for event in result.trace)
+
+
+def test_source_http_retries_do_not_create_extra_provider_invocations(workflow_runtime) -> None:
+    database, _store, _providers, _harness, _service = workflow_runtime
+    _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
+    source_requests = 0
+
+    def source_transport(_request: httpx.Request) -> httpx.Response:
+        nonlocal source_requests
+        source_requests += 1
+        if source_requests < 3:
+            return httpx.Response(429, headers={"content-type": "application/json"})
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={"ok": True},
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(source_transport),
+        sleep=lambda _seconds: None,
+    )
+    tools = phase0_test_tool_registry()
+
+    def source_backed_tool(_request) -> EchoOutput:
+        client.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi",
+            accepted_types={"application/json"},
+        )
+        return EchoOutput(value="source-retrieved")
+
+    tools.get("test_success").implementation = source_backed_tool
+
+    class CountingProvider:
+        name = "counting"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs) -> ProviderTurn:
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="test_success",
+                        arguments={"value": "retrieve"},
+                        idempotency_key="source-retry-tool-call",
+                    ),
+                )
+            return ProviderTurn(kind="output", output={"value": "done"})
+
+    provider = CountingProvider()
+    registry = ProviderRegistry()
+    registry.register("counting", lambda: provider)
+    harness = AgentHarness(database, registry, tools)
+    source_request = request.model_copy(
+        update={
+            "model": request.model.model_copy(update={"provider": "counting"}),
+            "output_schema_name": EchoOutput.__name__,
+            "available_tools": ["test_success"],
+            "context": {**request.context, "permission_scope": ["test:invoke"]},
+            "budget": request.budget.model_copy(update={"retry_count": 0}),
+        }
+    )
+    try:
+        _run_id, result = harness.run(source_request, EchoOutput)
+    finally:
+        client.close()
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert source_requests == 3
+    assert provider.calls == 2
+    assert not any(event.event_type == "provider.retry" for event in result.trace)
 
 
 def test_approval_interruption_is_typed(workflow_runtime) -> None:

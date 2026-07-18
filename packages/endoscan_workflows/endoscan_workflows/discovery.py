@@ -156,7 +156,7 @@ def discovery_request(
             maximum_input_tokens=configuration.maximum_input_tokens,
             maximum_output_tokens=configuration.maximum_output_tokens,
             maximum_cost_cents=configuration.maximum_cost_usd * 100,
-            retry_count=1,
+            retry_count=configuration.retry_count,
         ),
     )
 

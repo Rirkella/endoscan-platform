@@ -207,6 +207,7 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
         assert capabilities["run_mode"] == "replay"
         assert capabilities["api_key_present"] is False
         assert capabilities["source_tools_available"] is True
+        assert capabilities["configured_budget"]["retry_count"] == 0
         assert "api_key" not in capabilities
         assert health["agent_provider"]["live_model_api"] is False
         assert health["admin"]["development_mode"] is True

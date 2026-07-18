@@ -141,7 +141,7 @@ export function AdminEndpoints() {
 
       <div className="admin-mode-row" role="note">
         <strong>{capabilities?.run_mode === "live" ? "Live agent mode" : capabilities?.run_mode === "cached" ? "Cached mode" : "Replay mode"}</strong>
-        <span>{capabilities ? `${capabilities.provider} · ${capabilities.model} · API key present: ${capabilities.api_key_present ? "yes" : "no"} · source tools: ${capabilities.source_tools_available ? "available" : "unavailable"} · tracing: ${capabilities.tracing_enabled ? "enabled" : "disabled"} · budget: ${capabilities.configured_budget.maximum_tool_calls} tools / $${capabilities.configured_budget.maximum_cost_usd.toFixed(2)}` : "Configuration status is unavailable; the Admin Console remains usable with replay data."}</span>
+        <span>{capabilities ? `${capabilities.provider} · ${capabilities.model} · API key present: ${capabilities.api_key_present ? "yes" : "no"} · source tools: ${capabilities.source_tools_available ? "available" : "unavailable"} · tracing: ${capabilities.tracing_enabled ? "enabled" : "disabled"} · budget: ${capabilities.configured_budget.maximum_tool_calls} tools / $${capabilities.configured_budget.maximum_cost_usd.toFixed(2)} · provider retries: ${capabilities.configured_budget.retry_count}` : "Configuration status is unavailable; the Admin Console remains usable with replay data."}</span>
         {capabilities && !capabilities.live_mode_enabled && <span>Live runs are disabled because no OpenAI API key is configured. Replay remains available.</span>}
         <button className="admin-secondary" disabled={checkingProvider} onClick={() => void checkProviderAccess()}>
           {checkingProvider ? "Checking provider access..." : "Check provider access"}

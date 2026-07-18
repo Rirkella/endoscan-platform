@@ -27,6 +27,7 @@ class AgentConfiguration(BaseModel):
     maximum_input_tokens: int = Field(default=12_000, ge=1)
     maximum_output_tokens: int = Field(default=3_000, ge=1)
     maximum_cost_usd: float = Field(default=0.50, ge=0, le=100)
+    retry_count: int = Field(default=0, ge=0, le=0)
     input_cost_per_million_usd: float = Field(default=0.75, ge=0)
     output_cost_per_million_usd: float = Field(default=4.50, ge=0)
     tracing_enabled: bool = False
@@ -120,6 +121,7 @@ class AgentConfiguration(BaseModel):
                 "maximum_input_tokens": self.maximum_input_tokens,
                 "maximum_output_tokens": self.maximum_output_tokens,
                 "maximum_cost_usd": self.maximum_cost_usd,
+                "retry_count": self.retry_count,
                 "input_cost_per_million_usd": self.input_cost_per_million_usd,
                 "output_cost_per_million_usd": self.output_cost_per_million_usd,
             },

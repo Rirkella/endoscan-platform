@@ -116,6 +116,8 @@ def test_configuration_honors_bounded_live_settings(monkeypatch) -> None:
     assert configuration.run_mode is AgentRunMode.LIVE
     assert configuration.maximum_tool_calls == 4
     assert configuration.maximum_cost_usd == 0.20
+    assert configuration.retry_count == 0
+    assert configuration.public_status()["configured_budget"]["retry_count"] == 0
     assert "unit-test-key-never-display" not in json.dumps(configuration.public_status())
 
 

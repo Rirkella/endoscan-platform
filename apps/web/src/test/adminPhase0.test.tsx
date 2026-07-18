@@ -390,6 +390,7 @@ describe("Phase-1 live discovery presentation", () => {
             maximum_input_tokens: 3000,
             maximum_output_tokens: 1000,
             maximum_cost_usd: 0.2,
+            retry_count: 0,
             input_cost_per_million_usd: 0.75,
             output_cost_per_million_usd: 4.5,
           },
@@ -409,6 +410,7 @@ describe("Phase-1 live discovery presentation", () => {
     expect(screen.getByText("API credentials accepted: yes")).toBeInTheDocument();
     expect(screen.getByText("Configured model accessible: yes")).toBeInTheDocument();
     expect(screen.getByText("Billing and generation: not checked")).toBeInTheDocument();
+    expect(screen.getByText(/provider retries: 0/)).toBeInTheDocument();
     expect(preflightCalls).toBe(1);
   });
 
@@ -458,6 +460,7 @@ describe("Phase-1 live discovery presentation", () => {
             maximum_input_tokens: 12000,
             maximum_output_tokens: 3000,
             maximum_cost_usd: 0.5,
+            retry_count: 0,
             input_cost_per_million_usd: 0.75,
             output_cost_per_million_usd: 4.5,
           },
