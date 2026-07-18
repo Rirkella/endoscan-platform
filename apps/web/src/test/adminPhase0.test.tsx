@@ -385,10 +385,10 @@ describe("Phase-1 live discovery presentation", () => {
           tracing_enabled: false,
           configured_budget: {
             maximum_turns: 6,
-            maximum_tool_calls: 4,
-            timeout_seconds: 90,
-            maximum_input_tokens: 3000,
-            maximum_output_tokens: 1000,
+            maximum_tool_calls: 6,
+            timeout_seconds: 120,
+            maximum_input_tokens: 8000,
+            maximum_output_tokens: 1500,
             maximum_cost_usd: 0.2,
             retry_count: 0,
             input_cost_per_million_usd: 0.75,
@@ -497,9 +497,24 @@ describe("Phase-1 live discovery presentation", () => {
       provider: "openai",
       model_identifier: "gpt-5.4-mini",
       run_mode: "live" as const,
+      turns: 2,
       duration_ms: 1540,
-      usage: { input_tokens: 1000, output_tokens: 500, cost_cents: 0.3 },
-      tools: [{ id: "tool-live", tool_name: "validate_geo_accession", status: "completed", duration_ms: 40 }],
+      usage: { input_tokens: 3880, output_tokens: 500, cached_tokens: 120, cost_cents: 0.3 },
+      tools: [{ id: "tool-live", tool_name: "search_geo_series", status: "completed", duration_ms: 40 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: { output: {
+          rendered_query: '"oxidative stress"[All Fields] AND "Homo sapiens"[Organism]',
+          result_count: 2,
+          cache_status: "live",
+          strategy_reason: "Focused human oxidative-stress search.",
+        } },
+      }],
+      trace: { events: [
+        { event_type: "provider.turn.completed" },
+        { event_type: "tool_call.completed" },
+        { event_type: "provider.turn.completed" },
+      ] },
     };
     const liveCandidates = [
       {
@@ -563,9 +578,65 @@ describe("Phase-1 live discovery presentation", () => {
     expect(screen.getByText("Are the treatment labels scientifically acceptable?")).toBeInTheDocument();
     expect(screen.getByText("gpt-5.4-mini")).toBeInTheDocument();
     expect(screen.getByText("$0.0030")).toBeInTheDocument();
+    const activity = screen.getByRole("heading", { name: "Agent activity" }).closest("section")!;
+    expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("2");
+    expect(within(activity).getByText("Provider retries").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Tool calls").parentElement).toHaveTextContent("1");
+    expect(screen.getByText("Rendered GEO queries")).toBeInTheDocument();
+    expect(screen.getByText(/oxidative stress.*Homo sapiens/)).toBeInTheDocument();
+    expect(screen.getByText(/2 results/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh source metadata" })).toBeInTheDocument();
     expect(screen.queryByText(/chain of thought/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve dataset" })).toBeInTheDocument();
+  });
+
+  it("shows a no-candidate review without a false dataset approval action", async () => {
+    const noCandidateRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "approval_required",
+      turns: 3,
+      tools: [
+        { id: "tool-search-1", tool_name: "search_geo_series", status: "completed", duration_ms: 20 },
+        { id: "tool-search-2", tool_name: "search_geo_series", status: "completed", duration_ms: 20 },
+      ],
+    };
+    const noCandidateApproval: AdminApproval = {
+      ...approval,
+      request: {
+        ...approval.request,
+        proposed_decision: "Review the no-candidate search outcome.",
+        evidence_summary: "All bounded GEO searches returned zero suitable candidates.",
+        limitations: ["No candidate found under the current strategy."],
+        agent_recommendation: "No dataset recommendation.",
+        requested_action: "Request a revised bounded search or cancel.",
+      },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: {
+          artifact,
+          content: {
+            run_mode: "live",
+            live_discovery: true,
+            candidates,
+            recommended_candidate_id: null,
+          },
+        },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [noCandidateApproval] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [noCandidateRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: noCandidateRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Search review required")).toBeInTheDocument();
+    expect(screen.getByText("Bounded GEO searches found no suitable candidate")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request revised search" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed for review")).not.toBeInTheDocument();
   });
 
   it("shows a failed live run from persisted run truth without replay or review claims", async () => {
@@ -616,6 +687,8 @@ describe("Phase-1 live discovery presentation", () => {
     expect(screen.queryByRole("button", { name: "Retry failed step" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
     const activity = screen.getByRole("heading", { name: "Agent activity" }).closest("section")!;
-    expect(within(activity).getAllByText("0", { selector: "dd" })).toHaveLength(3);
+    expect(within(activity).getByText("Provider retries").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Tool calls").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("1");
   });
 });

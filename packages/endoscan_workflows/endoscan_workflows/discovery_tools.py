@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from xml.etree import ElementTree
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .artifacts import LocalArtifactStore
 from .config import AgentRunMode
@@ -32,9 +32,11 @@ class ToolContract(BaseModel):
 
 
 class SearchGeoSeriesInput(ToolContract):
-    query: str = Field(min_length=3, max_length=300)
-    organism_filters: list[str] = Field(default_factory=lambda: ["Homo sapiens"], max_length=5)
-    transcriptomic_platform_filters: list[str] = Field(default_factory=list, max_length=8)
+    scientific_terms: list[str] = Field(min_length=1, max_length=4)
+    organism_alternatives: list[str] = Field(default_factory=lambda: ["Homo sapiens"], max_length=4)
+    study_type_alternatives: list[str] = Field(default_factory=list, max_length=4)
+    cell_tissue_terms: list[str] = Field(default_factory=list, max_length=4)
+    treatment_terms: list[str] = Field(default_factory=list, max_length=4)
     maximum_results: int = Field(default=5, ge=1, le=10)
     publication_date_start: str | None = Field(
         default=None, pattern=r"^[0-9]{4}(/[0-9]{2}/[0-9]{2})?$"
@@ -42,14 +44,70 @@ class SearchGeoSeriesInput(ToolContract):
     publication_date_end: str | None = Field(
         default=None, pattern=r"^[0-9]{4}(/[0-9]{2}/[0-9]{2})?$"
     )
+    strategy_reason: str = Field(min_length=5, max_length=500)
+
+    @field_validator(
+        "scientific_terms",
+        "organism_alternatives",
+        "study_type_alternatives",
+        "cell_tissue_terms",
+        "treatment_terms",
+    )
+    @classmethod
+    def normalize_terms(cls, value: list[str]) -> list[str]:
+        normalized: dict[str, str] = {}
+        for item in value:
+            term = " ".join(item.split()).strip()
+            if not term or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .+/_-]{0,119}", term):
+                raise ValueError("search terms contain unsupported characters")
+            normalized.setdefault(term.casefold(), term)
+        return [normalized[key] for key in sorted(normalized)]
 
 
 class SearchGeoSeriesOutput(ToolContract):
     schema_version: str = "1.0.0"
+    typed_request: dict[str, Any]
+    rendered_query: str
+    normalized_query: str
+    strategy_reason: str
     results: list[dict[str, Any]]
+    result_count: int = Field(ge=0)
+    new_accession_count: int = Field(ge=0)
     retrieval_timestamp: datetime
     source_artifact_id: str
-    cache_status: Literal["live", "cached"]
+    cache_status: Literal["live", "cached", "not_executed"]
+    search_executed: bool = True
+    stop_reason: Literal["duplicate_query", "sufficient_candidates", "search_limit"] | None = None
+
+
+def render_geo_query(request: SearchGeoSeriesInput) -> str:
+    """Render a deterministic NCBI query: concepts use AND, alternatives use OR."""
+
+    def term(value: str, field: str) -> str:
+        return f'"{value}"[{field}]'
+
+    def alternatives(values: list[str], field: str) -> str | None:
+        if not values:
+            return None
+        rendered = [term(value, field) for value in values]
+        return rendered[0] if len(rendered) == 1 else f"({' OR '.join(rendered)})"
+
+    concepts = [term(value, "All Fields") for value in request.scientific_terms]
+    concepts.append("gse[Entry Type]")
+    for values, field in (
+        (request.organism_alternatives, "Organism"),
+        (request.study_type_alternatives, "All Fields"),
+        (request.cell_tissue_terms, "All Fields"),
+        (request.treatment_terms, "All Fields"),
+    ):
+        rendered = alternatives(values, field)
+        if rendered:
+            concepts.append(rendered)
+    if request.publication_date_start or request.publication_date_end:
+        start = request.publication_date_start or "1900"
+        end = request.publication_date_end or "3000"
+        concepts.append(f"{start}:{end}[Publication Date]")
+    return " AND ".join(concepts)
 
 
 class GeoAccessionInput(ToolContract):
@@ -153,27 +211,57 @@ class DiscoveryToolService:
         self.client = client
         self.ncbi_email = ncbi_email
         self.ncbi_api_key = ncbi_api_key
+        self._search_state: dict[tuple[str, str | None], dict[str, Any]] = {}
 
     def search_geo_series(
         self, request: SearchGeoSeriesInput, invocation: ToolInvocation
     ) -> SearchGeoSeriesOutput:
         args = request.model_dump(mode="json")
+        cache_args = {key: value for key, value in args.items() if key != "strategy_reason"}
+        rendered_query = render_geo_query(request)
+        normalized_query = rendered_query.casefold()
+        search_key = (_required(invocation.workflow_id, "workflow_id"), invocation.step_id)
+        state = self._search_state.setdefault(
+            search_key,
+            {"queries": {}, "seen_accessions": set(), "search_count": 0, "last": None},
+        )
+        prior = state["queries"].get(normalized_query)
+        if prior is not None:
+            return prior.model_copy(
+                update={
+                    "typed_request": args,
+                    "strategy_reason": request.strategy_reason,
+                    "results": [],
+                    "new_accession_count": 0,
+                    "cache_status": "not_executed",
+                    "search_executed": False,
+                    "stop_reason": "duplicate_query",
+                }
+            )
+        if len(state["seen_accessions"]) >= 2:
+            return self._skipped_search(
+                request,
+                rendered_query,
+                state["last"],
+                reason="sufficient_candidates",
+            )
+        if state["search_count"] >= 4:
+            return self._skipped_search(
+                request,
+                rendered_query,
+                state["last"],
+                reason="search_limit",
+            )
+        state["search_count"] += 1
 
         def retrieve() -> tuple[ScientificResponse, dict[str, Any]]:
-            terms = [request.query, "gse[Entry Type]"]
-            terms.extend(f'"{item}"[Organism]' for item in request.organism_filters)
-            terms.extend(request.transcriptomic_platform_filters)
-            if request.publication_date_start or request.publication_date_end:
-                start = request.publication_date_start or "1900"
-                end = request.publication_date_end or "3000"
-                terms.append(f"{start}:{end}[Publication Date]")
             common = self._eutils_params()
             search = self.client.get(
                 f"{EUTILS}/esearch.fcgi",
                 params={
                     **common,
                     "db": "gds",
-                    "term": " AND ".join(terms),
+                    "term": rendered_query,
                     "retmax": request.maximum_results,
                     "retmode": "json",
                 },
@@ -191,11 +279,15 @@ class DiscoveryToolService:
                 )
                 summaries = json.loads(summary_response.content).get("result", {})
             parsed_results = []
+            accessions = set()
             for uid in ids:
                 item = summaries.get(str(uid), {})
                 accession = str(item.get("accession") or item.get("Accession") or "").upper()
                 if not GSE_PATTERN.fullmatch(accession):
                     continue
+                if accession in accessions:
+                    continue
+                accessions.add(accession)
                 title = sanitize_untrusted_text(
                     str(item.get("title") or ""), source_id=f"geo:{accession}:title"
                 )
@@ -218,7 +310,12 @@ class DiscoveryToolService:
                         ],
                     }
                 )
-            combined = {"search": search_json, "summaries": summaries}
+            combined = {
+                "typed_request": args,
+                "rendered_query": rendered_query,
+                "search": search_json,
+                "summaries": summaries,
+            }
             combined_bytes = json.dumps(combined, sort_keys=True).encode()
             response = ScientificResponse(
                 url=summary_response.url,
@@ -228,16 +325,62 @@ class DiscoveryToolService:
                 headers={"content-type": "application/json"},
                 retrieved_at=summary_response.retrieved_at,
             )
-            return response, {"results": parsed_results}
+            return response, {
+                "results": parsed_results,
+                "result_count": len(parsed_results),
+                "retrieval_timestamp": datetime.fromtimestamp(
+                    response.retrieved_at, UTC
+                ).isoformat(),
+            }
 
         parsed, artifact_id, cache_status, _url = self._cached_source(
-            "search_geo_series", args, invocation, retrieve, suffix="json"
+            "search_geo_series", cache_args, invocation, retrieve, suffix="json"
         )
-        return SearchGeoSeriesOutput(
-            results=parsed.get("results", []),
-            retrieval_timestamp=datetime.now(UTC),
+        new_results = [
+            item
+            for item in parsed.get("results", [])
+            if item["accession"] not in state["seen_accessions"]
+        ]
+        state["seen_accessions"].update(item["accession"] for item in new_results)
+        output = SearchGeoSeriesOutput(
+            typed_request=args,
+            rendered_query=rendered_query,
+            normalized_query=normalized_query,
+            strategy_reason=request.strategy_reason,
+            results=new_results,
+            result_count=int(parsed.get("result_count", len(parsed.get("results", [])))),
+            new_accession_count=len(new_results),
+            retrieval_timestamp=parsed.get("retrieval_timestamp", datetime.now(UTC)),
             source_artifact_id=artifact_id,
             cache_status=cache_status,
+        )
+        state["queries"][normalized_query] = output
+        state["last"] = output
+        return output
+
+    @staticmethod
+    def _skipped_search(
+        request: SearchGeoSeriesInput,
+        rendered_query: str,
+        prior: SearchGeoSeriesOutput | None,
+        *,
+        reason: Literal["sufficient_candidates", "search_limit"],
+    ) -> SearchGeoSeriesOutput:
+        if prior is None:
+            raise SourceUnavailableError("No prior GEO search is available for bounded reuse.")
+        return prior.model_copy(
+            update={
+                "typed_request": request.model_dump(mode="json"),
+                "rendered_query": rendered_query,
+                "normalized_query": rendered_query.casefold(),
+                "strategy_reason": request.strategy_reason,
+                "results": [],
+                "result_count": 0,
+                "new_accession_count": 0,
+                "cache_status": "not_executed",
+                "search_executed": False,
+                "stop_reason": reason,
+            }
         )
 
     def validate_geo_accession(

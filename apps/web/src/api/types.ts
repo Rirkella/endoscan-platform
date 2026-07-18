@@ -120,7 +120,7 @@ export interface AdminAgentCapabilities {
     maximum_input_tokens: number;
     maximum_output_tokens: number;
     maximum_cost_usd: number;
-    retry_count: 0;
+    retry_count: number;
     input_cost_per_million_usd: number;
     output_cost_per_million_usd: number;
   };

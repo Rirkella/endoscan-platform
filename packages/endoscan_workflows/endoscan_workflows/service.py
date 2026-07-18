@@ -352,6 +352,9 @@ class WorkflowService:
                 "run_mode": run_mode,
                 "search_strategy": output.search_strategy,
                 "queries_executed": output.queries_executed,
+                "search_strategy_steps": [
+                    item.model_dump(mode="json") for item in output.search_strategy_steps
+                ],
                 "limitations": output.limitations,
             },
             artifact_type="search_strategy",
@@ -429,7 +432,11 @@ class WorkflowService:
             workflow_id=workflow_id,
             stage=WorkflowState.AWAITING_DATASET_APPROVAL,
             approval_type=ApprovalType.DATASET_SELECTION,
-            proposed_decision=f"Select one {run_mode} candidate from proposal revision {revision}.",
+            proposed_decision=(
+                f"Select one {run_mode} candidate from proposal revision {revision}."
+                if output.recommended_candidate_id
+                else f"Review the no-candidate search outcome for proposal revision {revision}."
+            ),
             evidence_summary=output.decision_summary,
             source_references=[candidate.source for candidate in output.candidates],
             limitations=output.limitations,
@@ -439,7 +446,11 @@ class WorkflowService:
                 recommendation_artifact.sha256,
             ],
             agent_recommendation=output.recommendation,
-            requested_action="Approve, reject, request revision, or choose an alternative.",
+            requested_action=(
+                "Approve, reject, request revision, or choose an alternative."
+                if output.recommended_candidate_id
+                else "Request a revised bounded search or cancel the workflow."
+            ),
         )
         self.create_approval(
             approval, idempotency_key=f"{idempotency_key}:dataset-approval-v{revision}"

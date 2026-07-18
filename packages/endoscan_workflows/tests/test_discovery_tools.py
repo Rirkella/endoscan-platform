@@ -13,6 +13,7 @@ from endoscan_workflows.discovery_tools import (
     GeoAccessionInput,
     SearchGeoSeriesInput,
     _parse_geo_soft,
+    render_geo_query,
 )
 from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_security import (
@@ -45,6 +46,17 @@ GEO_SOFT_FIXTURE = """^SERIES = GSE12345
 !Sample_characteristics_ch1 = dose: 10 uM
 !Sample_characteristics_ch1 = time: 24 h
 """
+
+
+def search_request(**updates) -> SearchGeoSeriesInput:
+    values = {
+        "scientific_terms": ["oxidative stress"],
+        "organism_alternatives": ["Homo sapiens"],
+        "study_type_alternatives": ["Expression profiling by high throughput sequencing"],
+        "strategy_reason": "Focused oxidative-stress transcriptomic search.",
+    }
+    values.update(updates)
+    return SearchGeoSeriesInput(**values)
 
 
 def invocation(workflow_id: str, *, mode: AgentRunMode, key: str = "tool-call") -> ToolInvocation:
@@ -86,6 +98,44 @@ def test_invalid_accession_is_rejected_before_network() -> None:
         GeoAccessionInput(accession="GSE0")
     with pytest.raises(ValidationError):
         GeoAccessionInput(accession="FABRICATED-123")
+
+
+def test_geo_query_uses_or_within_alternatives_and_and_between_concepts() -> None:
+    request = search_request(
+        scientific_terms=["transcriptomic perturbation", "oxidative stress"],
+        organism_alternatives=["Mus musculus", "Homo sapiens"],
+        study_type_alternatives=[
+            "Expression profiling by high throughput sequencing",
+            "Expression profiling by array",
+        ],
+    )
+    rendered = render_geo_query(request)
+    assert (
+        '"oxidative stress"[All Fields] AND "transcriptomic perturbation"[All Fields]' in rendered
+    )
+    assert '"Homo sapiens"[Organism] OR "Mus musculus"[Organism]' in rendered
+    assert (
+        '"Expression profiling by array"[All Fields] OR '
+        '"Expression profiling by high throughput sequencing"[All Fields]'
+    ) in rendered
+    assert '"Homo sapiens"[Organism] AND "Mus musculus"[Organism]' not in rendered
+    assert (
+        '"Expression profiling by array"[All Fields] AND '
+        '"Expression profiling by high throughput sequencing"[All Fields]'
+    ) not in rendered
+
+
+def test_geo_query_rendering_is_normalized_and_deterministic() -> None:
+    first = search_request(
+        organism_alternatives=["Mus musculus", "Homo sapiens", "Homo sapiens"],
+        study_type_alternatives=["sequencing", "array"],
+    )
+    second = search_request(
+        organism_alternatives=["Homo sapiens", "Mus musculus"],
+        study_type_alternatives=["array", "sequencing"],
+    )
+    assert first.model_dump() == second.model_dump()
+    assert render_geo_query(first) == render_geo_query(second)
 
 
 def test_disallowed_domain_and_private_network_are_rejected() -> None:
@@ -270,9 +320,135 @@ def test_search_geo_series_parses_only_real_series_accessions(workflow_runtime) 
     )
     service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
     output = service.search_geo_series(
-        SearchGeoSeriesInput(query="oxidative stress"),
+        search_request(),
         invocation(workflow_id, mode=AgentRunMode.LIVE, key="search"),
     )
     assert [item["accession"] for item in output.results] == ["GSE12345"]
     assert output.results[0]["sample_count"] == 12
+    assert output.result_count == 1
+    assert output.new_accession_count == 1
+    assert output.rendered_query == render_geo_query(search_request())
+    client.close()
+
+
+def test_duplicate_normalized_search_is_not_executed_twice(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.path.endswith("esearch.fcgi"):
+            body = {"esearchresult": {"idlist": ["1"]}}
+        else:
+            body = {"result": {"1": {"accession": "GSE12345", "title": "Series"}}}
+        return httpx.Response(
+            200,
+            json=body,
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    first = service.search_geo_series(
+        search_request(organism_alternatives=["Mus musculus", "Homo sapiens"]),
+        invocation(workflow_id, mode=AgentRunMode.LIVE, key="search-one"),
+    )
+    duplicate = service.search_geo_series(
+        search_request(organism_alternatives=["Homo sapiens", "Mus musculus"]),
+        invocation(workflow_id, mode=AgentRunMode.LIVE, key="search-two"),
+    )
+    assert first.search_executed is True
+    assert duplicate.search_executed is False
+    assert duplicate.stop_reason == "duplicate_query"
+    assert duplicate.results == []
+    assert calls == 2
+    client.close()
+
+
+def test_accessions_are_deduplicated_across_complementary_searches(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    search_number = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal search_number
+        if request.url.path.endswith("esearch.fcgi"):
+            search_number += 1
+            ids = ["1"] if search_number == 1 else ["1", "2"]
+            return httpx.Response(
+                200,
+                json={"esearchresult": {"idlist": ids}},
+                headers={"content-type": "application/json"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "1": {"accession": "GSE12345", "title": "First"},
+                    "2": {"accession": "GSE12346", "title": "Second"},
+                }
+            },
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    first = service.search_geo_series(
+        search_request(study_type_alternatives=["array"]),
+        invocation(workflow_id, mode=AgentRunMode.LIVE, key="search-array"),
+    )
+    second = service.search_geo_series(
+        search_request(study_type_alternatives=["sequencing"]),
+        invocation(workflow_id, mode=AgentRunMode.LIVE, key="search-sequencing"),
+    )
+    assert [item["accession"] for item in first.results] == ["GSE12345"]
+    assert [item["accession"] for item in second.results] == ["GSE12346"]
+    assert second.result_count == 2
+    assert second.new_accession_count == 1
+    client.close()
+
+
+def test_sufficient_candidates_stop_additional_geo_searches(workflow_runtime) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        body = (
+            {"esearchresult": {"idlist": ["1", "2"]}}
+            if request.url.path.endswith("esearch.fcgi")
+            else {
+                "result": {
+                    "1": {"accession": "GSE12345", "title": "First"},
+                    "2": {"accession": "GSE12346", "title": "Second"},
+                }
+            }
+        )
+        return httpx.Response(
+            200,
+            json=body,
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    service.search_geo_series(
+        search_request(study_type_alternatives=["array"]),
+        invocation(workflow_id, mode=AgentRunMode.LIVE, key="enough"),
+    )
+    stopped = service.search_geo_series(
+        search_request(study_type_alternatives=["sequencing"]),
+        invocation(workflow_id, mode=AgentRunMode.LIVE, key="stopped"),
+    )
+    assert stopped.search_executed is False
+    assert stopped.stop_reason == "sufficient_candidates"
+    assert calls == 2
     client.close()

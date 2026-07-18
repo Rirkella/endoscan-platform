@@ -161,6 +161,30 @@ def test_tool_request_is_translated_without_executing_tool() -> None:
     assert turn.tool_request.idempotency_key.startswith("openai-")
 
 
+def test_follow_up_context_is_compact_but_preserves_evidence_bindings() -> None:
+    history = [
+        {
+            "tool_name": "search_geo_series",
+            "output": {
+                "schema_version": "1.0.0",
+                "retrieval_timestamp": "2026-07-18T00:00:00Z",
+                "source_artifact_id": "artifact-safe-reference",
+                "results": [
+                    {"accession": f"GSE{10000 + index}", "summary": "x" * 2000}
+                    for index in range(9)
+                ],
+            },
+        }
+    ]
+    compact = OpenAIAgentProvider._compact_history(history)
+    output = compact[0]["output"]
+    assert "schema_version" not in output
+    assert "retrieval_timestamp" not in output
+    assert output["source_artifact_id"] == "artifact-safe-reference"
+    assert len(output["results"]) == 5
+    assert all(len(item["summary"]) == 1000 for item in output["results"])
+
+
 def test_provider_timeout_is_normalized() -> None:
     def timeout(*_args, **_kwargs):
         raise TimeoutError("provider internals must not leak")

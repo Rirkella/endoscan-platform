@@ -47,6 +47,7 @@ type Candidate = {
 
 type CandidateArtifact = {
   candidates?: Candidate[];
+  recommended_candidate_id?: string | null;
   run_mode?: "live" | "cached" | "replay";
   simulation_label?: string | null;
   live_discovery?: boolean;
@@ -83,11 +84,42 @@ function configuredModeLabel(mode: "live" | "cached" | "replay"): string {
   return mode === "live" ? "Live" : mode === "cached" ? "Cached" : "Replay";
 }
 
-function runStatusLabel(run: AdminAgentRun, mode: "live" | "cached" | "replay"): string {
+function runStatusLabel(
+  run: AdminAgentRun,
+  mode: "live" | "cached" | "replay",
+  hasRecommendation: boolean,
+): string {
   if (run.status === "failed") return mode === "live" ? "Live agent run failed" : "Agent run failed";
+  if (run.status === "budget_exceeded" && mode === "live") return "Live agent run stopped at the configured cumulative token budget.";
   if (run.status === "completed") return "Completed";
-  if (run.status === "approval_required") return "Completed for review";
+  if (run.status === "approval_required") return hasRecommendation ? "Completed for review" : "No dataset recommendation";
   return humanizeMachineValue(run.status);
+}
+
+function traceEventCount(run: AdminAgentRun, eventType: string): number {
+  return (run.trace?.events ?? []).filter((event) => event.event_type === eventType).length;
+}
+
+type GeoSearchSummary = {
+  renderedQuery: string;
+  resultCount: number;
+  cacheStatus: string;
+  strategyReason: string;
+};
+
+function geoSearchSummaries(run: AdminAgentRun): GeoSearchSummary[] {
+  return (run.tool_calls ?? []).flatMap((call) => {
+    if (call.tool_name !== "search_geo_series") return [];
+    const result = call.result as Record<string, unknown> | undefined;
+    const output = result?.output as Record<string, unknown> | undefined;
+    if (!output || typeof output.rendered_query !== "string") return [];
+    return [{
+      renderedQuery: output.rendered_query,
+      resultCount: typeof output.result_count === "number" ? output.result_count : 0,
+      cacheStatus: typeof output.cache_status === "string" ? output.cache_status : "unknown",
+      strategyReason: typeof output.strategy_reason === "string" ? output.strategy_reason : "Bounded GEO search",
+    }];
+  });
 }
 
 function safeDeveloperDiagnostic(run: AdminAgentRun): string | null {
@@ -113,6 +145,7 @@ export function AdminEndpointDetail() {
   const [trace, setTrace] = useState<AdminAgentRun | null>(null);
   const [errors, setErrors] = useState<AdminWorkflowError[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [recommendedCandidateId, setRecommendedCandidateId] = useState<string | null | undefined>(undefined);
   const [runMode, setRunMode] = useState<"live" | "cached" | "replay">("replay");
   const [simulationLabel, setSimulationLabel] = useState<string | null>(null);
   const [decisionSummary, setDecisionSummary] = useState("");
@@ -151,6 +184,7 @@ export function AdminEndpointDetail() {
         const preview = await api.adminArtifactPreview(candidateArtifact.id);
         const content = preview.content as CandidateArtifact;
         setCandidates(content.candidates ?? []);
+        setRecommendedCandidateId(content.recommended_candidate_id);
         setSelected((current) => current || content.candidates?.[0]?.candidate_id || "");
         setRunMode(persistedRunMode ?? content.run_mode ?? (content.live_discovery ? "live" : "replay"));
         setSimulationLabel(content.simulation_label ?? null);
@@ -158,6 +192,7 @@ export function AdminEndpointDetail() {
         setUnresolvedQuestions(content.unresolved_questions ?? []);
       } else {
         setCandidates([]);
+        setRecommendedCandidateId(undefined);
         setRunMode(persistedRunMode ?? "replay");
         setSimulationLabel(null);
         setDecisionSummary("");
@@ -225,8 +260,12 @@ export function AdminEndpointDetail() {
 
   const pending = approvals.find((item) => item.status === "pending") ?? null;
   const recommended = useMemo(
-    () => candidates.find((item, index) => candidateStatus(item, index) === "Recommended") ?? candidates[0],
-    [candidates],
+    () => recommendedCandidateId === null
+      ? undefined
+      : recommendedCandidateId
+        ? candidates.find((item) => item.candidate_id === recommendedCandidateId)
+        : candidates.find((item, index) => candidateStatus(item, index) === "Recommended") ?? candidates[0],
+    [candidates, recommendedCandidateId],
   );
   const agentTools = useMemo(
     () => trace?.tools ?? [],
@@ -246,6 +285,10 @@ export function AdminEndpointDetail() {
   const selectedIndex = Math.max(0, candidates.findIndex((candidate) => candidate.candidate_id === selected));
   const selectedCandidate = candidates[selectedIndex];
   const developerDiagnostic = trace ? safeDeveloperDiagnostic(trace) : null;
+  const providerRetries = trace ? traceEventCount(trace, "provider.retry") : 0;
+  const geoSearches = trace ? geoSearchSummaries(trace) : [];
+  const hasCompletedOutput = trace?.status === "completed" || trace?.status === "approval_required";
+  const hasCandidateRecommendation = Boolean(pending && recommended && candidates.length > 0);
 
   function requestConfirmation(kind: Confirmation["kind"], approval?: AdminApproval, trigger?: HTMLElement) {
     confirmationTrigger.current = trigger ?? null;
@@ -316,12 +359,12 @@ export function AdminEndpointDetail() {
             <div className="admin-decision-heading">
               <div>
                 <span className="admin-section-kicker">Human decision</span>
-                <h2 id="decision-title">{pending ? "Dataset review required" : "No review required"}</h2>
-                <p>{pending ? "Review the bounded recommendation before any data curation can begin." : "This workflow is not currently waiting for a reviewer."}</p>
+                <h2 id="decision-title">{pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
+                <p>{pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
               </div>
               {pending && <span className="admin-review-flag">Action required</span>}
             </div>
-            {pending ? (
+            {pending && hasCandidateRecommendation ? (
               <div className="admin-approval-card">
                 <div className="admin-recommendation">
                   <span>Recommended candidate</span>
@@ -348,6 +391,22 @@ export function AdminEndpointDetail() {
                   <button className="admin-secondary" disabled={busy || !comment} onClick={(event) => requestConfirmation("request_revision", pending, event.currentTarget)}>Request revision</button>
                   <button className="admin-danger-outline" disabled={busy || !comment} onClick={(event) => requestConfirmation("reject", pending, event.currentTarget)}>Reject</button>
                   {candidates.length > 1 && <button className="admin-link-button" disabled={busy || !selected || !comment} onClick={(event) => requestConfirmation("choose_alternative", pending, event.currentTarget)}>Select another candidate</button>}
+                </div>
+              </div>
+            ) : pending ? (
+              <div className="admin-approval-card admin-no-candidate-review">
+                <div className="admin-recommendation">
+                  <span>No dataset recommendation</span>
+                  <h3>Bounded GEO searches found no suitable candidate</h3>
+                  <p>{pending.request.evidence_summary}</p>
+                </div>
+                <div className="admin-decision-evidence">
+                  <div><h3>Limitations</h3><ul>{pending.request.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                </div>
+                <label className="admin-comment-field">Reviewer comment<textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Required to request a revised search" /></label>
+                <div className="admin-approval-actions">
+                  <button className="admin-secondary" disabled={busy || !comment} onClick={(event) => requestConfirmation("request_revision", pending, event.currentTarget)}>Request revised search</button>
+                  <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>
                 </div>
               </div>
             ) : <div className="admin-empty">The next workflow action is shown below.</div>}
@@ -420,19 +479,24 @@ export function AdminEndpointDetail() {
             {trace ? (
               <div className="admin-agent-summary">
                 <h3>{trace.agent_name}</h3>
-                <span className="admin-status">{runStatusLabel(trace, runMode)}</span>
+                <span className="admin-status">{runStatusLabel(trace, runMode, hasCandidateRecommendation)}</span>
                 <dl>
-                  <div><dt>Configured mode</dt><dd>{configuredModeLabel(runMode)}</dd></div>
+                  <div><dt>Mode</dt><dd>{configuredModeLabel(runMode)}</dd></div>
                   <div><dt>Final run status</dt><dd>{humanizeMachineValue(trace.status)}</dd></div>
-                  <div><dt>Output</dt><dd>{trace.status === "failed" ? "No recommendation available" : `${candidates.length} candidates prepared`}</dd></div>
-                  <div><dt>Tools used</dt><dd>{agentTools.length}</dd></div>
+                  <div><dt>Output</dt><dd>{hasCompletedOutput ? `${candidates.length} candidates prepared` : "No recommendation available"}</dd></div>
+                  <div><dt>Agent runs</dt><dd>{runs.length}</dd></div>
+                  <div><dt>Model turns</dt><dd>{trace.turns}</dd></div>
+                  <div><dt>Provider retries</dt><dd>{providerRetries}</dd></div>
+                  <div><dt>Tool calls</dt><dd>{agentTools.length}</dd></div>
                   <div><dt>Duration</dt><dd>{(trace.duration_ms / 1000).toFixed(2)} s</dd></div>
                   <div><dt>Provider</dt><dd>{trace.provider}</dd></div>
                   <div><dt>Model</dt><dd>{trace.model_identifier}</dd></div>
                   <div><dt>Input tokens</dt><dd>{usageNumber(trace, "input_tokens")}</dd></div>
                   <div><dt>Output tokens</dt><dd>{usageNumber(trace, "output_tokens")}</dd></div>
+                  <div><dt>Cached input tokens</dt><dd>{usageNumber(trace, "cached_tokens")}</dd></div>
                   <div><dt>Estimated cost</dt><dd>${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}</dd></div>
                 </dl>
+                {geoSearches.length > 0 && <div className="admin-trace-summary"><h4>Rendered GEO queries</h4><ol>{geoSearches.map((search, index) => <li key={`${search.renderedQuery}-${index}`}><strong>{search.strategyReason}</strong><code>{search.renderedQuery}</code><span>{search.resultCount} results / {search.cacheStatus}</span></li>)}</ol></div>}
                 {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
                 <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
                 <div className="admin-inline-actions">

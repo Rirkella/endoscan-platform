@@ -20,6 +20,12 @@ The adapter uses `openai-agents==0.18.2`, the Responses API path, strict Pydanti
 model turn per EndoScan turn, disabled parallel tool calls, and `store=False`. Configuration defaults
 to `gpt-5.4-mini` but domain code does not hard-code the model; deployments can override it.
 
+One agent run can contain several normal model turns. A normal turn may request one bounded tool;
+after EndoScan executes it, another normal model turn can consume the structured result. A provider
+retry is different: it repeats a failed provider call for the same turn. `retry_count=0` disables
+those retries without limiting the normal tool loop to one model request. Traces and the Admin
+Console therefore report agent runs, model turns, provider retries, and tool calls separately.
+
 ## Configuration and status
 
 The complete placeholder set is in `.env.example`. Core settings are:
@@ -64,6 +70,15 @@ organism, data type, sample count, biological context, treatment/control and dos
 strengths, limitations, exclusion reasons, status, and evidence references. There is no chain-of-
 thought or unbounded reasoning field.
 
+`search_geo_series` accepts a typed plan rather than an opaque URL or raw NCBI parameter string:
+scientific terms, organism alternatives, study-type alternatives, optional cell/tissue terms,
+optional treatment terms, an optional date range, maximum results, and a concise strategy reason.
+The deterministic renderer joins separate scientific concepts with `AND` and alternatives within
+one concept with `OR`. For example, oxidative stress is combined with
+`(Homo sapiens OR Mus musculus)` and
+`(expression profiling by array OR expression profiling by high throughput sequencing)`. It never
+renders human and mouse, or array and sequencing, as mutually mandatory `AND` filters.
+
 ## Bounded tools and sources
 
 The tool inventory is:
@@ -74,6 +89,19 @@ The tool inventory is:
 4. `inspect_geo_sample_design`
 5. `fetch_publication_metadata` for dataset-linked PMIDs only
 6. `compare_dataset_candidates`
+
+A run may execute at most four unique GEO searches within the six-call overall tool budget.
+Complementary focused searches are preferred over one compound query. Normalized duplicate queries
+are not executed twice, returned GSE accessions are deduplicated across searches, and broadening
+stops after two candidate accessions have been found. Candidate ranking begins only after official
+metadata validation. Each tool result and internal trace retains the typed request, rendered query,
+result count, retrieval timestamp, and cache status.
+
+After a zero-result first search, the agent may relax or split one bounded filter, replace a synonym,
+or remove an optional context constraint while remaining within transcriptomic GEO Series. If every
+bounded search is empty, the run returns a valid no-candidate `DiscoveryOutput` with a null
+recommendation ID, explicit limitations and unresolved questions. It reaches human review without
+showing a dataset-approval action; the reviewer can request a revised bounded search or cancel.
 
 Network access is limited to HTTPS on `eutils.ncbi.nlm.nih.gov` and `www.ncbi.nlm.nih.gov`. URLs are
 constructed internally from validated arguments. Redirects, userinfo, arbitrary hosts, private
@@ -115,6 +143,20 @@ count, and estimated cost. The harness enforces the configured turn/tool/token/c
 Admin Console shows the compact usage summary without hidden reasoning. For a non-default model,
 configure explicit per-million-token prices or the estimate remains zero rather than guessing.
 
+The controlled Phase-1 live defaults are six model turns, six total tool calls, 8,000 cumulative
+input tokens, 1,500 cumulative output tokens, `$0.20` estimated cost, zero provider retries, and a
+120-second timeout. All remain environment-configurable. Usage is checked after every successful
+model turn. Before another turn, the harness uses the previous measured turn as a conservative
+estimate and stops before the provider call when that estimate would exceed the remaining token or
+cost budget.
+
+Provider context is compacted between turns: only the six latest structured tool-result entries are
+retained; result, publication, and sample lists are capped at five; abstracts and summaries are
+truncated; schema versions and retrieval timestamps are excluded from model context. The immutable
+trace and source artifacts still preserve the audit data. For a two-turn discovery this removes
+repeated raw/audit payloads and is expected to save roughly 30-60% of follow-up prompt content,
+depending on GEO metadata size, without removing safety instructions, schemas, or evidence rules.
+
 ## Evaluation
 
 Run the deterministic CI benchmark without paid calls:
@@ -134,8 +176,9 @@ latency, tokens, and estimated cost. Normal CI uses mocks and replay and never r
 Use a monitored development environment, never a shared production deployment:
 
 1. Set `ENDOSCAN_ADMIN_MODE=development`, `ENDOSCAN_AGENT_PROVIDER=openai`,
-   `ENDOSCAN_AGENT_MODE=live`, `OPENAI_API_KEY`, and conservative budgets (for example four tool
-   calls, 3,000 input tokens, 1,000 output tokens, and `$0.20`).
+   `ENDOSCAN_AGENT_MODE=live`, `OPENAI_API_KEY`, and the controlled acceptance limits: six model
+   turns, six tool calls, 8,000 cumulative input tokens, 1,500 cumulative output tokens, `$0.20`,
+   zero provider retries, and 120 seconds.
 2. Start the normal API and web development services.
 3. Create one **Oxidative stress** endpoint build and start it once.
 4. Confirm every tool call is in the inventory, every GSE accession resolves at official GEO, source

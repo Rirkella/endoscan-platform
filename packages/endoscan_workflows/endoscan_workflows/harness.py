@@ -91,6 +91,9 @@ class AgentHarness:
         turns = 0
         tool_calls = 0
         validation_failures = 0
+        provider_invocations = 0
+        retries = 0
+        last_turn_usage: UsageReport | None = None
         provider = self.providers.create(request.model.provider)
 
         def emit(event_type: str, status: str = "", **detail: Any) -> None:
@@ -132,7 +135,6 @@ class AgentHarness:
             )
 
         emit("agent_run.started", "running", provider=provider.name)
-        retries = 0
         result: AgentRunResult | None = None
         while result is None:
             elapsed = time.monotonic() - started
@@ -160,8 +162,38 @@ class AgentHarness:
                     started,
                 )
                 break
-            turns += 1
-            emit("provider.turn.started", "running", turn=turns)
+            estimated_budget_error = self._estimated_next_turn_budget_error(
+                request, usage, last_turn_usage
+            )
+            if estimated_budget_error:
+                code, estimate = estimated_budget_error
+                emit(
+                    "agent_run.budget_precheck_failed",
+                    "budget_exceeded",
+                    code=code,
+                    completed_model_turns=turns,
+                    **estimate,
+                )
+                result = self._failure(
+                    AgentRunStatus.BUDGET_EXCEEDED,
+                    code,
+                    self._budget_message(code),
+                    trace,
+                    usage,
+                    turns,
+                    tool_calls,
+                    started,
+                )
+                break
+            turn_number = turns + 1
+            provider_invocations += 1
+            emit(
+                "provider.turn.started",
+                "running",
+                turn=turn_number,
+                provider_invocation=provider_invocations,
+                retry_attempt=retries,
+            )
             try:
                 turn = self._provider_turn(
                     provider,
@@ -172,7 +204,8 @@ class AgentHarness:
                 )
             except (ProviderTimeout, FutureTimeout) as exc:
                 timeout_detail = {
-                    "turn": turns,
+                    "turn": turn_number,
+                    "provider_invocation": provider_invocations,
                     "retryable": True,
                     **getattr(
                         exc,
@@ -198,7 +231,8 @@ class AgentHarness:
                 break
             except ProviderFailure as exc:
                 failure_detail = {
-                    "turn": turns,
+                    "turn": turn_number,
+                    "provider_invocation": provider_invocations,
                     "retryable": exc.retryable,
                     **exc.trace_detail,
                 }
@@ -210,7 +244,13 @@ class AgentHarness:
                 log_provider_failure(failure_detail)
                 if exc.retryable and retries < request.budget.retry_count:
                     retries += 1
-                    emit("provider.retry", "retrying", retry=retries)
+                    emit(
+                        "provider.retry",
+                        "retrying",
+                        retry=retries,
+                        turn=turn_number,
+                        provider_invocation=provider_invocations,
+                    )
                     continue
                 result = self._failure(
                     AgentRunStatus.FAILED,
@@ -224,14 +264,22 @@ class AgentHarness:
                     retryable=exc.retryable,
                 )
                 break
+            turns += 1
+            last_turn_usage = turn.usage
             usage = self._add_usage(usage, turn.usage)
-            emit("provider.turn.completed", "completed", turn=turns, kind=turn.kind)
+            emit(
+                "provider.turn.completed",
+                "completed",
+                turn=turns,
+                provider_invocation=provider_invocations,
+                kind=turn.kind,
+            )
             budget_error = self._budget_error(request, usage)
             if budget_error:
                 result = self._failure(
                     AgentRunStatus.BUDGET_EXCEEDED,
                     budget_error,
-                    "Agent run exceeded its token or cost budget.",
+                    self._budget_message(budget_error),
                     trace,
                     usage,
                     turns,
@@ -667,6 +715,53 @@ class AgentHarness:
         if usage.cost_cents > request.budget.maximum_cost_cents:
             return "cost_budget_exceeded"
         return None
+
+    @staticmethod
+    def _estimated_next_turn_budget_error(
+        request: AgentRunRequest,
+        usage: UsageReport,
+        last_turn_usage: UsageReport | None,
+    ) -> tuple[str, dict[str, float | int]] | None:
+        """Use the last measured turn as a conservative estimate for the next model turn."""
+
+        if last_turn_usage is None:
+            return None
+        estimates = (
+            (
+                "input_token_budget_precheck",
+                usage.input_tokens,
+                last_turn_usage.input_tokens,
+                request.budget.maximum_input_tokens,
+            ),
+            (
+                "output_token_budget_precheck",
+                usage.output_tokens,
+                last_turn_usage.output_tokens,
+                request.budget.maximum_output_tokens,
+            ),
+            (
+                "cost_budget_precheck",
+                usage.cost_cents,
+                last_turn_usage.cost_cents,
+                request.budget.maximum_cost_cents,
+            ),
+        )
+        for code, consumed, estimated_next, maximum in estimates:
+            if estimated_next > 0 and consumed + estimated_next > maximum:
+                return code, {
+                    "consumed": consumed,
+                    "estimated_next_turn": estimated_next,
+                    "configured_maximum": maximum,
+                }
+        return None
+
+    @staticmethod
+    def _budget_message(code: str) -> str:
+        if code.startswith(("input_token_", "output_token_")):
+            return "Live agent run stopped at the configured cumulative token budget."
+        if code.startswith("cost_"):
+            return "Live agent run stopped at the configured cumulative cost budget."
+        return "Agent run exceeded its token or cost budget."
 
     @staticmethod
     def _failure(

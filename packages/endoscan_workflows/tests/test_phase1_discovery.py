@@ -10,7 +10,12 @@ from endoscan_workflows.benchmark import (
     score_benchmark,
 )
 from endoscan_workflows.config import AgentConfiguration, AgentRunMode
-from endoscan_workflows.contracts import EndpointBuildCreate, WorkflowState
+from endoscan_workflows.contracts import (
+    AgentRunResult,
+    AgentRunStatus,
+    EndpointBuildCreate,
+    WorkflowState,
+)
 from endoscan_workflows.discovery import (
     DatasetCandidate,
     DiscoveryOutput,
@@ -110,15 +115,118 @@ def test_configuration_honors_bounded_live_settings(monkeypatch) -> None:
     monkeypatch.setenv("ENDOSCAN_AGENT_PROVIDER", "openai")
     monkeypatch.setenv("ENDOSCAN_AGENT_MODE", "live")
     monkeypatch.setenv("OPENAI_API_KEY", "unit-test-key-never-display")
-    monkeypatch.setenv("ENDOSCAN_AGENT_MAX_TOOL_CALLS", "4")
-    monkeypatch.setenv("ENDOSCAN_AGENT_MAX_COST_USD", "0.20")
     configuration = AgentConfiguration.from_env()
     assert configuration.run_mode is AgentRunMode.LIVE
-    assert configuration.maximum_tool_calls == 4
+    assert configuration.maximum_turns == 6
+    assert configuration.maximum_tool_calls == 6
+    assert configuration.maximum_input_tokens == 8000
+    assert configuration.maximum_output_tokens == 1500
     assert configuration.maximum_cost_usd == 0.20
+    assert configuration.timeout_seconds == 120
     assert configuration.retry_count == 0
     assert configuration.public_status()["configured_budget"]["retry_count"] == 0
     assert "unit-test-key-never-display" not in json.dumps(configuration.public_status())
+
+
+def test_all_zero_searches_have_a_valid_no_candidate_contract() -> None:
+    parsed = DiscoveryOutput(
+        endpoint_name="Oxidative stress",
+        endpoint_definition_summary="Transcriptomic oxidative-stress response.",
+        run_mode="live",
+        live_discovery=True,
+        search_strategy="Two bounded focused searches returned no GEO Series.",
+        queries_executed=["query-one", "query-two"],
+        search_strategy_steps=[
+            {
+                "strategy_reason": "Focused human sequencing search.",
+                "scientific_terms": ["oxidative stress"],
+                "organism_alternatives": ["Homo sapiens"],
+                "study_type_alternatives": ["sequencing"],
+                "rendered_query": "query-one",
+                "result_count": 0,
+            },
+            {
+                "strategy_reason": "Relaxed one study-type filter.",
+                "scientific_terms": ["oxidative stress"],
+                "organism_alternatives": ["Homo sapiens"],
+                "study_type_alternatives": [],
+                "rendered_query": "query-two",
+                "result_count": 0,
+            },
+        ],
+        candidates=[],
+        recommended_candidate_id=None,
+        recommendation="No dataset recommendation under the bounded strategy.",
+        decision_summary="Human review is required before revising or cancelling the search.",
+        unresolved_questions=["Should one transcriptomic context filter be revised?"],
+        evidence_references=[],
+        limitations=["No candidate found under the current bounded strategy."],
+        confidence_category="low",
+    )
+    assert parsed.candidates == []
+    assert parsed.recommended_candidate_id is None
+    assert parsed.requires_human_review is True
+
+
+def test_no_candidate_output_reaches_human_review_without_dataset_approval_claim(
+    workflow_runtime,
+) -> None:
+    _database, store, _providers, _harness, service = workflow_runtime
+    no_candidate = DiscoveryOutput(
+        endpoint_name="Oxidative stress",
+        endpoint_definition_summary="Transcriptomic oxidative-stress response.",
+        run_mode="replay",
+        simulation_label="Offline no-candidate test fixture",
+        live_discovery=False,
+        search_strategy="All bounded searches returned zero GEO Series.",
+        queries_executed=["query-one", "query-two"],
+        candidates=[],
+        recommended_candidate_id=None,
+        recommendation="No dataset recommendation.",
+        decision_summary="Review the bounded no-candidate outcome.",
+        unresolved_questions=["Should one bounded filter be revised?"],
+        evidence_references=[],
+        limitations=["No candidate found under the current strategy."],
+        confidence_category="low",
+    )
+
+    class NoCandidateHarness:
+        def run(self, *_args, **_kwargs):
+            return "run-offline-no-candidate", AgentRunResult(
+                status=AgentRunStatus.COMPLETED,
+                output=no_candidate.model_dump(mode="json"),
+            )
+
+    service.harness = NoCandidateHarness()
+    created = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="No candidate endpoint",
+            endpoint_slug="no-candidate-endpoint",
+            biological_goal="Verify bounded zero-result human-review behavior.",
+            created_by="test-admin",
+            idempotency_key="no-candidate-review-build",
+        )
+    )
+    started = service.start_build(
+        created.id,
+        expected_version=created.version,
+        actor="test-admin",
+        idempotency_key="no-candidate-review-start",
+    )
+    assert started.current_stage is WorkflowState.AWAITING_DATASET_APPROVAL
+    approval = next(
+        item for item in service.list_approvals(started.id) if item["status"] == "pending"
+    )
+    assert approval["request"]["requested_action"] == (
+        "Request a revised bounded search or cancel the workflow."
+    )
+    candidate_artifact = next(
+        item
+        for item in store.list_artifacts(started.id)
+        if item.artifact_type == "dataset_candidates"
+    )
+    _descriptor, raw = store.get(candidate_artifact.id)
+    assert json.loads(raw)["recommended_candidate_id"] is None
 
 
 def test_replay_workflow_stops_at_dataset_approval_with_phase1_artifacts(

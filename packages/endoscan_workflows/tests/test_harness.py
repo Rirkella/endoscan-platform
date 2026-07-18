@@ -17,15 +17,18 @@ from endoscan_workflows.contracts import (
     ProviderToolRequest,
     ProviderTurn,
     TransitionRequest,
+    UsageReport,
     WorkflowState,
 )
 from endoscan_workflows.discovery import DiscoveryOutput, discovery_request
+from endoscan_workflows.discovery_tools import DiscoveryToolService
 from endoscan_workflows.errors import GuardNotSatisfied
 from endoscan_workflows.harness import AgentHarness
 from endoscan_workflows.providers import FakeAgentProvider, ProviderFailure, ProviderRegistry
+from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_security import ScientificSourceClient
 from endoscan_workflows.testing import phase0_test_tool_registry
-from endoscan_workflows.tools import EchoOutput
+from endoscan_workflows.tools import EchoOutput, phase1_tool_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -259,6 +262,7 @@ def test_safe_provider_failure_diagnostics_are_persisted_and_logged(
     failed = next(event for event in result.trace if event.event_type == "provider.turn.failed")
     assert failed.detail == {
         "turn": 1,
+        "provider_invocation": 1,
         "retryable": False,
         "exception_class": "BadRequestError",
         "http_status": 400,
@@ -502,6 +506,241 @@ def test_source_http_retries_do_not_create_extra_provider_invocations(workflow_r
     assert source_requests == 3
     assert provider.calls == 2
     assert not any(event.event_type == "provider.retry" for event in result.trace)
+
+
+def test_two_normal_model_turns_accept_3880_tokens_without_counting_a_retry(
+    workflow_runtime,
+) -> None:
+    database, _store, _providers, _harness, _service = workflow_runtime
+    _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
+
+    class TwoTurnProvider:
+        name = "counting"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs) -> ProviderTurn:
+            self.calls += 1
+            usage = UsageReport(input_tokens=1940, output_tokens=100, cost_cents=0.1)
+            if self.calls == 1:
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="test_success",
+                        arguments={"value": "bounded"},
+                        idempotency_key="two-normal-turns-tool",
+                    ),
+                    usage=usage,
+                )
+            return ProviderTurn(kind="output", output={"value": "done"}, usage=usage)
+
+    provider = TwoTurnProvider()
+    registry = ProviderRegistry()
+    registry.register("counting", lambda: provider)
+    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    bounded = request.model_copy(
+        update={
+            "model": request.model.model_copy(update={"provider": "counting"}),
+            "output_schema_name": EchoOutput.__name__,
+            "available_tools": ["test_success"],
+            "context": {**request.context, "permission_scope": ["test:invoke"]},
+            "budget": request.budget.model_copy(
+                update={
+                    "maximum_input_tokens": 8000,
+                    "maximum_output_tokens": 1500,
+                    "retry_count": 0,
+                }
+            ),
+        }
+    )
+    _run_id, result = harness.run(bounded, EchoOutput)
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.turns == 2
+    assert result.usage.input_tokens == 3880
+    assert provider.calls == 2
+    assert sum(event.event_type == "provider.turn.completed" for event in result.trace) == 2
+    assert not any(event.event_type == "provider.retry" for event in result.trace)
+
+
+def test_next_turn_budget_precheck_stops_before_an_unsafe_provider_call(
+    workflow_runtime,
+) -> None:
+    database, _store, _providers, _harness, _service = workflow_runtime
+    _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
+
+    class ExpensiveProvider:
+        name = "counting"
+        calls = 0
+
+        def run_turn(self, *_args, **_kwargs) -> ProviderTurn:
+            self.calls += 1
+            return ProviderTurn(
+                kind="tool",
+                tool_request=ProviderToolRequest(
+                    tool_name="test_success",
+                    arguments={"value": "bounded"},
+                    idempotency_key="budget-precheck-tool",
+                ),
+                usage=UsageReport(input_tokens=4500),
+            )
+
+    provider = ExpensiveProvider()
+    registry = ProviderRegistry()
+    registry.register("counting", lambda: provider)
+    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    bounded = request.model_copy(
+        update={
+            "model": request.model.model_copy(update={"provider": "counting"}),
+            "output_schema_name": EchoOutput.__name__,
+            "available_tools": ["test_success"],
+            "context": {**request.context, "permission_scope": ["test:invoke"]},
+            "budget": request.budget.model_copy(update={"maximum_input_tokens": 8000}),
+        }
+    )
+    _run_id, result = harness.run(bounded, EchoOutput)
+    assert result.status is AgentRunStatus.BUDGET_EXCEEDED
+    assert result.error.code == "input_token_budget_precheck"
+    assert result.error.safe_message == (
+        "Live agent run stopped at the configured cumulative token budget."
+    )
+    assert provider.calls == 1
+
+
+def test_cost_cap_is_enforced_after_each_model_turn(workflow_runtime) -> None:
+    database, _store, _providers, _harness, _service = workflow_runtime
+    _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
+
+    class CostlyProvider:
+        name = "costly"
+
+        def run_turn(self, *_args, **_kwargs) -> ProviderTurn:
+            return ProviderTurn(
+                kind="output",
+                output={"value": "done"},
+                usage=UsageReport(cost_cents=20.01),
+            )
+
+    registry = ProviderRegistry()
+    registry.register("costly", CostlyProvider)
+    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    costly = request.model_copy(
+        update={
+            "model": request.model.model_copy(update={"provider": "costly"}),
+            "output_schema_name": EchoOutput.__name__,
+            "budget": request.budget.model_copy(update={"maximum_cost_cents": 20}),
+        }
+    )
+    _run_id, result = harness.run(costly, EchoOutput)
+    assert result.status is AgentRunStatus.BUDGET_EXCEEDED
+    assert result.error.code == "cost_budget_exceeded"
+
+
+def test_zero_first_geo_result_triggers_one_bounded_alternative_and_structured_output(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, _service = workflow_runtime
+    _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
+    source_requests = 0
+
+    def no_results(source_request: httpx.Request) -> httpx.Response:
+        nonlocal source_requests
+        source_requests += 1
+        return httpx.Response(
+            200,
+            json={"esearchresult": {"idlist": []}},
+            headers={"content-type": "application/json"},
+            request=source_request,
+        )
+
+    source_client = ScientificSourceClient(
+        transport=httpx.MockTransport(no_results), sleep=lambda _seconds: None
+    )
+    discovery_tools = DiscoveryToolService(SourceResponseCache(database), store, source_client)
+
+    class ZeroResultProvider:
+        name = "scripted"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs) -> ProviderTurn:
+            self.calls += 1
+            if self.calls <= 2:
+                study_types = ["sequencing"] if self.calls == 1 else ["array"]
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="search_geo_series",
+                        arguments={
+                            "scientific_terms": ["oxidative stress"],
+                            "organism_alternatives": ["Homo sapiens"],
+                            "study_type_alternatives": study_types,
+                            "cell_tissue_terms": [],
+                            "treatment_terms": [],
+                            "maximum_results": 5,
+                            "publication_date_start": None,
+                            "publication_date_end": None,
+                            "strategy_reason": (
+                                "Focused sequencing search."
+                                if self.calls == 1
+                                else "Alternative array search after zero results."
+                            ),
+                        },
+                        idempotency_key=f"zero-search-{self.calls}",
+                    ),
+                )
+            return ProviderTurn(
+                kind="output",
+                output={
+                    "endpoint_name": "Oxidative stress",
+                    "endpoint_definition_summary": "Transcriptomic oxidative-stress response.",
+                    "run_mode": "live",
+                    "simulation_label": None,
+                    "live_discovery": True,
+                    "search_strategy": "Two focused searches returned zero GEO Series.",
+                    "queries_executed": ["human sequencing", "human array"],
+                    "search_strategy_steps": [],
+                    "candidates": [],
+                    "recommended_candidate_id": None,
+                    "recommendation": "No dataset recommendation.",
+                    "decision_summary": "Review the bounded no-candidate outcome.",
+                    "rejected_candidates": [],
+                    "unresolved_questions": ["Should one bounded filter be revised?"],
+                    "requires_human_review": True,
+                    "evidence_references": [],
+                    "limitations": ["No candidate found under the current strategy."],
+                    "confidence_category": "low",
+                },
+            )
+
+    provider = ZeroResultProvider()
+    registry = ProviderRegistry()
+    registry.register("scripted", lambda: provider)
+    harness = AgentHarness(database, registry, phase1_tool_registry(REPO_ROOT, discovery_tools))
+    bounded = request.model_copy(
+        update={
+            "model": request.model.model_copy(update={"provider": "scripted"}),
+            "instruction_version": "zero-result-bounded-search-test",
+            "available_tools": ["search_geo_series"],
+            "context": {
+                **request.context,
+                "run_mode": "live",
+                "permission_scope": ["source:geo:read"],
+            },
+        }
+    )
+    try:
+        _run_id, result = harness.run(bounded, DiscoveryOutput)
+    finally:
+        source_client.close()
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.tool_calls == 2
+    assert result.turns == 3
+    assert result.output["candidates"] == []
+    assert result.output["recommended_candidate_id"] is None
+    assert provider.calls == 3
+    assert source_requests == 2
 
 
 def test_approval_interruption_is_typed(workflow_runtime) -> None:

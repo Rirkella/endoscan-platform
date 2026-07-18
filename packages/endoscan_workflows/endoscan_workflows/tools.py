@@ -361,7 +361,10 @@ def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
     specs = [
         (
             "search_geo_series",
-            "Search official NCBI GEO Series metadata within bounded query and result limits.",
+            (
+                "Search official NCBI GEO Series metadata with a typed bounded plan. "
+                "The tool renders AND between concepts and OR within alternatives."
+            ),
             SearchGeoSeriesInput,
             SearchGeoSeriesOutput,
             discovery_service.search_geo_series,
