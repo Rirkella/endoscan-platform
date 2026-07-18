@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from .contracts import (
     ToolCallStatus,
     ToolDefinition,
     ToolInvocation,
+    ToolNormalizationWarning,
     ToolResult,
     WorkflowState,
 )
@@ -76,6 +78,90 @@ class EchoOutput(ToolOutput):
     value: str
 
 
+@dataclass(frozen=True)
+class NormalizedToolArguments:
+    arguments: dict[str, Any]
+    warnings: tuple[ToolNormalizationWarning, ...] = ()
+
+
+ArgumentNormalizer = Callable[[dict[str, Any]], NormalizedToolArguments]
+
+
+def normalize_configured_string_lists(
+    arguments: dict[str, Any],
+    *,
+    optional_fields: tuple[str, ...],
+    required_fields: tuple[str, ...] = (),
+) -> NormalizedToolArguments:
+    """Normalize only explicitly safe string-list fields without inferring new values."""
+
+    optional_field_set = set(optional_fields)
+    configured_fields = tuple(dict.fromkeys((*required_fields, *optional_fields)))
+    normalized_arguments = dict(arguments)
+    warnings: list[ToolNormalizationWarning] = []
+    for field in configured_fields:
+        value = arguments.get(field)
+        if not isinstance(value, list):
+            continue
+        normalized_values: list[Any] = []
+        seen: set[str] = set()
+        for index, item in enumerate(value):
+            if not isinstance(item, str):
+                normalized_values.append(item)
+                continue
+            normalized = item.strip()
+            if normalized != item:
+                warnings.append(
+                    ToolNormalizationWarning(
+                        code="search_term_whitespace_trimmed",
+                        field=field,
+                        original_index=index,
+                    )
+                )
+            if not normalized:
+                warnings.append(
+                    ToolNormalizationWarning(
+                        code=(
+                            "empty_optional_search_term_removed"
+                            if field in optional_field_set
+                            else "empty_required_search_term_removed"
+                        ),
+                        field=field,
+                        original_index=index,
+                    )
+                )
+                continue
+            if normalized in seen:
+                warnings.append(
+                    ToolNormalizationWarning(
+                        code="duplicate_search_term_removed",
+                        field=field,
+                        original_index=index,
+                    )
+                )
+                continue
+            seen.add(normalized)
+            normalized_values.append(normalized)
+        normalized_arguments[field] = normalized_values
+    return NormalizedToolArguments(
+        arguments=normalized_arguments,
+        warnings=tuple(warnings),
+    )
+
+
+def normalize_geo_search_arguments(arguments: dict[str, Any]) -> NormalizedToolArguments:
+    return normalize_configured_string_lists(
+        arguments,
+        optional_fields=(
+            "organism_alternatives",
+            "study_type_alternatives",
+            "cell_tissue_terms",
+            "treatment_terms",
+        ),
+        required_fields=("scientific_terms",),
+    )
+
+
 class RegisteredTool:
     def __init__(
         self,
@@ -85,12 +171,14 @@ class RegisteredTool:
         implementation: Callable[..., BaseModel | dict],
         *,
         contextual: bool = False,
+        argument_normalizer: ArgumentNormalizer | None = None,
     ):
         self.definition = definition
         self.input_model = input_model
         self.output_model = output_model
         self.implementation = implementation
         self.contextual = contextual
+        self.argument_normalizer = argument_normalizer
 
 
 class ToolRegistry:
@@ -115,13 +203,17 @@ class ToolRegistry:
 
     def invoke(self, invocation: ToolInvocation) -> ToolResult:
         started = time.monotonic()
+        original_arguments = dict(invocation.arguments)
+        normalized = NormalizedToolArguments(arguments=original_arguments)
         try:
             tool = self.get(invocation.tool_name)
             if invocation.workflow_stage not in tool.definition.allowed_workflow_stages:
                 raise AgentPolicyError("Tool is prohibited in the current workflow stage.")
             if not set(tool.definition.required_permissions).issubset(invocation.permission_scope):
                 raise AgentPolicyError("Tool permission scope is insufficient.")
-            typed_input = tool.input_model.model_validate(invocation.arguments)
+            if tool.argument_normalizer is not None:
+                normalized = tool.argument_normalizer(original_arguments)
+            typed_input = tool.input_model.model_validate(normalized.arguments)
         except (ValidationError, AgentPolicyError) as exc:
             return ToolResult(
                 tool_name=invocation.tool_name,
@@ -137,6 +229,9 @@ class ToolRegistry:
                     category="policy" if isinstance(exc, AgentPolicyError) else "validation",
                 ),
                 duration_ms=int((time.monotonic() - started) * 1000),
+                original_arguments=original_arguments,
+                normalized_arguments=normalized.arguments,
+                normalization_warnings=list(normalized.warnings),
             )
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
@@ -158,6 +253,9 @@ class ToolRegistry:
                         category="timeout",
                     ),
                     duration_ms=int((time.monotonic() - started) * 1000),
+                    original_arguments=original_arguments,
+                    normalized_arguments=normalized.arguments,
+                    normalization_warnings=list(normalized.warnings),
                 )
             except ValidationError:
                 return ToolResult(
@@ -170,6 +268,9 @@ class ToolRegistry:
                         category="validation",
                     ),
                     duration_ms=int((time.monotonic() - started) * 1000),
+                    original_arguments=original_arguments,
+                    normalized_arguments=normalized.arguments,
+                    normalization_warnings=list(normalized.warnings),
                 )
             except Exception:
                 return ToolResult(
@@ -182,12 +283,18 @@ class ToolRegistry:
                         category="tool",
                     ),
                     duration_ms=int((time.monotonic() - started) * 1000),
+                    original_arguments=original_arguments,
+                    normalized_arguments=normalized.arguments,
+                    normalization_warnings=list(normalized.warnings),
                 )
         return ToolResult(
             tool_name=invocation.tool_name,
             status=ToolCallStatus.COMPLETED,
             output=output,
             duration_ms=int((time.monotonic() - started) * 1000),
+            original_arguments=original_arguments,
+            normalized_arguments=normalized.arguments,
+            normalization_warnings=list(normalized.warnings),
         )
 
 
@@ -363,7 +470,10 @@ def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
             "search_geo_series",
             (
                 "Search official NCBI GEO Series metadata with a typed bounded plan. "
-                "The tool renders AND between concepts and OR within alternatives."
+                "The tool renders AND between concepts and OR within alternatives. "
+                "For optional filters, omit the filter or return [] when no constraint "
+                "is intended; never include empty strings, and provide only concrete "
+                "biological terms."
             ),
             SearchGeoSeriesInput,
             SearchGeoSeriesOutput,
@@ -439,6 +549,9 @@ def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
                 output_model,
                 implementation,
                 contextual=True,
+                argument_normalizer=(
+                    normalize_geo_search_arguments if name == "search_geo_series" else None
+                ),
             )
         )
     return registry

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -741,6 +742,147 @@ def test_zero_first_geo_result_triggers_one_bounded_alternative_and_structured_o
     assert result.output["recommended_candidate_id"] is None
     assert provider.calls == 3
     assert source_requests == 2
+
+
+def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
+    workflow_runtime,
+) -> None:
+    database, _store, _providers, _harness, service = workflow_runtime
+    build, _discovering, _step, request, _default, _service = harness_context(workflow_runtime)
+    supplied_arguments = {
+        "cell_tissue_terms": [""],
+        "maximum_results": 5,
+        "organism_alternatives": ["Homo sapiens", "Mus musculus"],
+        "publication_date_end": None,
+        "publication_date_start": None,
+        "scientific_terms": ["oxidative stress", "transcriptomic"],
+        "strategy_reason": (
+            "Initial focused GEO search for transcriptomic series related to "
+            "oxidative-stress response in human or mouse."
+        ),
+        "study_type_alternatives": [
+            "expression profiling by array",
+            "expression profiling by high throughput sequencing",
+        ],
+        "treatment_terms": ["ROS", "H2O2", "oxidative stress"],
+    }
+    executed_arguments: list[dict] = []
+
+    class BoundaryDiscoveryService:
+        def search_geo_series(self, typed_request, _invocation):
+            values = typed_request.model_dump(mode="json")
+            executed_arguments.append(values)
+            return {
+                "typed_request": values,
+                "rendered_query": "mocked bounded GEO query",
+                "normalized_query": "mocked bounded geo query",
+                "strategy_reason": typed_request.strategy_reason,
+                "results": [],
+                "result_count": 0,
+                "new_accession_count": 0,
+                "retrieval_timestamp": datetime.now(UTC),
+                "source_artifact_id": "art-mocked-normalized-search",
+                "cache_status": "cached",
+            }
+
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: {}
+
+    class NormalizationProvider:
+        name = "scripted"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs) -> ProviderTurn:
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="search_geo_series",
+                        arguments=supplied_arguments,
+                        idempotency_key="normalized-live-search",
+                    ),
+                )
+            return ProviderTurn(
+                kind="output",
+                output={
+                    "endpoint_name": "Oxidative stress",
+                    "endpoint_definition_summary": "Transcriptomic oxidative-stress response.",
+                    "run_mode": "live",
+                    "simulation_label": None,
+                    "live_discovery": True,
+                    "search_strategy": "One safely normalized bounded search.",
+                    "queries_executed": ["mocked bounded GEO query"],
+                    "search_strategy_steps": [],
+                    "candidates": [],
+                    "recommended_candidate_id": None,
+                    "recommendation": "No dataset recommendation from the mocked boundary.",
+                    "decision_summary": "Normalization preserved the intended search scope.",
+                    "rejected_candidates": [],
+                    "unresolved_questions": [],
+                    "requires_human_review": True,
+                    "evidence_references": [],
+                    "limitations": ["Mocked GEO execution boundary only."],
+                    "confidence_category": "low",
+                },
+            )
+
+    provider = NormalizationProvider()
+    providers = ProviderRegistry()
+    providers.register("scripted", lambda: provider)
+    harness = AgentHarness(
+        database,
+        providers,
+        phase1_tool_registry(REPO_ROOT, BoundaryDiscoveryService()),
+    )
+    bounded = request.model_copy(
+        update={
+            "model": request.model.model_copy(update={"provider": "scripted"}),
+            "instruction_version": "optional-search-term-normalization-test",
+            "available_tools": ["search_geo_series"],
+            "budget": request.budget.model_copy(update={"retry_count": 0}),
+            "context": {
+                **request.context,
+                "run_mode": "live",
+                "permission_scope": ["source:geo:read"],
+            },
+        }
+    )
+
+    run_id, result = harness.run(bounded, DiscoveryOutput)
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.turns == 2
+    assert result.tool_calls == 1
+    assert provider.calls == 2
+    assert len(service.agent_runs(build.id)) == 1
+    assert executed_arguments == [{**supplied_arguments, "cell_tissue_terms": []}]
+    assert not any(event.event_type == "provider.retry" for event in result.trace)
+    completed = next(event for event in result.trace if event.event_type == "tool_call.completed")
+    assert completed.detail["model_supplied_arguments"] == supplied_arguments
+    assert completed.detail["normalized_execution_arguments"] == {
+        **supplied_arguments,
+        "cell_tissue_terms": [],
+    }
+    assert completed.detail["normalization_warning_count"] == 1
+    assert completed.detail["normalization_warning_codes"] == ["empty_optional_search_term_removed"]
+    stored = service.agent_run(run_id)
+    call = stored["tool_calls"][0]
+    assert call["arguments"]["original_arguments"] == supplied_arguments
+    assert call["arguments"]["normalized_arguments"] == {
+        **supplied_arguments,
+        "cell_tissue_terms": [],
+    }
+    assert call["arguments"]["normalization_warnings"] == [
+        {
+            "schema_version": "1.0.0",
+            "code": "empty_optional_search_term_removed",
+            "field": "cell_tissue_terms",
+            "original_index": 0,
+        }
+    ]
 
 
 def test_approval_interruption_is_typed(workflow_runtime) -> None:

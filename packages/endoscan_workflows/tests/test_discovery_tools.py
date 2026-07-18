@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 import pytest
 from pydantic import ValidationError
 
 from endoscan_workflows.config import AgentRunMode
-from endoscan_workflows.contracts import EndpointBuildCreate, ToolInvocation, WorkflowState
+from endoscan_workflows.contracts import (
+    EndpointBuildCreate,
+    ToolCallStatus,
+    ToolInvocation,
+    WorkflowState,
+)
 from endoscan_workflows.discovery_tools import (
     DiscoveryToolService,
     GeoAccessionInput,
@@ -24,6 +31,7 @@ from endoscan_workflows.source_security import (
     SourceUnavailableError,
     sanitize_untrusted_text,
 )
+from endoscan_workflows.tools import normalize_geo_search_arguments, phase1_tool_registry
 
 GEO_SOFT_FIXTURE = """^SERIES = GSE12345
 !Series_geo_accession = GSE12345
@@ -46,6 +54,24 @@ GEO_SOFT_FIXTURE = """^SERIES = GSE12345
 !Sample_characteristics_ch1 = dose: 10 uM
 !Sample_characteristics_ch1 = time: 24 h
 """
+
+FAILED_LIVE_SEARCH_ARGUMENTS = {
+    "cell_tissue_terms": [""],
+    "maximum_results": 5,
+    "organism_alternatives": ["Homo sapiens", "Mus musculus"],
+    "publication_date_end": None,
+    "publication_date_start": None,
+    "scientific_terms": ["oxidative stress", "transcriptomic"],
+    "strategy_reason": (
+        "Initial focused GEO search for transcriptomic series related to oxidative-stress "
+        "response in human or mouse."
+    ),
+    "study_type_alternatives": [
+        "expression profiling by array",
+        "expression profiling by high throughput sequencing",
+    ],
+    "treatment_terms": ["ROS", "H2O2", "oxidative stress"],
+}
 
 
 def search_request(**updates) -> SearchGeoSeriesInput:
@@ -111,12 +137,12 @@ def test_geo_query_uses_or_within_alternatives_and_and_between_concepts() -> Non
     )
     rendered = render_geo_query(request)
     assert (
-        '"oxidative stress"[All Fields] AND "transcriptomic perturbation"[All Fields]' in rendered
+        '"transcriptomic perturbation"[All Fields] AND "oxidative stress"[All Fields]' in rendered
     )
-    assert '"Homo sapiens"[Organism] OR "Mus musculus"[Organism]' in rendered
+    assert '"Mus musculus"[Organism] OR "Homo sapiens"[Organism]' in rendered
     assert (
-        '"Expression profiling by array"[All Fields] OR '
-        '"Expression profiling by high throughput sequencing"[All Fields]'
+        '"Expression profiling by high throughput sequencing"[All Fields] OR '
+        '"Expression profiling by array"[All Fields]'
     ) in rendered
     assert '"Homo sapiens"[Organism] AND "Mus musculus"[Organism]' not in rendered
     assert (
@@ -125,17 +151,102 @@ def test_geo_query_uses_or_within_alternatives_and_and_between_concepts() -> Non
     ) not in rendered
 
 
-def test_geo_query_rendering_is_normalized_and_deterministic() -> None:
-    first = search_request(
-        organism_alternatives=["Mus musculus", "Homo sapiens", "Homo sapiens"],
-        study_type_alternatives=["sequencing", "array"],
+def test_configured_search_lists_trim_remove_empty_and_preserve_first_occurrence() -> None:
+    normalized = normalize_geo_search_arguments(
+        {
+            "scientific_terms": [" oxidative stress "],
+            "cell_tissue_terms": ["  ", "HepG2", "HepG2"],
+            "treatment_terms": [" ROS ", "H2O2"],
+            "organism_alternatives": ["Homo sapiens", "Homo sapiens"],
+            "study_type_alternatives": [],
+        }
     )
-    second = search_request(
-        organism_alternatives=["Homo sapiens", "Mus musculus"],
-        study_type_alternatives=["array", "sequencing"],
+
+    assert normalized.arguments["scientific_terms"] == ["oxidative stress"]
+    assert normalized.arguments["cell_tissue_terms"] == ["HepG2"]
+    assert normalized.arguments["treatment_terms"] == ["ROS", "H2O2"]
+    assert normalized.arguments["organism_alternatives"] == ["Homo sapiens"]
+    assert [warning.code for warning in normalized.warnings] == [
+        "search_term_whitespace_trimmed",
+        "duplicate_search_term_removed",
+        "search_term_whitespace_trimmed",
+        "empty_optional_search_term_removed",
+        "duplicate_search_term_removed",
+        "search_term_whitespace_trimmed",
+    ]
+
+
+def test_required_and_allowlisted_geo_search_fields_remain_strict() -> None:
+    normalized_required = normalize_geo_search_arguments(
+        {**FAILED_LIVE_SEARCH_ARGUMENTS, "scientific_terms": [""]}
     )
-    assert first.model_dump() == second.model_dump()
-    assert render_geo_query(first) == render_geo_query(second)
+    with pytest.raises(ValidationError):
+        SearchGeoSeriesInput(**normalized_required.arguments)
+    with pytest.raises(ValidationError, match="allowlisted"):
+        SearchGeoSeriesInput(
+            **{
+                **FAILED_LIVE_SEARCH_ARGUMENTS,
+                "cell_tissue_terms": [],
+                "organism_alternatives": ["Unknown species"],
+            }
+        )
+    with pytest.raises(ValidationError, match="allowlisted"):
+        SearchGeoSeriesInput(
+            **{
+                **FAILED_LIVE_SEARCH_ARGUMENTS,
+                "cell_tissue_terms": [],
+                "study_type_alternatives": ["proteomics"],
+            }
+        )
+
+
+def test_exact_failed_live_arguments_reach_mocked_geo_boundary_normalized() -> None:
+    captured: list[dict] = []
+
+    class BoundaryDiscoveryService:
+        def search_geo_series(self, request, _invocation):
+            typed_request = request.model_dump(mode="json")
+            captured.append(typed_request)
+            return {
+                "typed_request": typed_request,
+                "rendered_query": "mocked bounded GEO query",
+                "normalized_query": "mocked bounded geo query",
+                "strategy_reason": request.strategy_reason,
+                "results": [],
+                "result_count": 0,
+                "new_accession_count": 0,
+                "retrieval_timestamp": datetime.now(UTC),
+                "source_artifact_id": "art-mocked-geo-boundary",
+                "cache_status": "cached",
+            }
+
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: {}
+
+    registry = phase1_tool_registry(Path.cwd(), BoundaryDiscoveryService())
+    result = registry.invoke(
+        ToolInvocation(
+            tool_name="search_geo_series",
+            arguments=FAILED_LIVE_SEARCH_ARGUMENTS,
+            workflow_id="build-normalization-regression",
+            step_id="step-normalization-regression",
+            workflow_stage=WorkflowState.DISCOVERING_DATA,
+            permission_scope=["source:geo:read"],
+            run_context={"run_mode": "replay"},
+            idempotency_key="exact-failed-live-arguments",
+        )
+    )
+
+    assert result.status is ToolCallStatus.COMPLETED
+    assert captured == [{**FAILED_LIVE_SEARCH_ARGUMENTS, "cell_tissue_terms": []}]
+    assert result.original_arguments == FAILED_LIVE_SEARCH_ARGUMENTS
+    assert result.normalized_arguments == {
+        **FAILED_LIVE_SEARCH_ARGUMENTS,
+        "cell_tissue_terms": [],
+    }
+    assert [warning.code for warning in result.normalization_warnings] == [
+        "empty_optional_search_term_removed"
+    ]
 
 
 def test_disallowed_domain_and_private_network_are_rejected() -> None:

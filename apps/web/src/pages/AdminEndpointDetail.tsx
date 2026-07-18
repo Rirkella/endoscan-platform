@@ -122,6 +122,37 @@ function geoSearchSummaries(run: AdminAgentRun): GeoSearchSummary[] {
   });
 }
 
+type ToolNormalizationSummary = {
+  toolName: string;
+  originalArguments: Record<string, unknown>;
+  normalizedArguments: Record<string, unknown>;
+  warningCodes: string[];
+};
+
+function toolNormalizationSummaries(run: AdminAgentRun): ToolNormalizationSummary[] {
+  return (run.tool_calls ?? []).flatMap((call) => {
+    const result = call.result as Record<string, unknown> | undefined;
+    const originalArguments = result?.original_arguments;
+    const normalizedArguments = result?.normalized_arguments;
+    const warnings = result?.normalization_warnings;
+    if (
+      !originalArguments || typeof originalArguments !== "object" || Array.isArray(originalArguments)
+      || !normalizedArguments || typeof normalizedArguments !== "object" || Array.isArray(normalizedArguments)
+      || !Array.isArray(warnings) || warnings.length === 0
+    ) return [];
+    return [{
+      toolName: typeof call.tool_name === "string" ? call.tool_name : "tool",
+      originalArguments: originalArguments as Record<string, unknown>,
+      normalizedArguments: normalizedArguments as Record<string, unknown>,
+      warningCodes: warnings.flatMap((warning) => {
+        if (!warning || typeof warning !== "object" || Array.isArray(warning)) return [];
+        const code = (warning as Record<string, unknown>).code;
+        return typeof code === "string" ? [code] : [];
+      }),
+    }];
+  });
+}
+
 function safeDeveloperDiagnostic(run: AdminAgentRun): string | null {
   const events = run.trace?.events ?? [];
   for (const event of [...events].reverse()) {
@@ -287,6 +318,17 @@ export function AdminEndpointDetail() {
   const developerDiagnostic = trace ? safeDeveloperDiagnostic(trace) : null;
   const providerRetries = trace ? traceEventCount(trace, "provider.retry") : 0;
   const geoSearches = trace ? geoSearchSummaries(trace) : [];
+  const normalizationSummaries = trace ? toolNormalizationSummaries(trace) : [];
+  const normalizationWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.length,
+    0,
+  );
+  const emptyOptionalFilterWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.filter(
+      (code) => code === "empty_optional_search_term_removed",
+    ).length,
+    0,
+  );
   const hasCompletedOutput = trace?.status === "completed" || trace?.status === "approval_required";
   const hasCandidateRecommendation = Boolean(pending && recommended && candidates.length > 0);
 
@@ -497,6 +539,7 @@ export function AdminEndpointDetail() {
                   <div><dt>Estimated cost</dt><dd>${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}</dd></div>
                 </dl>
                 {geoSearches.length > 0 && <div className="admin-trace-summary"><h4>Rendered GEO queries</h4><ol>{geoSearches.map((search, index) => <li key={`${search.renderedQuery}-${index}`}><strong>{search.strategyReason}</strong><code>{search.renderedQuery}</code><span>{search.resultCount} results / {search.cacheStatus}</span></li>)}</ol></div>}
+                {normalizationWarningCount > 0 && <p className="admin-secondary-note">{emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
                 {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
                 <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
                 <div className="admin-inline-actions">
@@ -504,7 +547,7 @@ export function AdminEndpointDetail() {
                   <a href="#agent-tools">View tools used</a>
                   <a href="#artifacts">View generated artifact</a>
                 </div>
-                {showTrace && <div className="admin-trace-summary" id="agent-trace"><h4>Trace events</h4><ol>{(trace.trace?.events ?? []).map((event, index) => <li key={index}>{typeof event.event_type === "string" ? humanizeMachineValue(event.event_type.replace(/\./g, "_")) : `Trace event ${index + 1}`}</li>)}</ol></div>}
+                {showTrace && <div className="admin-trace-summary" id="agent-trace"><h4>Trace events</h4><ol>{(trace.trace?.events ?? []).map((event, index) => <li key={index}>{typeof event.event_type === "string" ? humanizeMachineValue(event.event_type.replace(/\./g, "_")) : `Trace event ${index + 1}`}</li>)}</ol>{normalizationSummaries.map((summary, index) => <section key={`${summary.toolName}-${index}`}><h5>{toolLabel(summary.toolName)} input normalization</h5><p>{summary.warningCodes.length} warning{summary.warningCodes.length === 1 ? "" : "s"}: {summary.warningCodes.join(", ")}</p><dl><div><dt>Model-supplied arguments</dt><dd><code>{JSON.stringify(summary.originalArguments)}</code></dd></div><div><dt>Executed arguments</dt><dd><code>{JSON.stringify(summary.normalizedArguments)}</code></dd></div></dl></section>)}</div>}
               </div>
             ) : <div className="admin-empty">No agent run yet.</div>}
           </section>

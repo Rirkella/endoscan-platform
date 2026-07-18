@@ -33,6 +33,7 @@ from .repository import (
     append_event,
     canonical_json,
     deterministic_id,
+    load_versioned_json,
     require_build,
     utc_text,
     versioned_payload,
@@ -338,6 +339,12 @@ class AgentHarness:
                     tool_name=requested.tool_name,
                     tool_call_id=call_id,
                     replayed=tool_result.replayed,
+                    model_supplied_arguments=tool_result.original_arguments,
+                    normalized_execution_arguments=tool_result.normalized_arguments,
+                    normalization_warning_count=len(tool_result.normalization_warnings),
+                    normalization_warning_codes=[
+                        warning.code for warning in tool_result.normalization_warnings
+                    ],
                 )
                 history.append(
                     {
@@ -573,8 +580,8 @@ class AgentHarness:
                 )
             )
             if prior is not None:
-                stored_arguments = prior.arguments_json
-                if stored_arguments != canonical_json(versioned_payload(arguments=arguments)):
+                stored_arguments = load_versioned_json(prior.arguments_json).get("arguments")
+                if canonical_json(stored_arguments) != canonical_json(arguments):
                     raise WorkflowConflict(
                         "Tool idempotency key was reused with different arguments."
                     )
@@ -636,8 +643,27 @@ class AgentHarness:
                 idempotency_key=key,
             )
         )
+        original_arguments = redact(result.original_arguments or tool_request.arguments)
+        normalized_arguments = redact(result.normalized_arguments or tool_request.arguments)
+        normalization_warnings = [
+            warning.model_dump(mode="json") for warning in result.normalization_warnings
+        ]
+        result = result.model_copy(
+            update={
+                "original_arguments": original_arguments,
+                "normalized_arguments": normalized_arguments,
+            }
+        )
         with self.database.session() as session:
             row = session.get(ToolCallRow, call_id)
+            row.arguments_json = canonical_json(
+                versioned_payload(
+                    arguments=arguments,
+                    original_arguments=original_arguments,
+                    normalized_arguments=normalized_arguments,
+                    normalization_warnings=normalization_warnings,
+                )
+            )
             row.result_json = result.model_dump_json()
             row.status = result.status.value
             row.duration_ms = result.duration_ms
@@ -654,6 +680,10 @@ class AgentHarness:
                     "tool_call_id": call_id,
                     "status": result.status.value,
                     "duration_ms": result.duration_ms,
+                    "normalization_warning_count": len(normalization_warnings),
+                    "normalization_warning_codes": [
+                        warning["code"] for warning in normalization_warnings
+                    ],
                 },
                 from_state=build.current_stage,
                 to_state=build.current_stage,

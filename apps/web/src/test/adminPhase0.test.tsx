@@ -590,6 +590,61 @@ describe("Phase-1 live discovery presentation", () => {
     expect(screen.getByRole("button", { name: "Approve dataset" })).toBeInTheDocument();
   });
 
+  it("presents safe optional-filter normalization only as secondary trace detail", async () => {
+    const originalArguments = {
+      scientific_terms: ["oxidative stress"],
+      organism_alternatives: ["Homo sapiens"],
+      study_type_alternatives: ["expression profiling by array"],
+      cell_tissue_terms: [""],
+      treatment_terms: ["ROS"],
+      maximum_results: 5,
+      publication_date_start: null,
+      publication_date_end: null,
+      strategy_reason: "Focused oxidative-stress search.",
+    };
+    const normalizedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      turns: 2,
+      tools: [{ id: "tool-normalized", tool_name: "search_geo_series", status: "completed", duration_ms: 20 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: {
+          output: {
+            rendered_query: '"oxidative stress"[All Fields]',
+            result_count: 1,
+            cache_status: "cached",
+            strategy_reason: "Focused oxidative-stress search.",
+          },
+          original_arguments: originalArguments,
+          normalized_arguments: { ...originalArguments, cell_tissue_terms: [] },
+          normalization_warnings: [{
+            schema_version: "1.0.0",
+            code: "empty_optional_search_term_removed",
+            field: "cell_tissue_terms",
+            original_index: 0,
+          }],
+        },
+      }],
+    };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [normalizedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: normalizedRun },
+    });
+    const user = userEvent.setup();
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText(/1 empty optional filter was removed before execution/i)).toBeInTheDocument();
+    expect(screen.queryByText(/tool input invalid/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View trace" }));
+    expect(await screen.findByText(/empty_optional_search_term_removed/)).toBeInTheDocument();
+    expect(screen.getByText(/"cell_tissue_terms":\[""\]/)).toBeInTheDocument();
+    expect(screen.getByText(/"cell_tissue_terms":\[\]/)).toBeInTheDocument();
+  });
+
   it("shows a no-candidate review without a false dataset approval action", async () => {
     const noCandidateRun: AdminAgentRun = {
       ...run,

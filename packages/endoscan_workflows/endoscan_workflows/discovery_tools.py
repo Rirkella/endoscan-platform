@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from xml.etree import ElementTree
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .artifacts import LocalArtifactStore
 from .config import AgentRunMode
@@ -25,6 +25,15 @@ from .source_security import (
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 GEO_SOFT = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
 GSE_PATTERN = re.compile(r"^GSE[1-9][0-9]{1,8}$", re.I)
+ALLOWED_GEO_ORGANISMS = frozenset({"Homo sapiens", "Mus musculus"})
+ALLOWED_GEO_STUDY_TYPES = frozenset(
+    {
+        "Expression profiling by array",
+        "Expression profiling by high throughput sequencing",
+        "array",
+        "sequencing",
+    }
+)
 
 
 class ToolContract(BaseModel):
@@ -32,19 +41,63 @@ class ToolContract(BaseModel):
 
 
 class SearchGeoSeriesInput(ToolContract):
-    scientific_terms: list[str] = Field(min_length=1, max_length=4)
-    organism_alternatives: list[str] = Field(default_factory=lambda: ["Homo sapiens"], max_length=4)
-    study_type_alternatives: list[str] = Field(default_factory=list, max_length=4)
-    cell_tissue_terms: list[str] = Field(default_factory=list, max_length=4)
-    treatment_terms: list[str] = Field(default_factory=list, max_length=4)
-    maximum_results: int = Field(default=5, ge=1, le=10)
+    scientific_terms: list[str] = Field(
+        min_length=1,
+        max_length=4,
+        description=(
+            "Required concrete scientific concepts for the bounded GEO query. "
+            "At least one non-empty term is required; empty strings are not allowed."
+        ),
+    )
+    organism_alternatives: list[str] = Field(
+        default_factory=lambda: ["Homo sapiens"],
+        max_length=4,
+        description=(
+            "Optional allowlisted organism alternatives. Return [] when no organism "
+            "constraint is intended. Empty strings are not allowed."
+        ),
+    )
+    study_type_alternatives: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description=(
+            "Optional allowlisted GEO study-type terms. Return [] when no study-type "
+            "constraint is intended. Empty strings are not allowed."
+        ),
+    )
+    cell_tissue_terms: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description=(
+            "Optional concrete cell-line, tissue, or organ terms. Return [] when no such "
+            "constraint is intended. Empty strings are not allowed."
+        ),
+    )
+    treatment_terms: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description=(
+            "Optional concrete treatment or exposure terms. Return [] when no such "
+            "constraint is intended. Empty strings are not allowed."
+        ),
+    )
+    maximum_results: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Maximum bounded GEO Series results to return (1 through 10).",
+    )
     publication_date_start: str | None = Field(
         default=None, pattern=r"^[0-9]{4}(/[0-9]{2}/[0-9]{2})?$"
     )
     publication_date_end: str | None = Field(
         default=None, pattern=r"^[0-9]{4}(/[0-9]{2}/[0-9]{2})?$"
     )
-    strategy_reason: str = Field(min_length=5, max_length=500)
+    strategy_reason: str = Field(
+        min_length=5,
+        max_length=500,
+        description="Brief scientific reason for this bounded search plan.",
+    )
 
     @field_validator(
         "scientific_terms",
@@ -54,14 +107,47 @@ class SearchGeoSeriesInput(ToolContract):
         "treatment_terms",
     )
     @classmethod
-    def normalize_terms(cls, value: list[str]) -> list[str]:
-        normalized: dict[str, str] = {}
+    def validate_terms(cls, value: list[str]) -> list[str]:
         for item in value:
-            term = " ".join(item.split()).strip()
-            if not term or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .+/_-]{0,119}", term):
+            if not item or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .+/_-]{0,119}", item):
                 raise ValueError("search terms contain unsupported characters")
-            normalized.setdefault(term.casefold(), term)
-        return [normalized[key] for key in sorted(normalized)]
+        return value
+
+    @field_validator("organism_alternatives")
+    @classmethod
+    def validate_organisms(cls, value: list[str]) -> list[str]:
+        allowed = {item.casefold() for item in ALLOWED_GEO_ORGANISMS}
+        if any(item.casefold() not in allowed for item in value):
+            raise ValueError("organism alternatives must use allowlisted values")
+        return value
+
+    @field_validator("study_type_alternatives")
+    @classmethod
+    def validate_study_types(cls, value: list[str]) -> list[str]:
+        allowed = {item.casefold() for item in ALLOWED_GEO_STUDY_TYPES}
+        if any(item.casefold() not in allowed for item in value):
+            raise ValueError("study type alternatives must use allowlisted values")
+        return value
+
+    @field_validator("publication_date_start", "publication_date_end")
+    @classmethod
+    def validate_publication_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            datetime.strptime(value, "%Y" if "/" not in value else "%Y/%m/%d")
+        except ValueError as exc:
+            raise ValueError("publication date is invalid") from exc
+        return value
+
+    @model_validator(mode="after")
+    def validate_publication_range(self) -> SearchGeoSeriesInput:
+        if self.publication_date_start and self.publication_date_end:
+            start = self.publication_date_start.replace("/", "")
+            end = self.publication_date_end.replace("/", "")
+            if start.ljust(8, "0") > end.ljust(8, "9"):
+                raise ValueError("publication date range is invalid")
+        return self
 
 
 class SearchGeoSeriesOutput(ToolContract):
@@ -108,6 +194,28 @@ def render_geo_query(request: SearchGeoSeriesInput) -> str:
         end = request.publication_date_end or "3000"
         concepts.append(f"{start}:{end}[Publication Date]")
     return " AND ".join(concepts)
+
+
+def _geo_query_identity(request: SearchGeoSeriesInput) -> str:
+    """Canonical identity for semantically identical commutative GEO query clauses."""
+
+    return json.dumps(
+        {
+            "scientific_terms": sorted(item.casefold() for item in request.scientific_terms),
+            "organism_alternatives": sorted(
+                item.casefold() for item in request.organism_alternatives
+            ),
+            "study_type_alternatives": sorted(
+                item.casefold() for item in request.study_type_alternatives
+            ),
+            "cell_tissue_terms": sorted(item.casefold() for item in request.cell_tissue_terms),
+            "treatment_terms": sorted(item.casefold() for item in request.treatment_terms),
+            "publication_date_start": request.publication_date_start,
+            "publication_date_end": request.publication_date_end,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 class GeoAccessionInput(ToolContract):
@@ -220,12 +328,13 @@ class DiscoveryToolService:
         cache_args = {key: value for key, value in args.items() if key != "strategy_reason"}
         rendered_query = render_geo_query(request)
         normalized_query = rendered_query.casefold()
+        query_identity = _geo_query_identity(request)
         search_key = (_required(invocation.workflow_id, "workflow_id"), invocation.step_id)
         state = self._search_state.setdefault(
             search_key,
             {"queries": {}, "seen_accessions": set(), "search_count": 0, "last": None},
         )
-        prior = state["queries"].get(normalized_query)
+        prior = state["queries"].get(query_identity)
         if prior is not None:
             return prior.model_copy(
                 update={
@@ -354,7 +463,7 @@ class DiscoveryToolService:
             source_artifact_id=artifact_id,
             cache_status=cache_status,
         )
-        state["queries"][normalized_query] = output
+        state["queries"][query_identity] = output
         state["last"] = output
         return output
 

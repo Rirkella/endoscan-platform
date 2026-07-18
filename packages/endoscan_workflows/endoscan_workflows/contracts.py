@@ -332,6 +332,12 @@ class ToolInvocation(StrictContract):
     idempotency_key: str | None = Field(default=None, max_length=160)
 
 
+class ToolNormalizationWarning(StrictContract):
+    code: str = Field(pattern=r"^[a-z][a-z0-9_]{2,79}$")
+    field: str = Field(pattern=r"^[a-z][a-z0-9_]{1,79}$")
+    original_index: int = Field(ge=0)
+
+
 class ToolResult(StrictContract):
     tool_name: str
     status: ToolCallStatus
@@ -339,6 +345,9 @@ class ToolResult(StrictContract):
     error: NormalizedAgentError | None = None
     duration_ms: int = Field(default=0, ge=0)
     replayed: bool = False
+    original_arguments: dict[str, Any] | None = None
+    normalized_arguments: dict[str, Any] | None = None
+    normalization_warnings: list[ToolNormalizationWarning] = Field(default_factory=list)
 
 
 class ProviderToolRequest(StrictContract):
