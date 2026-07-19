@@ -14,6 +14,7 @@ from .config import AgentConfiguration
 from .contracts import (
     SCHEMA_VERSION,
     ActorType,
+    AgentRunStatus,
     ApprovalDecision,
     ApprovalDecisionValue,
     ApprovalRequest,
@@ -73,6 +74,7 @@ from .training_dataset import (
     TrainingDatasetSpecification,
     VerifiedSourceInventory,
     derive_component_requirements,
+    specialized_agent_request,
     validate_strategy_sources,
 )
 
@@ -839,6 +841,249 @@ class WorkflowService:
         with self.database.session() as session:
             return self._snapshot(session, require_build(session, workflow_id))
 
+    def continue_training_dataset_workflow(
+        self,
+        workflow_id: str,
+        *,
+        expected_version: int,
+        actor: str,
+        idempotency_key: str,
+    ) -> WorkflowSnapshot:
+        """Explicitly resume one durable training-dataset activity after recovery.
+
+        Restart reconciliation never invokes a paid provider. This command is the
+        authorization boundary for a build that was already transitioned into an
+        active stage before its bounded agent step was created.
+        """
+
+        snapshot = self.get_build(workflow_id)
+        if snapshot.workflow_kind is not WorkflowKind.TRAINING_DATASET_DISCOVERY:
+            raise WorkflowConflict("Only training-dataset workflows use this continuation.")
+        with self.database.session() as session:
+            prior = session.scalar(
+                select(WorkflowEventRow).where(
+                    WorkflowEventRow.workflow_id == workflow_id,
+                    WorkflowEventRow.idempotency_key
+                    == f"{idempotency_key}:specification:finalize:transition",
+                )
+            )
+            if prior is not None:
+                return self._snapshot(session, require_build(session, workflow_id))
+        if snapshot.version != expected_version:
+            raise StaleWorkflowVersion(
+                "Workflow version is stale.", detail={"current_version": snapshot.version}
+            )
+        if snapshot.current_stage is WorkflowState.SPECIFYING_TARGET_DATASET:
+            return self.run_training_dataset_specification(
+                workflow_id,
+                expected_version=expected_version,
+                actor=actor,
+                idempotency_key=f"{idempotency_key}:specification",
+            )
+        if snapshot.current_stage is WorkflowState.DERIVING_COMPONENT_REQUIREMENTS:
+            derived = self.derive_training_dataset_requirements(
+                workflow_id,
+                actor="deterministic-orchestrator",
+                idempotency_key=f"{idempotency_key}:requirements",
+            )
+            if isinstance(derived, WorkflowSnapshot):
+                return derived
+            return self.get_build(workflow_id)
+        if snapshot.current_stage in {
+            WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE,
+            WorkflowState.DISCOVERING_TRANSCRIPTOMIC_EVIDENCE,
+            WorkflowState.DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES,
+            WorkflowState.DISCOVERING_SUPPORTING_METADATA,
+        }:
+            raise GuardNotSatisfied(
+                "No reviewed production source adapters are configured for this discovery "
+                "stage; provider execution is blocked before a paid turn."
+            )
+        raise InvalidTransition(
+            "The current training-dataset stage has no explicit continuation activity."
+        )
+
+    def run_training_dataset_specification(
+        self,
+        workflow_id: str,
+        *,
+        expected_version: int,
+        actor: str,
+        idempotency_key: str,
+    ) -> WorkflowSnapshot:
+        """Run and checkpoint the bounded Dataset Specification Agent exactly once."""
+
+        if self.harness is None:
+            raise WorkflowConflict("No agent harness is configured.")
+        snapshot = self.get_build(workflow_id)
+        if snapshot.current_stage is not WorkflowState.SPECIFYING_TARGET_DATASET:
+            raise InvalidTransition(
+                "Dataset specification can run only in SPECIFYING_TARGET_DATASET."
+            )
+        if snapshot.version != expected_version:
+            raise StaleWorkflowVersion(
+                "Workflow version is stale.", detail={"current_version": snapshot.version}
+            )
+        with self.database.session() as session:
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None:
+                raise WorkflowNotFound("Training-dataset workflow state was not found.")
+            initial_context = BlindBenchmarkInitialContext.model_validate(
+                _load_training_document(row.initial_context_json)
+            )
+        definition = next(
+            item
+            for item in SPECIALIZED_AGENT_SEQUENCE
+            if item.agent_name == "Dataset Specification Agent"
+        )
+        step = self.create_step(
+            workflow_id,
+            WorkflowState.SPECIFYING_TARGET_DATASET,
+            idempotency_key=f"{idempotency_key}:step",
+            input_payload={
+                "agent_name": definition.agent_name,
+                "benchmark_mode": initial_context.benchmark_mode,
+                "provider": self.agent_configuration.planner_provider,
+                "model": self.agent_configuration.planner_model,
+            },
+        )
+        request = specialized_agent_request(
+            definition=definition,
+            workflow_id=workflow_id,
+            step_id=step.id,
+            workflow_stage=WorkflowState.SPECIFYING_TARGET_DATASET,
+            initial_context=initial_context,
+            validated_artifacts={
+                "target_training_dataset_contract": (
+                    initial_context.target_training_dataset_contract
+                ),
+                "approved_scientific_policies": (
+                    initial_context.approved_scientific_policies
+                ),
+            },
+            configuration=self.agent_configuration,
+        )
+        run_id, result = self.harness.run(request, TrainingDatasetSpecification)
+        if result.status is not AgentRunStatus.COMPLETED or result.output is None:
+            return self._fail_training_dataset_agent_step(
+                workflow_id=workflow_id,
+                step=step,
+                run_id=run_id,
+                request=request,
+                result=result,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+            )
+        specification = TrainingDatasetSpecification.model_validate(result.output)
+        trace_artifact = self._persist_specialized_agent_trace(
+            workflow_id=workflow_id,
+            step=step,
+            run_id=run_id,
+            request=request,
+            result=result,
+            idempotency_key=f"{idempotency_key}:trace",
+        )
+        self.complete_step(
+            step.id,
+            output_payload={
+                "agent_run_id": run_id,
+                "trace_artifact_id": trace_artifact.id,
+                "output_schema": TrainingDatasetSpecification.__name__,
+            },
+            idempotency_key=f"{idempotency_key}:step-complete",
+        )
+        return self.finalize_training_dataset_specification(
+            workflow_id,
+            specification=specification,
+            expected_version=expected_version,
+            actor=definition.agent_name,
+            idempotency_key=f"{idempotency_key}:finalize",
+        )
+
+    def _persist_specialized_agent_trace(
+        self,
+        *,
+        workflow_id: str,
+        step,
+        run_id: str,
+        request,
+        result,
+        idempotency_key: str,
+    ):
+        return self.artifact_store.put_json(
+            workflow_id=workflow_id,
+            step_id=step.id,
+            value={
+                "agent_name": request.agent_name,
+                "provider": request.model.provider,
+                "model": request.model.model_identifier,
+                "run_mode": request.context.get("run_mode"),
+                "benchmark_mode": request.context.get("benchmark_mode"),
+                "agent_run_id": run_id,
+                "status": result.status.value,
+                "turns": result.turns,
+                "tool_calls": result.tool_calls,
+                "usage": result.usage.model_dump(mode="json"),
+                "events": [event.model_dump(mode="json") for event in result.trace],
+            },
+            artifact_type="specialized_agent_trace",
+            logical_name=(
+                f"{request.agent_name.casefold().replace(' ', '-')}-trace-v{step.attempt}.json"
+            ),
+            producer="agent-harness",
+            original_source="endoscan://immutable-trace",
+            idempotency_key=idempotency_key,
+        )
+
+    def _fail_training_dataset_agent_step(
+        self,
+        *,
+        workflow_id: str,
+        step,
+        run_id: str,
+        request,
+        result,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> WorkflowSnapshot:
+        trace_artifact = self._persist_specialized_agent_trace(
+            workflow_id=workflow_id,
+            step=step,
+            run_id=run_id,
+            request=request,
+            result=result,
+            idempotency_key=f"{idempotency_key}:terminal-trace",
+        )
+        with self.database.session() as session:
+            stored_step = session.get(WorkflowStepRow, step.id)
+            if stored_step and stored_step.status == StepStatus.RUNNING.value:
+                retryable = bool(result.error and result.error.retryable)
+                stored_step.status = (
+                    StepStatus.FAILED_RETRYABLE.value if retryable else StepStatus.FAILED.value
+                )
+                if result.error:
+                    stored_step.error_id = deterministic_id("err", run_id, result.error.code)
+                stored_step.output_json = canonical_json(
+                    versioned_payload(trace_artifact_id=trace_artifact.id)
+                )
+                stored_step.completed_at = utc_text()
+        return self.transition(
+            workflow_id,
+            TransitionRequest(
+                target_state=WorkflowState.FAILED,
+                expected_version=expected_version,
+                idempotency_key=f"{idempotency_key}:failed",
+                initiator=ActorType.ORCHESTRATOR,
+                initiator_id="agent-harness",
+                reason=(
+                    result.error.safe_message
+                    if result.error
+                    else "Specialized agent failed safely."
+                ),
+                artifact_hashes=[trace_artifact.sha256],
+            ),
+        )
+
     def start_build(
         self,
         workflow_id: str,
@@ -863,7 +1108,7 @@ class WorkflowService:
             )
             if context is None:
                 raise GuardNotSatisfied("Training-dataset initial context is missing.")
-            return self.transition(
+            snapshot = self.transition(
                 workflow_id,
                 TransitionRequest(
                     target_state=WorkflowState.SPECIFYING_TARGET_DATASET,
@@ -874,6 +1119,14 @@ class WorkflowService:
                     reason="Administrator started target training-dataset specification.",
                     artifact_hashes=[definition.sha256, context.sha256],
                 ),
+            )
+            if snapshot.current_stage is not WorkflowState.SPECIFYING_TARGET_DATASET:
+                return snapshot
+            return self.run_training_dataset_specification(
+                workflow_id,
+                expected_version=snapshot.version,
+                actor=actor,
+                idempotency_key=f"{idempotency_key}:specification",
             )
         snapshot = self.transition(
             workflow_id,

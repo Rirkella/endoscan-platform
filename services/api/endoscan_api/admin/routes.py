@@ -113,6 +113,19 @@ def start(build_id: str, body: WorkflowCommandBody, request: Request, key: str =
     return _command("start_build", build_id, body, request, key)
 
 
+@router.post(
+    "/endpoint-builds/{build_id}/continue-training-dataset",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def continue_training_dataset(
+    build_id: str,
+    body: WorkflowCommandBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _command("continue_training_dataset_workflow", build_id, body, request, key)
+
+
 @router.post("/endpoint-builds/{build_id}/pause", dependencies=[Depends(require_mutation_budget)])
 def pause(build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)):
     return _command("pause", build_id, body, request, key)

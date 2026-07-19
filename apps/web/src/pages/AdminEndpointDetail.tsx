@@ -348,7 +348,16 @@ export function AdminEndpointDetail() {
 
   const load = useCallback(async () => {
     try {
-      const [nextBuild, nextEvents, nextArtifacts, nextApprovals, nextRuns, nextErrors, nextTrainingWorkflow] =
+      const [
+        nextBuild,
+        nextEvents,
+        nextArtifacts,
+        nextApprovals,
+        nextRuns,
+        nextErrors,
+        nextTrainingWorkflow,
+        nextCapabilities,
+      ] =
         await Promise.all([
           api.adminGetBuild(buildId),
           api.adminTimeline(buildId),
@@ -363,6 +372,7 @@ export function AdminEndpointDetail() {
             legacy: true,
             label: "Legacy single-source discovery",
           })),
+          api.adminCapabilities().catch(() => null),
         ]);
       setBuild(nextBuild);
       setEvents(nextEvents);
@@ -381,14 +391,14 @@ export function AdminEndpointDetail() {
         setCandidates(content.candidates ?? []);
         setRecommendedCandidateId(content.recommended_candidate_id);
         setSelected((current) => current || content.candidates?.[0]?.candidate_id || "");
-        setRunMode(persistedRunMode ?? content.run_mode ?? (content.live_discovery ? "live" : "replay"));
+        setRunMode(persistedRunMode ?? content.run_mode ?? nextCapabilities?.run_mode ?? "replay");
         setSimulationLabel(content.simulation_label ?? null);
         setDecisionSummary(content.decision_summary ?? "");
         setUnresolvedQuestions(content.unresolved_questions ?? []);
       } else {
         setCandidates([]);
         setRecommendedCandidateId(undefined);
-        setRunMode(persistedRunMode ?? "replay");
+        setRunMode(persistedRunMode ?? nextCapabilities?.run_mode ?? "replay");
         setSimulationLabel(null);
         setDecisionSummary("");
         setUnresolvedQuestions([]);
@@ -448,6 +458,23 @@ export function AdminEndpointDetail() {
       await load();
     } catch (reason) {
       setError(reason instanceof EndoscanApiError ? reason.detail : "Source metadata could not be refreshed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function continueTrainingDataset() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminContinueTrainingDataset(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof EndoscanApiError
+          ? reason.detail
+          : "The active training-dataset stage could not be continued.",
+      );
     } finally {
       setBusy(false);
     }
@@ -710,6 +737,14 @@ export function AdminEndpointDetail() {
             <div className="admin-panel-heading"><h2 id="workflow-actions-title">Workflow actions</h2><span>Only valid actions are shown</span></div>
             <div className="admin-actions" aria-label="Workflow controls">
               {build.current_stage === "DRAFT" && <button disabled={busy} onClick={() => void command("start")}>Start workflow</button>}
+              {build.workflow_kind === "training_dataset_discovery" &&
+                ["SPECIFYING_TARGET_DATASET", "DERIVING_COMPONENT_REQUIREMENTS"].includes(
+                  build.current_stage,
+                ) && (
+                  <button disabled={busy} onClick={() => void continueTrainingDataset()}>
+                    Continue active stage
+                  </button>
+                )}
               {canPause && <button disabled={busy} onClick={() => void command("pause")}>Pause</button>}
               {build.current_stage === "PAUSED" && <button disabled={busy} onClick={() => void command("resume")}>Resume</button>}
               {canRetry && <button disabled={busy} onClick={() => void command("retry")}>Retry failed step</button>}

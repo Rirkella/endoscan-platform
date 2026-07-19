@@ -231,7 +231,97 @@ class FakeAgentProvider:
             if not isinstance(approval, dict):
                 raise ProviderFailure("Prepared approval payload is missing.", retryable=False)
             return ProviderTurn(kind="approval", approval=approval, usage=self._usage(len(history)))
+        if request.output_schema_name == "TrainingDatasetSpecification":
+            return self._training_dataset_specification_turn(request, history)
         return self._discovery_turn(request, history)
+
+    def _training_dataset_specification_turn(
+        self, request: AgentRunRequest, history: list[dict]
+    ) -> ProviderTurn:
+        endpoint_name = str(request.context.get("endpoint_name", "Prepared endpoint"))
+        biological_goal = str(request.context.get("biological_goal", ""))
+        return ProviderTurn(
+            kind="output",
+            output={
+                "contract_version": "1.0.0",
+                "specification_id": "prepared-source-neutral-specification",
+                "endpoint_name": endpoint_name,
+                "biological_target": "Unresolved target requiring human review",
+                "endpoint_modality": "Unresolved endpoint modality",
+                "endpoint_definition": (
+                    biological_goal
+                    or "Prepared source-neutral endpoint definition requiring human review."
+                ),
+                "intended_prediction_task": (
+                    "Predict endpoint-relative compound activity from compound-induced "
+                    "transcriptomic responses for an explicitly approved biological context."
+                ),
+                "prediction_unit": "compound_cell_context_dose_time",
+                "explicit_prediction_grain": None,
+                "acceptable_activity_representations": [
+                    "continuous_activity",
+                    "binary_active_inactive",
+                ],
+                "acceptable_transcriptomic_representations": [
+                    "processed differential signature",
+                    "raw expression with matched controls",
+                ],
+                "compound_identity_requirements": ["PubChem CID", "InChIKey"],
+                "chemical_structure_requirements": [
+                    "canonical SMILES",
+                    "isomeric SMILES where available",
+                ],
+                "experimental_context_requirements": [
+                    "cell or tissue context",
+                    "dose",
+                    "exposure duration",
+                    "control or reference definition",
+                ],
+                "mandatory_output_fields": [
+                    "canonical_compound_id",
+                    "canonical_smiles",
+                    "inchikey",
+                    "transcriptomic_signature",
+                    "feature_schema",
+                    "cell_or_tissue_context",
+                    "dose",
+                    "exposure_time",
+                    "endpoint_activity_value",
+                    "endpoint_modality",
+                    "assay_id",
+                    "provenance",
+                    "quality_flags",
+                ],
+                "optional_output_fields": [
+                    "preferred_name",
+                    "isomeric_smiles",
+                    "endpoint_activity_label",
+                ],
+                "allowed_missingness": {"isomeric_smiles": 1.0},
+                "minimum_evidence_requirements": [
+                    "official primary public records",
+                    "human-reviewed endpoint modality",
+                ],
+                "minimum_coverage_requirements": {},
+                "minimum_class_size_requirements": {},
+                "permitted_biological_contexts": [],
+                "excluded_modalities": [],
+                "intended_scope_of_claim": (
+                    "Prepared research-use scope restricted to the approved endpoint, evidence "
+                    "modalities, and experimental contexts."
+                ),
+                "assumptions_requiring_human_approval": [
+                    "Resolve the biological target and endpoint modality.",
+                    "Approve the observation grain and acceptable context aggregation.",
+                ],
+                "unresolved_questions": [
+                    "Which biological contexts are permitted?",
+                    "Which activity representation is primary?",
+                ],
+                "requires_human_review": True,
+            },
+            usage=self._usage(len(history)),
+        )
 
     def _discovery_turn(self, request: AgentRunRequest, history: list[dict]) -> ProviderTurn:
         sequence = [

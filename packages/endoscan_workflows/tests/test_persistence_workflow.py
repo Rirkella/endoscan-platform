@@ -8,9 +8,11 @@ from sqlalchemy import inspect, select, text, update
 from sqlalchemy.exc import DatabaseError
 
 from endoscan_workflows.contracts import (
+    ActorType,
     ApprovalDecision,
     ApprovalDecisionValue,
     EndpointBuildCreate,
+    TransitionRequest,
     WorkflowKind,
     WorkflowState,
 )
@@ -25,6 +27,7 @@ from endoscan_workflows.errors import (
     WorkflowNotFound,
 )
 from endoscan_workflows.models import EndpointBuildRow, WorkflowErrorRow, WorkflowEventRow
+from endoscan_workflows.providers import ProviderFailure
 from endoscan_workflows.repository import load_versioned_json
 from endoscan_workflows.training_dataset import TrainingDatasetSpecification
 
@@ -149,8 +152,11 @@ def test_training_dataset_draft_is_hint_free_durable_and_strategy_locked(
         actor="test-admin",
         idempotency_key="start-training-dataset",
     )
-    assert started.current_stage is WorkflowState.SPECIFYING_TARGET_DATASET
-    assert service.agent_runs(build.id) == []
+    assert started.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL
+    runs = service.agent_runs(build.id)
+    assert len(runs) == 1
+    assert runs[0]["agent_name"] == "Dataset Specification Agent"
+    assert runs[0]["status"] == "completed"
 
 
 def test_training_dataset_documents_survive_readback_and_requirements_are_deterministic(
@@ -203,18 +209,11 @@ def test_training_dataset_specification_approval_precedes_discovery(
             idempotency_key="training-spec-approval",
         )
     )
-    started = service.start_build(
+    waiting = service.start_build(
         build.id,
         expected_version=0,
         actor="test-admin",
         idempotency_key="training-spec-start",
-    )
-    waiting = service.finalize_training_dataset_specification(
-        build.id,
-        specification=training_specification(),
-        expected_version=started.version,
-        actor="Dataset Specification Agent",
-        idempotency_key="training-spec-finalize",
     )
     assert waiting.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL
     approval = service.list_approvals(build.id, pending_only=True)[0]
@@ -238,6 +237,97 @@ def test_training_dataset_specification_approval_precedes_discovery(
     )
     assert discovering.current_stage is WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE
     assert service.training_dataset_workflow(build.id)["assembly_strategies"] is None
+
+
+def test_training_dataset_specification_recovery_requires_explicit_idempotent_continue(
+    workflow_runtime,
+) -> None:
+    _database, store, _providers, _harness, service = workflow_runtime
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Example functional endpoint",
+            endpoint_slug="example-functional-endpoint-recovery",
+            biological_goal="Construct a reviewable public training-dataset plan.",
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="training-spec-recovery",
+        )
+    )
+    artifacts = store.list_artifacts(build.id)
+    active = service.transition(
+        build.id,
+        TransitionRequest(
+            target_state=WorkflowState.SPECIFYING_TARGET_DATASET,
+            expected_version=0,
+            idempotency_key="training-spec-recovery:specifying",
+            initiator=ActorType.HUMAN,
+            initiator_id="test-admin",
+            reason="Prepared interrupted pre-agent state.",
+            artifact_hashes=[item.sha256 for item in artifacts],
+        ),
+    )
+    assert service.agent_runs(build.id) == []
+
+    waiting = service.continue_training_dataset_workflow(
+        build.id,
+        expected_version=active.version,
+        actor="test-admin",
+        idempotency_key="training-spec-recovery:continue",
+    )
+    repeated = service.continue_training_dataset_workflow(
+        build.id,
+        expected_version=active.version,
+        actor="test-admin",
+        idempotency_key="training-spec-recovery:continue",
+    )
+
+    assert waiting.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL
+    assert repeated.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL
+    assert len(service.agent_runs(build.id)) == 1
+
+
+def test_training_dataset_specification_failure_invokes_provider_once_without_retry(
+    workflow_runtime,
+) -> None:
+    _database, _store, providers, _harness, service = workflow_runtime
+
+    class CountingFailureProvider:
+        name = "fake"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs):
+            self.calls += 1
+            raise ProviderFailure("Prepared terminal failure.", retryable=False)
+
+    provider = CountingFailureProvider()
+    providers._providers["fake"] = lambda: provider
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Example functional endpoint",
+            endpoint_slug="example-functional-endpoint-failure",
+            biological_goal="Construct a reviewable source-neutral public training plan.",
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="training-spec-provider-failure",
+        )
+    )
+
+    failed = service.start_build(
+        build.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="training-spec-provider-failure:start",
+    )
+
+    assert failed.current_stage is WorkflowState.FAILED
+    assert provider.calls == 1
+    runs = service.agent_runs(build.id)
+    assert len(runs) == 1
+    assert runs[0]["status"] == "failed"
 
 
 def test_create_is_idempotent_and_deterministic(workflow_runtime) -> None:

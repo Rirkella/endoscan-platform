@@ -129,11 +129,34 @@ const candidates = [
   },
 ];
 
+const replayCapabilities = {
+  schema_version: "1.0.0",
+  provider: "fake",
+  model: "prepared-fixture",
+  run_mode: "replay",
+  api_key_present: false,
+  live_mode_enabled: false,
+  source_tools_available: false,
+  tracing_enabled: false,
+  configured_budget: {
+    maximum_turns: 6,
+    maximum_tool_calls: 6,
+    timeout_seconds: 120,
+    maximum_input_tokens: 8000,
+    maximum_output_tokens: 1500,
+    maximum_cost_usd: 0.2,
+    retry_count: 0,
+    input_cost_per_million_usd: 0,
+    output_cost_per_million_usd: 0,
+  },
+} as const;
+
 function detailRoutes(
   current: () => AdminBuild,
   errors: AdminWorkflowError[] = [],
 ) {
   return {
+    "GET /api/admin/capabilities": { body: replayCapabilities },
     [`GET /api/admin/endpoint-builds/${buildId}`]: () => ({ body: current() }),
     [`GET /api/admin/endpoint-builds/${buildId}/timeline`]: { body: events },
     [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [artifact] },
@@ -318,6 +341,29 @@ describe("Phase-0 build detail information architecture", () => {
 
     expect(await screen.findByText("No agent run yet.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Copy full run ID/ })).not.toBeInTheDocument();
+  });
+
+  it("uses authoritative live capabilities before the first training agent run", async () => {
+    installFetchMock({
+      ...detailRoutes(() => build("SPECIFYING_TARGET_DATASET", 1, {
+        workflow_kind: "training_dataset_discovery",
+        benchmark_mode: "blind_training_dataset_discovery",
+      })),
+      "GET /api/admin/capabilities": {
+        body: {
+          ...replayCapabilities,
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          run_mode: "live",
+        },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText("Live agent mode")).toBeInTheDocument();
+    expect(screen.queryByText("Replay mode")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue active stage" })).toBeInTheDocument();
   });
 
   it("uses the latest persisted run identifier when multiple attempts exist", async () => {

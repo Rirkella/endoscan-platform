@@ -254,6 +254,12 @@ export const api = {
       { expected_version: version, actor: "local-admin" },
       "refresh-source-metadata",
     ),
+  adminContinueTrainingDataset: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/continue-training-dataset`,
+      { expected_version: version, actor: "local-admin" },
+      "continue-training-dataset",
+    ),
   adminTimeline: (id: string) =>
     adminGet<AdminTimelineEvent[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/timeline`),
   adminArtifacts: (id: string) =>
