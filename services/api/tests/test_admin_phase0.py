@@ -88,14 +88,12 @@ def test_training_dataset_draft_api_is_hint_free_and_strategy_locked(
         artifacts = client.get(
             f"/admin/endpoint-builds/{build['id']}/artifacts", headers=ADMIN
         ).json()
-        assert "endpoint_request_semantic_hints" in {
-            item["artifact_type"] for item in artifacts
-        }
+        assert "endpoint_request_semantic_hints" in {item["artifact_type"] for item in artifacts}
         runs = client.get(f"/admin/endpoint-builds/{build['id']}/agent-runs", headers=ADMIN)
         assert runs.json() == []
 
 
-def test_training_dataset_start_runs_specification_agent_and_persists_approval(
+def test_training_dataset_start_compiles_specification_and_persists_approval(
     repo_root, monkeypatch, tmp_path
 ) -> None:
     configure(monkeypatch, tmp_path)
@@ -104,9 +102,12 @@ def test_training_dataset_start_runs_specification_agent_and_persists_approval(
             client,
             "/admin/endpoint-builds",
             {
-                "endpoint_name": "Example functional endpoint",
+                "endpoint_name": "X receptor antagonist",
                 "endpoint_slug": "example-functional-endpoint-start",
-                "biological_goal": "Construct a reviewable source-neutral public training plan.",
+                "biological_goal": (
+                    "Construct a compound-level source-neutral public training plan with "
+                    "transcriptomic responses."
+                ),
                 "created_by": "local-admin",
                 "workflow_kind": "training_dataset_discovery",
                 "benchmark_mode": "blind_training_dataset_discovery",
@@ -120,12 +121,11 @@ def test_training_dataset_start_runs_specification_agent_and_persists_approval(
             "api-training-start",
         )
         assert started.status_code == 200, started.text
-        assert started.json()["current_stage"] == "AWAITING_DATASET_SPECIFICATION_APPROVAL"
+        assert started.json()["current_stage"] == "AWAITING_DATASET_SPECIFICATION_REVIEW"
         runs = client.get(
             f"/admin/endpoint-builds/{created['id']}/agent-runs", headers=ADMIN
         ).json()
-        assert len(runs) == 1
-        assert runs[0]["agent_name"] == "Dataset Specification Agent"
+        assert runs == []
         approvals = client.get(
             f"/admin/endpoint-builds/{created['id']}/approvals", headers=ADMIN
         ).json()
@@ -151,7 +151,7 @@ def test_specialized_boundary_probes_are_zero_network(repo_root, monkeypatch, tm
         specification = next(
             item
             for item in body["results"]
-            if item["agent_name"] == "Dataset Specification Agent"
+            if item["agent_name"] == "Dataset Specification Review Agent"
         )
         assert specification["semantic_hints_present"] is True
 

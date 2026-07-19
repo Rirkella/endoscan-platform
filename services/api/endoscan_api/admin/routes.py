@@ -137,6 +137,16 @@ def retry_dataset_specification(
 
 
 @router.post(
+    "/endpoint-builds/{build_id}/run-dataset-specification-review",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def run_dataset_specification_review(
+    build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)
+):
+    return _command("run_optional_dataset_specification_review", build_id, body, request, key)
+
+
+@router.post(
     "/endpoint-builds/{build_id}/revise-endpoint-request",
     dependencies=[Depends(require_mutation_budget)],
 )

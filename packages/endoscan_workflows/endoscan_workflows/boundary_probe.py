@@ -23,7 +23,7 @@ from .training_dataset import (
 )
 
 SPECIALIZED_AGENT_STAGES = {
-    "Dataset Specification Agent": WorkflowState.SPECIFYING_TARGET_DATASET,
+    "Dataset Specification Review Agent": WorkflowState.REVIEWING_DATASET_SPECIFICATION,
     "Activity Evidence Discovery Agent": WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE,
     "Transcriptomic Evidence Discovery Agent": WorkflowState.DISCOVERING_TRANSCRIPTOMIC_EVIDENCE,
     "Chemical Identity and Structure Source Discovery Agent": (
@@ -168,8 +168,10 @@ class AdapterBoundaryProbe:
             exception_class = None
             developer_message = None
             handlers: dict[str, Any] = {}
+            fingerprint = None
             try:
                 agent = adapter._build_agent(request)
+                fingerprint = adapter.structured_output_fingerprint(request)
                 run_config = adapter._build_run_config(
                     request, model_provider=_BoundaryModelProvider()
                 )
@@ -194,6 +196,7 @@ class AdapterBoundaryProbe:
                 developer_message = sanitize_local_sdk_message(exc.message)
             except Exception as exc:
                 exception_class = type(exc).__name__
+                fingerprint = None
             results.append(
                 {
                     "agent_name": definition.agent_name,
@@ -210,12 +213,26 @@ class AdapterBoundaryProbe:
                     "output_schema_name": definition.output_schema_name,
                     "output_schema_version": request.agent_version,
                     "output_schema_size": len(
-                        canonical_json(sdk_output_schema(definition.output_schema_name).json_schema())
+                        canonical_json(
+                            sdk_output_schema(definition.output_schema_name).json_schema()
+                        )
+                    ),
+                    "output_type_present": bool(fingerprint and fingerprint.output_type_present),
+                    "strict_json_schema": bool(fingerprint and fingerprint.strict_json_schema),
+                    "api_surface": fingerprint.api_surface if fingerprint else None,
+                    "schema_hash": fingerprint.schema_hash if fingerprint else None,
+                    "runtime_configuration_hash": (
+                        fingerprint.runtime_configuration_hash if fingerprint else None
+                    ),
+                    "boundary_probe_configuration_hash": (
+                        fingerprint.boundary_probe_configuration_hash if fingerprint else None
+                    ),
+                    "boundary_runtime_contracts_match": bool(
+                        fingerprint and fingerprint.boundary_runtime_contracts_match
                     ),
                     "error_handler_names": sorted(handlers),
                     "semantic_hints_present": (
-                        "endpoint_request_semantic_hints"
-                        in request.context["validated_artifacts"]
+                        "endpoint_request_semantic_hints" in request.context["validated_artifacts"]
                     ),
                     "provider_retries": request.budget.retry_count,
                     "network_requests": 0,

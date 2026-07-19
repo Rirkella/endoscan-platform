@@ -418,16 +418,75 @@ def specification_request() -> AgentRunRequest:
     )
 
 
-def test_exact_specification_schema_is_strict_and_bounded() -> None:
+def test_exact_legacy_specification_schema_remains_readable() -> None:
     with pytest.raises(UserError, match="Strict JSON schema is enabled"):
         AgentOutputSchema(TrainingDatasetSpecification)
     schema = sdk_output_schema("DatasetSpecificationAgentOutcome").json_schema()
     encoded = json.dumps(schema, separators=(",", ":"), sort_keys=True)
     assert len(encoded) < 8_000
     assert schema["additionalProperties"] is False
-    assert schema["required"] == list(schema["properties"])
+    assert '"additionalProperties":true' not in encoded
+
+
+def test_compact_specification_review_schema_is_strict_and_bounded() -> None:
+    schema = sdk_output_schema("DatasetSpecificationReviewOutcome")
+    encoded = json.dumps(schema.json_schema(), separators=(",", ":"), sort_keys=True)
+    assert len(encoded) < 5_000
+    assert schema.is_strict_json_schema() is True
+    assert schema.json_schema()["additionalProperties"] is False
+    assert schema.json_schema()["required"] == list(schema.json_schema()["properties"])
     assert '"additionalProperties":true' not in encoded
     assert '"default"' not in encoded
+
+
+def test_structured_output_request_fingerprint_records_safe_runtime_contract() -> None:
+    item = provider(lambda *_args, **_kwargs: result(valid_output()))
+    base = request()
+    expected = {
+        "agent_name": base.agent_name,
+        "output_schema_name": base.output_schema_name,
+        "api_surface": "responses",
+        "configured_model": base.model.model_identifier,
+        "tool_count": len(base.available_tools),
+        "tool_choice_mode": "auto",
+    }
+    fingerprint = item.structured_output_fingerprint(
+        base.model_copy(
+            update={"context": {**base.context, "structured_output_boundary_contract": expected}}
+        )
+    )
+    assert fingerprint.output_type_present is True
+    assert fingerprint.strict_json_schema is True
+    assert fingerprint.api_surface == "responses"
+    assert fingerprint.boundary_runtime_contracts_match is True
+    assert fingerprint.runtime_configuration_hash == (fingerprint.boundary_probe_configuration_hash)
+    assert len(fingerprint.schema_hash) == 64
+    assert fingerprint.schema_byte_size > 0
+    persisted = fingerprint.model_dump_json().casefold()
+    assert base.instructions.casefold() not in persisted
+    assert "unit-test-provider-secret" not in persisted
+    assert "raw_response" not in persisted
+
+
+def test_structured_output_request_fingerprint_detects_wrong_runtime_schema() -> None:
+    item = provider(lambda *_args, **_kwargs: result(valid_output()))
+    base = request()
+    expected = {
+        "agent_name": base.agent_name,
+        "output_schema_name": "DatasetSpecificationReviewOutcome",
+        "api_surface": "responses",
+        "configured_model": base.model.model_identifier,
+        "tool_count": len(base.available_tools),
+        "tool_choice_mode": "auto",
+    }
+    fingerprint = item.structured_output_fingerprint(
+        base.model_copy(
+            update={"context": {**base.context, "structured_output_boundary_contract": expected}}
+        )
+    )
+    assert fingerprint.output_type_present is True
+    assert fingerprint.boundary_runtime_contracts_match is False
+    assert fingerprint.runtime_configuration_hash != (fingerprint.boundary_probe_configuration_hash)
 
 
 def test_offline_specification_boundary_fixtures_cover_invalid_shapes() -> None:
@@ -512,9 +571,7 @@ def test_specification_error_handlers_are_terminal_safe_and_preserve_metadata(
             raw_responses=[raw_response],
         )
 
-    turn = provider(runner).run_turn(
-        specification_request(), [], interruption_requested=False
-    )
+    turn = provider(runner).run_turn(specification_request(), [], interruption_requested=False)
     assert calls == 1
     assert include_in_history is False
     assert turn.kind == "output"
@@ -529,6 +586,14 @@ def test_specification_error_handlers_are_terminal_safe_and_preserve_metadata(
     assert turn.diagnostic.usage.output_tokens == 45
     assert turn.diagnostic.usage.cached_tokens == 12
     assert turn.diagnostic.retryable is False
+    assert turn.diagnostic.output_item_count == 1
+    assert turn.diagnostic.output_item_types == ["message"]
+    assert turn.diagnostic.text_output_present is False
+    assert turn.diagnostic.bounded_text_length == 0
+    assert turn.diagnostic.json_object_present is False
+    assert turn.diagnostic.strict_mode is True
+    assert turn.diagnostic.request_fingerprint is not None
+    assert turn.diagnostic.request_fingerprint.output_type_present is True
     serialized = turn.model_dump_json()
     assert "sk-unit-test-secret" not in serialized
     assert "do-not-store" not in serialized

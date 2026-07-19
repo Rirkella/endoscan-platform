@@ -25,6 +25,9 @@ class StrictContract(BaseModel):
 
 class WorkflowState(str, Enum):
     DRAFT = "DRAFT"
+    COMPILING_TARGET_DATASET_SPECIFICATION = "COMPILING_TARGET_DATASET_SPECIFICATION"
+    AWAITING_DATASET_SPECIFICATION_REVIEW = "AWAITING_DATASET_SPECIFICATION_REVIEW"
+    REVIEWING_DATASET_SPECIFICATION = "REVIEWING_DATASET_SPECIFICATION"
     SPECIFYING_TARGET_DATASET = "SPECIFYING_TARGET_DATASET"
     AWAITING_DATASET_SPECIFICATION_APPROVAL = "AWAITING_DATASET_SPECIFICATION_APPROVAL"
     AWAITING_DATASET_SPECIFICATION_REVISION = "AWAITING_DATASET_SPECIFICATION_REVISION"
@@ -290,6 +293,28 @@ class UsageReport(StrictContract):
         return self
 
 
+class StructuredOutputRequestFingerprint(StrictContract):
+    """Safe proof of the exact structured-output contract used for one model turn."""
+
+    agent_name: str = Field(min_length=2, max_length=120)
+    output_type_name: str = Field(min_length=1, max_length=160)
+    schema_version: Literal["1.0.0"] = SCHEMA_VERSION
+    schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    schema_byte_size: int = Field(ge=2, le=1_000_000)
+    strict_json_schema: bool
+    api_surface: Literal["responses", "chat_completions"]
+    provider_class: str = Field(min_length=1, max_length=160)
+    configured_model: str = Field(min_length=1, max_length=160)
+    tool_count: int = Field(ge=0, le=64)
+    tool_choice_mode: Literal["none", "auto", "required"]
+    sdk_version: str = Field(min_length=1, max_length=80)
+    model_settings_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    boundary_probe_configuration_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    runtime_configuration_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    boundary_runtime_contracts_match: bool
+    output_type_present: bool
+
+
 class StructuredOutputDiagnostic(StrictContract):
     """Bounded, allowlisted SDK metadata; never raw prompts or model output."""
 
@@ -312,7 +337,13 @@ class StructuredOutputDiagnostic(StrictContract):
     incomplete_reason: str | None = Field(default=None, max_length=240)
     refusal_present: bool = False
     output_item_types: list[str] = Field(default_factory=list, max_length=40)
+    output_item_count: int = Field(default=0, ge=0, le=100)
+    text_output_present: bool = False
+    bounded_text_length: int = Field(default=0, ge=0, le=100_000)
+    json_object_present: bool = False
     raw_response_count: int = Field(default=0, ge=0, le=100)
+    strict_mode: bool = False
+    request_fingerprint: StructuredOutputRequestFingerprint | None = None
     usage: UsageReport = Field(default_factory=UsageReport)
     duration_ms: int = Field(default=0, ge=0)
     retryable: bool = False

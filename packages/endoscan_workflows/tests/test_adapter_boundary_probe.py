@@ -88,14 +88,17 @@ def test_every_specialized_agent_reaches_its_schema_boundary_without_network(
     assert all(item["local_sdk_configuration_valid"] for item in results)
     assert all(item["model_call_boundary_reached"] for item in results)
     assert all(item["network_requests"] == 0 for item in results)
+    assert all(item["output_type_present"] for item in results)
+    assert all(item["strict_json_schema"] for item in results)
+    assert all(item["boundary_runtime_contracts_match"] for item in results)
     assert all(item["output_schema_version"] == "training-dataset-v1" for item in results)
     assert {item["output_schema_name"] for item in results} == {
-        "DatasetSpecificationAgentOutcome",
+        "DatasetSpecificationReviewOutcome",
         "VerifiedSourceInventoryFragment",
         "TrainingDatasetAssemblyReview",
     }
     specification = next(
-        item for item in results if item["agent_name"] == "Dataset Specification Agent"
+        item for item in results if item["agent_name"] == "Dataset Specification Review Agent"
     )
     assert specification["error_handler_names"] == [
         "invalid_final_output",
@@ -104,6 +107,10 @@ def test_every_specialized_agent_reaches_its_schema_boundary_without_network(
     assert specification["output_schema_size"] < 8_000
     assert specification["provider_retries"] == 0
     assert specification["semantic_hints_present"] is True
+    assert specification["output_type_present"] is True
+    assert specification["strict_json_schema"] is True
+    assert specification["api_surface"] == "responses"
+    assert specification["boundary_runtime_contracts_match"] is True
 
 
 def test_production_agent_tools_and_output_schema_are_strict_sdk_inputs() -> None:

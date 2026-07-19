@@ -7,7 +7,8 @@
     "FAILED": "Stores failed_from_state, retryability and the immutable failed attempt."
   },
   "states": [
-    "DRAFT", "SPECIFYING_TARGET_DATASET", "AWAITING_DATASET_SPECIFICATION_APPROVAL",
+    "DRAFT", "COMPILING_TARGET_DATASET_SPECIFICATION", "AWAITING_DATASET_SPECIFICATION_REVIEW",
+    "REVIEWING_DATASET_SPECIFICATION", "SPECIFYING_TARGET_DATASET", "AWAITING_DATASET_SPECIFICATION_APPROVAL",
     "AWAITING_DATASET_SPECIFICATION_REVISION",
     "DERIVING_COMPONENT_REQUIREMENTS", "DISCOVERING_ACTIVITY_EVIDENCE",
     "DISCOVERING_TRANSCRIPTOMIC_EVIDENCE", "DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES",
@@ -22,11 +23,20 @@
     "CANCELLED"
   ],
   "transitions": [
+    {"from":"DRAFT","to":"COMPILING_TARGET_DATASET_SPECIFICATION","initiator":"human","guard":"training-dataset deterministic compilation explicitly authorized","required_artifacts":["endpoint_definition","blind_context_audit","endpoint_request_semantic_hints"]},
+    {"from":"COMPILING_TARGET_DATASET_SPECIFICATION","to":"AWAITING_DATASET_SPECIFICATION_REVIEW","initiator":"orchestrator","guard":"source-neutral deterministic specification compiled","required_artifacts":["endpoint_request_semantic_hints","training_dataset_specification_draft","dataset_specification_compilation_outcome"]},
+    {"from":"COMPILING_TARGET_DATASET_SPECIFICATION","to":"AWAITING_DATASET_SPECIFICATION_REVISION","initiator":"orchestrator","guard":"core endpoint definition requires human clarification","required_artifacts":["endpoint_request_semantic_hints","dataset_specification_compilation_outcome"]},
+    {"from":"AWAITING_DATASET_SPECIFICATION_REVIEW","to":"REVIEWING_DATASET_SPECIFICATION","initiator":"human","guard":"optional bounded reviewer explicitly authorized","required_artifacts":["training_dataset_specification_draft","dataset_specification_compilation_outcome"]},
+    {"from":"REVIEWING_DATASET_SPECIFICATION","to":"AWAITING_DATASET_SPECIFICATION_REVIEW","initiator":"orchestrator","guard":"optional review completed or unavailable while deterministic draft remains authoritative","required_artifacts":["training_dataset_specification_draft","dataset_specification_review_record"]},
+    {"from":"REVIEWING_DATASET_SPECIFICATION","to":"AWAITING_DATASET_SPECIFICATION_REVISION","initiator":"orchestrator","guard":"optional reviewer found a genuinely blocking contradiction","required_artifacts":["training_dataset_specification_draft","dataset_specification_review_record"]},
+    {"from":"AWAITING_DATASET_SPECIFICATION_REVIEW","to":"DERIVING_COMPONENT_REQUIREMENTS","initiator":"human","guard":"compiled target specification approved with immutable hash binding","required_artifacts":["dataset_specification_approval"]},
+    {"from":"AWAITING_DATASET_SPECIFICATION_REVIEW","to":"DRAFT","initiator":"human","guard":"compiled specification revision requested","required_artifacts":["review_decision"]},
     {"from":"DRAFT","to":"SPECIFYING_TARGET_DATASET","initiator":"human","guard":"training-dataset workflow start explicitly authorized","required_artifacts":["endpoint_definition","blind_context_audit"]},
     {"from":"SPECIFYING_TARGET_DATASET","to":"AWAITING_DATASET_SPECIFICATION_APPROVAL","initiator":"orchestrator","guard":"strict target training-dataset draft produced","required_artifacts":["training_dataset_specification_draft","dataset_specification_agent_outcome"]},
     {"from":"SPECIFYING_TARGET_DATASET","to":"AWAITING_DATASET_SPECIFICATION_REVISION","initiator":"orchestrator","guard":"terminal specification-agent outcome requires human revision","required_artifacts":["dataset_specification_agent_outcome","specialized_agent_trace"]},
     {"from":"AWAITING_DATASET_SPECIFICATION_REVISION","to":"SPECIFYING_TARGET_DATASET","initiator":"human","guard":"explicit retry or configured alternate planner model authorized","required_artifacts":["dataset_specification_agent_outcome"]},
-    {"from":"AWAITING_DATASET_SPECIFICATION_REVISION","to":"DRAFT","initiator":"human","guard":"endpoint request revision selected","required_artifacts":["dataset_specification_agent_outcome"]},
+    {"from":"AWAITING_DATASET_SPECIFICATION_REVISION","to":"COMPILING_TARGET_DATASET_SPECIFICATION","initiator":"human","guard":"explicit deterministic recompilation authorized","required_artifacts":["endpoint_request_semantic_hints"]},
+    {"from":"AWAITING_DATASET_SPECIFICATION_REVISION","to":"DRAFT","initiator":"human","guard":"endpoint request revision selected","required_artifacts":["endpoint_request_semantic_hints"]},
     {"from":"AWAITING_DATASET_SPECIFICATION_APPROVAL","to":"DERIVING_COMPONENT_REQUIREMENTS","initiator":"human","guard":"target specification approved with immutable hash binding","required_artifacts":["dataset_specification_approval"]},
     {"from":"AWAITING_DATASET_SPECIFICATION_APPROVAL","to":"SPECIFYING_TARGET_DATASET","initiator":"human","guard":"target specification revision requested","required_artifacts":["review_decision"]},
     {"from":"DERIVING_COMPONENT_REQUIREMENTS","to":"DISCOVERING_ACTIVITY_EVIDENCE","initiator":"orchestrator","guard":"component requirements derived deterministically","required_artifacts":["component_requirements"]},
