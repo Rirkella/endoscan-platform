@@ -60,6 +60,7 @@ export interface AdminTrainingDatasetWorkflow {
   gap_report?: Record<string, unknown> | null;
   preparation_plan?: Record<string, unknown> | null;
   assembly_review?: Record<string, unknown> | null;
+  planned_discovery_agents?: Array<Record<string, unknown>>;
   discovery_round?: number;
 }
 

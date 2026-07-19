@@ -150,6 +150,85 @@ def training_specification() -> TrainingDatasetSpecification:
     )
 
 
+def approved_specification_policy() -> dict:
+    return {
+        "policy_version": "1.0.0",
+        "activity_representation": (
+            "Retain continuous primary measurements and permit separately versioned derived "
+            "binary or multiclass labels without discarding continuous values."
+        ),
+        "observation_grain": (
+            "Keep compound by transcriptomic experimental context records distinct during "
+            "discovery and initial ingestion."
+        ),
+        "evidence_hierarchy": (
+            "Require direct experimentally measured endpoint activity; retain supporting "
+            "evidence only in provenance and quality flags."
+        ),
+        "multiple_activity_assays": (
+            "Retain assay-specific records separately and defer combination to a later "
+            "human-approved curation policy."
+        ),
+        "conflicting_activity_records": (
+            "Preserve every conflicting record with provenance and conflict flags; do not "
+            "resolve conflicts during discovery."
+        ),
+        "transcriptomic_contexts": (
+            "Keep cell or tissue, dose, duration, control and processing contexts as distinct "
+            "observations."
+        ),
+        "repeated_transcriptomic_signatures": (
+            "Retain repeated signatures separately and report replicate structure and quality "
+            "before any aggregation policy."
+        ),
+        "quality_thresholds": (
+            "Set no arbitrary numeric threshold before real source fields and distributions "
+            "have been inspected."
+        ),
+        "minimum_usable_coverage": (
+            "Set no arbitrary count or overlap minimum before deterministic joinability "
+            "diagnostics are available."
+        ),
+        "missingness": (
+            "Permit explicit staging missingness, but require finalized observations to satisfy "
+            "the approved mandatory fields and population constraints."
+        ),
+        "mandatory_output_fields": [
+            "canonical_compound_id",
+            "preferred_compound_name",
+            "canonical_smiles",
+            "inchikey",
+            "source_specific_compound_ids",
+            "transcriptomic_response_vector",
+            "transcriptomic_feature_schema",
+            "cell_or_tissue_model",
+            "dose",
+            "exposure_duration",
+            "transcriptomic_control_reference",
+            "endpoint_activity_value",
+            "endpoint_activity_label",
+            "endpoint_modality",
+            "assay_id",
+            "assay_context",
+            "complete_provenance",
+            "quality_flags",
+            "uncertainty_flags",
+        ],
+        "nullable_output_fields": [
+            "preferred_compound_name",
+            "endpoint_activity_value",
+            "endpoint_activity_label",
+        ],
+        "optional_output_fields": ["isomeric_smiles"],
+        "population_constraints": [
+            "At least one of endpoint_activity_value or endpoint_activity_label is populated.",
+            "Both activity fields are populated when a label derives from a retained value.",
+            "Incomplete records may remain in staging but not enter the finalized table.",
+        ],
+        "source_discovery_requires_explicit_authorization": True,
+    }
+
+
 def test_training_dataset_draft_is_hint_free_durable_and_strategy_locked(
     workflow_runtime,
 ) -> None:
@@ -274,16 +353,38 @@ def test_training_dataset_specification_approval_precedes_discovery(
             expected_version=waiting.version,
             idempotency_key="training-spec-approved",
             artifact_hashes=approval["request"]["artifact_hashes"],
+            dataset_specification_policy=approved_specification_policy(),
         ),
     )
     assert approved.current_stage is WorkflowState.DERIVING_COMPONENT_REQUIREMENTS
-    discovering = service.derive_training_dataset_requirements(
+    derived = service.derive_training_dataset_requirements(
         build.id,
         actor="deterministic-orchestrator",
         idempotency_key="derive-approved-requirements",
     )
-    assert discovering.current_stage is WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE
-    assert service.training_dataset_workflow(build.id)["assembly_strategies"] is None
+    assert len(derived["sha256"]) == 64
+    waiting = service.get_build(build.id)
+    assert waiting.current_stage is WorkflowState.DERIVING_COMPONENT_REQUIREMENTS
+    workflow = service.training_dataset_workflow(build.id)
+    assert workflow["target_specification"]["approved_policy_version"] == "1.0.0"
+    assert workflow["target_specification"]["requires_human_review"] is False
+    assert len(workflow["target_specification"]["approved_policy_decisions"]) == 10
+    assert len(workflow["component_requirements"]["requirements"]) == 11
+    assert workflow["assembly_strategies"] is None
+    artifact_types = {
+        item.artifact_type for item in service.artifact_store.list_artifacts(build.id)
+    }
+    assert "dataset_specification_human_policy" in artifact_types
+    assert "training_dataset_specification" in artifact_types
+    assert service.agent_runs(build.id) == []
+    authorized = service.continue_training_dataset_workflow(
+        build.id,
+        expected_version=waiting.version,
+        actor="test-admin",
+        idempotency_key="authorize-source-discovery",
+    )
+    assert authorized.current_stage is WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE
+    assert service.agent_runs(build.id) == []
 
 
 def test_training_dataset_specification_recovery_requires_explicit_idempotent_continue(

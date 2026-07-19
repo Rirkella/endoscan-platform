@@ -319,6 +319,8 @@ class TrainingDatasetSpecification(StrictContract):
     experimental_context_requirements: list[str] = Field(min_length=1, max_length=50)
     mandatory_output_fields: list[str] = Field(min_length=1, max_length=100)
     optional_output_fields: list[str] = Field(default_factory=list, max_length=100)
+    nullable_output_fields: list[str] = Field(default_factory=list, max_length=100)
+    population_constraints: list[str] = Field(default_factory=list, max_length=100)
     allowed_missingness: dict[str, float] = Field(default_factory=dict)
     minimum_evidence_requirements: list[str] = Field(min_length=1, max_length=50)
     minimum_coverage_requirements: dict[str, float | int | str] = Field(default_factory=dict)
@@ -328,6 +330,8 @@ class TrainingDatasetSpecification(StrictContract):
     intended_scope_of_claim: str = Field(min_length=10, max_length=4000)
     assumptions_requiring_human_approval: list[str] = Field(default_factory=list, max_length=50)
     unresolved_questions: list[str] = Field(default_factory=list, max_length=100)
+    approved_policy_version: str | None = Field(default=None, max_length=40)
+    approved_policy_decisions: list[str] = Field(default_factory=list, max_length=50)
     requires_human_review: bool = True
 
     @model_validator(mode="after")
@@ -399,6 +403,41 @@ class TrainingDatasetSpecificationDraft(BaseModel):
         ):
             raise ValueError("explicit_prediction_grain is required for explicit_other")
         return self
+
+
+class TrainingDatasetSpecificationApprovalPolicy(StrictContract):
+    """Human-authored policy bound to one deterministic specification approval."""
+
+    policy_version: Literal["1.0.0"] = PLATFORM_SPECIFICATION_POLICY_VERSION
+    activity_representation: str = Field(min_length=20, max_length=4000)
+    observation_grain: str = Field(min_length=20, max_length=4000)
+    evidence_hierarchy: str = Field(min_length=20, max_length=4000)
+    multiple_activity_assays: str = Field(min_length=20, max_length=4000)
+    conflicting_activity_records: str = Field(min_length=20, max_length=4000)
+    transcriptomic_contexts: str = Field(min_length=20, max_length=4000)
+    repeated_transcriptomic_signatures: str = Field(min_length=20, max_length=4000)
+    quality_thresholds: str = Field(min_length=20, max_length=4000)
+    minimum_usable_coverage: str = Field(min_length=20, max_length=4000)
+    missingness: str = Field(min_length=20, max_length=4000)
+    mandatory_output_fields: list[str] = Field(min_length=1, max_length=100)
+    nullable_output_fields: list[str] = Field(default_factory=list, max_length=100)
+    optional_output_fields: list[str] = Field(default_factory=list, max_length=100)
+    population_constraints: list[str] = Field(min_length=1, max_length=100)
+    source_discovery_requires_explicit_authorization: bool = True
+
+    def decision_texts(self) -> list[str]:
+        return [
+            self.activity_representation,
+            self.observation_grain,
+            self.evidence_hierarchy,
+            self.multiple_activity_assays,
+            self.conflicting_activity_records,
+            self.transcriptomic_contexts,
+            self.repeated_transcriptomic_signatures,
+            self.quality_thresholds,
+            self.minimum_usable_coverage,
+            self.missingness,
+        ]
 
 
 class DatasetSpecificationCompilationOutcome(StrictContract):
@@ -1016,8 +1055,15 @@ def materialize_training_dataset_specification(
     draft: TrainingDatasetSpecificationDraft,
     *,
     specification_id: str,
+    approved_policy: TrainingDatasetSpecificationApprovalPolicy | None = None,
 ) -> TrainingDatasetSpecification:
     """Create the full approved contract without inventing policy thresholds."""
+
+    mandatory_fields = (
+        approved_policy.mandatory_output_fields
+        if approved_policy is not None
+        else draft.mandatory_target_table_fields
+    )
 
     return TrainingDatasetSpecification(
         specification_id=specification_id,
@@ -1033,8 +1079,10 @@ def materialize_training_dataset_specification(
         compound_identity_requirements=draft.compound_identity_requirements,
         chemical_structure_requirements=draft.chemical_structure_requirements,
         experimental_context_requirements=draft.experimental_context_requirements,
-        mandatory_output_fields=draft.mandatory_target_table_fields,
-        optional_output_fields=[],
+        mandatory_output_fields=mandatory_fields,
+        optional_output_fields=(approved_policy.optional_output_fields if approved_policy else []),
+        nullable_output_fields=(approved_policy.nullable_output_fields if approved_policy else []),
+        population_constraints=(approved_policy.population_constraints if approved_policy else []),
         allowed_missingness={},
         minimum_evidence_requirements=draft.minimum_evidence_requirements,
         minimum_coverage_requirements={},
@@ -1042,12 +1090,15 @@ def materialize_training_dataset_specification(
         permitted_biological_contexts=[],
         excluded_modalities=draft.explicit_exclusions,
         intended_scope_of_claim=draft.intended_scope_of_claim,
-        assumptions_requiring_human_approval=[
-            *draft.assumptions,
-            *draft.human_decisions_required,
-        ],
+        assumptions_requiring_human_approval=(
+            []
+            if approved_policy is not None
+            else [*draft.assumptions, *draft.human_decisions_required]
+        ),
         unresolved_questions=draft.explicit_ambiguities,
-        requires_human_review=True,
+        approved_policy_version=(approved_policy.policy_version if approved_policy else None),
+        approved_policy_decisions=(approved_policy.decision_texts() if approved_policy else []),
+        requires_human_review=approved_policy is None,
     )
 
 
@@ -1061,6 +1112,8 @@ class ComponentRequirement(StrictContract):
     quality_requirements: list[str] = Field(default_factory=list, max_length=50)
     possible_substitutes: list[ComponentRole] = Field(default_factory=list, max_length=20)
     depends_on: list[str] = Field(default_factory=list, max_length=30)
+    explicit_exclusions: list[str] = Field(default_factory=list, max_length=50)
+    unresolved_discovery_questions: list[str] = Field(default_factory=list, max_length=50)
 
 
 class TrainingDatasetComponentRequirements(StrictContract):
@@ -1086,6 +1139,14 @@ def derive_component_requirements(
     """Derive the source ontology deterministically; this is not a source strategy."""
 
     identity_ids = list(specification.compound_identity_requirements)
+    endpoint_exclusions = list(specification.excluded_modalities) or [
+        "activity outside the approved endpoint modality"
+    ]
+    discovery_questions = [
+        "Which official public source can satisfy this component?",
+        "Which source fields and distributions support a later quality policy?",
+        "How much identity-resolvable and joinable coverage is available?",
+    ]
     requirements = [
         ComponentRequirement(
             requirement_id="endpoint-activity",
@@ -1097,6 +1158,8 @@ def derive_component_requirements(
             acceptable_identifier_types=identity_ids,
             minimum_metadata=["assay_id", "measurement_type", "assay_context"],
             quality_requirements=["primary public records", "explicit endpoint modality"],
+            explicit_exclusions=endpoint_exclusions,
+            unresolved_discovery_questions=discovery_questions,
         ),
         ComponentRequirement(
             requirement_id="assay-metadata",
@@ -1106,6 +1169,8 @@ def derive_component_requirements(
             minimum_metadata=["biological_target", "endpoint_modality", "biological_system"],
             quality_requirements=["stable source identifier", "provenance"],
             depends_on=["endpoint-activity"],
+            explicit_exclusions=["publication prose without compound-level primary records"],
+            unresolved_discovery_questions=discovery_questions,
         ),
         ComponentRequirement(
             requirement_id="compound-identity",
@@ -1115,6 +1180,8 @@ def derive_component_requirements(
             acceptable_identifier_types=identity_ids,
             minimum_metadata=["source_compound_id", "canonical_compound_id"],
             quality_requirements=["deterministic mapping status", "conflict flags"],
+            explicit_exclusions=["unresolved identity silently promoted to canonical identity"],
+            unresolved_discovery_questions=discovery_questions,
         ),
         ComponentRequirement(
             requirement_id="chemical-structure",
@@ -1125,6 +1192,8 @@ def derive_component_requirements(
             minimum_metadata=["canonical_smiles", "inchikey"],
             quality_requirements=["structure provenance", "mixture and salt flags"],
             depends_on=["compound-identity"],
+            explicit_exclusions=["structure without provenance", "unresolved mixtures"],
+            unresolved_discovery_questions=discovery_questions,
         ),
         ComponentRequirement(
             requirement_id="transcriptomic-matrix",
@@ -1135,6 +1204,8 @@ def derive_component_requirements(
             minimum_metadata=["feature_schema", "perturbagen_identifier"],
             quality_requirements=["chemical perturbation", "reproducible feature schema"],
             depends_on=["compound-identity"],
+            explicit_exclusions=["genetic perturbations", "disease cohorts as compound responses"],
+            unresolved_discovery_questions=discovery_questions,
         ),
         ComponentRequirement(
             requirement_id="transcriptomic-conditions",
@@ -1145,6 +1216,20 @@ def derive_component_requirements(
             minimum_metadata=list(specification.experimental_context_requirements),
             quality_requirements=["defined control or reference", "condition provenance"],
             depends_on=["transcriptomic-matrix"],
+            explicit_exclusions=["context-free aggregated signatures"],
+            unresolved_discovery_questions=discovery_questions,
+        ),
+        ComponentRequirement(
+            requirement_id="control-reference-metadata",
+            role=ComponentRole.SAMPLE_METADATA,
+            mandatory=True,
+            acceptable_data_forms=["control metadata", "reference sample metadata"],
+            acceptable_identifier_types=identity_ids,
+            minimum_metadata=["control_or_reference_definition", "sample_relationship"],
+            quality_requirements=["explicit control relationship", "sample provenance"],
+            depends_on=["transcriptomic-conditions"],
+            explicit_exclusions=["implicit or undocumented reference definitions"],
+            unresolved_discovery_questions=discovery_questions,
         ),
         ComponentRequirement(
             requirement_id="provenance-license",
@@ -1153,6 +1238,8 @@ def derive_component_requirements(
             acceptable_data_forms=["source references", "licence metadata"],
             minimum_metadata=["official source", "retrieval artifact hash"],
             quality_requirements=["immutable evidence references"],
+            explicit_exclusions=["unverifiable provenance", "undocumented access conditions"],
+            unresolved_discovery_questions=discovery_questions,
         ),
         ComponentRequirement(
             requirement_id="source-id-mapping",
@@ -1163,6 +1250,9 @@ def derive_component_requirements(
             minimum_metadata=["source_identifier", "target_identifier"],
             quality_requirements=["mapping confidence", "collision flags"],
             depends_on=["compound-identity"],
+            possible_substitutes=[ComponentRole.COMPOUND_IDENTITY],
+            explicit_exclusions=["non-deterministic identifier joins"],
+            unresolved_discovery_questions=discovery_questions,
         ),
         ComponentRequirement(
             requirement_id="counter-screen",
@@ -1173,6 +1263,26 @@ def derive_component_requirements(
             minimum_metadata=["assay_id", "relationship"],
             quality_requirements=["official source relationship"],
             depends_on=["endpoint-activity"],
+            possible_substitutes=[ComponentRole.ASSAY_METADATA],
+            explicit_exclusions=["supporting evidence converted directly into endpoint labels"],
+            unresolved_discovery_questions=discovery_questions,
+        ),
+        ComponentRequirement(
+            requirement_id="supporting-quality-metadata",
+            role=ComponentRole.METHODOLOGICAL_EVIDENCE,
+            mandatory=False,
+            acceptable_data_forms=[
+                "assay-interference metadata",
+                "cytotoxicity metadata",
+                "signature-quality metadata",
+            ],
+            acceptable_identifier_types=identity_ids,
+            minimum_metadata=["record_type", "relationship", "provenance"],
+            quality_requirements=["source-linked quality or uncertainty flag"],
+            depends_on=["endpoint-activity"],
+            possible_substitutes=[ComponentRole.COUNTER_SCREEN],
+            explicit_exclusions=["supporting evidence promoted to primary endpoint evidence"],
+            unresolved_discovery_questions=discovery_questions,
         ),
     ]
     return TrainingDatasetComponentRequirements(

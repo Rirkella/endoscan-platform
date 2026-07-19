@@ -32,6 +32,7 @@ from endoscan_workflows.training_dataset import (
     TrainingDatasetPreparationPlan,
     TrainingDatasetPreparationStep,
     TrainingDatasetSpecification,
+    TrainingDatasetSpecificationApprovalPolicy,
     TrainingDatasetSpecificationDraft,
     VerifiedSourceInventory,
     VerifiedSourceRecord,
@@ -192,6 +193,65 @@ def test_draft_materialization_does_not_invent_policy_thresholds() -> None:
     assert full.minimum_coverage_requirements == {}
     assert full.minimum_class_size_requirements == {}
     assert full.permitted_biological_contexts == []
+
+
+def test_human_policy_materializes_nullable_and_population_semantics() -> None:
+    policy = TrainingDatasetSpecificationApprovalPolicy(
+        activity_representation="Retain measured values and separately approved derived labels.",
+        observation_grain="Keep compound by transcriptomic context observations distinct.",
+        evidence_hierarchy="Require direct measured endpoint activity as primary evidence.",
+        multiple_activity_assays="Keep assay-specific activity records separate during discovery.",
+        conflicting_activity_records=(
+            "Preserve conflicts with provenance and do not resolve them yet."
+        ),
+        transcriptomic_contexts="Keep different cells, doses, durations and controls distinct.",
+        repeated_transcriptomic_signatures=(
+            "Retain repeated signatures until a later approved policy."
+        ),
+        quality_thresholds="Set no numeric threshold before inspecting source distributions.",
+        minimum_usable_coverage="Set no count or overlap minimum before joinability diagnostics.",
+        missingness="Allow explicit staging missingness but enforce finalized table constraints.",
+        mandatory_output_fields=MANDATORY_FIELDS,
+        nullable_output_fields=[
+            "preferred_name",
+            "endpoint_activity_value",
+            "endpoint_activity_label",
+        ],
+        optional_output_fields=["isomeric_smiles"],
+        population_constraints=[
+            "At least one activity value or label is populated for every usable observation."
+        ],
+    )
+    full = materialize_training_dataset_specification(
+        specification_draft(),
+        specification_id="spec-approved-with-policy",
+        approved_policy=policy,
+    )
+    assert full.approved_policy_version == "1.0.0"
+    assert len(full.approved_policy_decisions) == 10
+    assert full.nullable_output_fields == policy.nullable_output_fields
+    assert full.optional_output_fields == ["isomeric_smiles"]
+    assert full.population_constraints == policy.population_constraints
+    assert full.allowed_missingness == {}
+    assert full.minimum_coverage_requirements == {}
+    assert full.requires_human_review is False
+
+
+def test_component_requirements_are_complete_and_source_neutral() -> None:
+    requirements = derive_component_requirements(specification())
+    assert len(requirements.requirements) == 11
+    roles = {item.role for item in requirements.requirements}
+    assert {
+        ComponentRole.ENDPOINT_ACTIVITY,
+        ComponentRole.SAMPLE_METADATA,
+        ComponentRole.COMPOUND_IDENTITY,
+        ComponentRole.CHEMICAL_STRUCTURE,
+        ComponentRole.TRANSCRIPTOMIC_MATRIX,
+        ComponentRole.PROVENANCE_LICENSE,
+    }.issubset(roles)
+    assert all(item.acceptable_data_forms for item in requirements.requirements)
+    assert all(item.explicit_exclusions for item in requirements.requirements)
+    assert all(item.unresolved_discovery_questions for item in requirements.requirements)
 
 
 @pytest.mark.parametrize(

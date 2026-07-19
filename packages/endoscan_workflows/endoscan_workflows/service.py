@@ -78,6 +78,7 @@ from .training_dataset import (
     TrainingDatasetComponentRequirements,
     TrainingDatasetPreparationPlan,
     TrainingDatasetSpecification,
+    TrainingDatasetSpecificationApprovalPolicy,
     TrainingDatasetSpecificationDraft,
     VerifiedSourceInventory,
     derive_component_requirements,
@@ -505,10 +506,49 @@ class WorkflowService:
                     if row.assembly_review_json
                     else None
                 ),
+                "planned_discovery_agents": self._planned_discovery_agents(),
                 "discovery_round": row.discovery_round,
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
             }
+
+    def _planned_discovery_agents(self) -> list[dict]:
+        adapter_labels = {
+            "Activity Evidence Discovery Agent": [
+                "official activity-source metadata adapters"
+            ],
+            "Transcriptomic Evidence Discovery Agent": [
+                "official perturbational-transcriptomic metadata adapters"
+            ],
+            "Chemical Identity and Structure Source Discovery Agent": [
+                "official chemical identity and structure metadata adapters"
+            ],
+            "Supporting Metadata Discovery Agent": [
+                "official activity-source metadata adapters",
+                "official perturbational-transcriptomic metadata adapters",
+                "official chemical identity and structure metadata adapters",
+            ],
+        }
+        names = set(adapter_labels)
+        return [
+            {
+                "agent_name": item.agent_name,
+                "provider": self.agent_configuration.worker_provider,
+                "model": self.agent_configuration.worker_model,
+                "allowed_tools": item.allowed_tools,
+                "allowed_official_source_adapters": adapter_labels[item.agent_name],
+                "maximum_turns": self.agent_configuration.maximum_turns,
+                "maximum_tool_calls": self.agent_configuration.maximum_tool_calls,
+                "maximum_input_tokens": self.agent_configuration.maximum_input_tokens,
+                "maximum_output_tokens": self.agent_configuration.maximum_output_tokens,
+                "maximum_cost_usd": self.agent_configuration.maximum_cost_usd,
+                "timeout_seconds": self.agent_configuration.timeout_seconds,
+                "provider_retries": self.agent_configuration.retry_count,
+                "output_schema_name": item.output_schema_name,
+            }
+            for item in SPECIALIZED_AGENT_SEQUENCE
+            if item.agent_name in names
+        ]
 
     def persist_training_dataset_document(
         self,
@@ -685,21 +725,7 @@ class WorkflowService:
             actor=actor,
             idempotency_key=idempotency_key,
         )
-        snapshot = self.get_build(workflow_id)
-        if snapshot.current_stage is not WorkflowState.DERIVING_COMPONENT_REQUIREMENTS:
-            return stored
-        return self.transition(
-            workflow_id,
-            TransitionRequest(
-                target_state=WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE,
-                expected_version=snapshot.version,
-                idempotency_key=f"{idempotency_key}:transition",
-                initiator=ActorType.ORCHESTRATOR,
-                initiator_id=actor,
-                reason="Component requirements were derived deterministically.",
-                artifact_hashes=[stored["sha256"]],
-            ),
-        )
+        return stored
 
     def validate_training_dataset_strategy_checkpoint(self, workflow_id: str) -> None:
         """Enforce discovery-before-strategy against the durable current inventory."""
@@ -955,13 +981,40 @@ class WorkflowService:
                 idempotency_key=f"{idempotency_key}:compile",
             )
         if snapshot.current_stage is WorkflowState.DERIVING_COMPONENT_REQUIREMENTS:
-            derived = self.derive_training_dataset_requirements(
+            with self.database.session() as session:
+                workflow = session.get(TrainingDatasetWorkflowRow, workflow_id)
+                requirements_ready = bool(
+                    workflow is not None and workflow.component_requirements_json
+                )
+            if requirements_ready:
+                artifacts = self.artifact_store.list_artifacts(workflow_id)
+                requirement = next(
+                    (
+                        item
+                        for item in reversed(artifacts)
+                        if item.artifact_type == "component_requirements"
+                    ),
+                    None,
+                )
+                if requirement is None:
+                    raise GuardNotSatisfied("Persisted component requirements are missing.")
+                return self.transition(
+                    workflow_id,
+                    TransitionRequest(
+                        target_state=WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE,
+                        expected_version=snapshot.version,
+                        idempotency_key=f"{idempotency_key}:authorize-source-discovery",
+                        initiator=ActorType.ORCHESTRATOR,
+                        initiator_id=actor,
+                        reason="Human explicitly authorized source discovery.",
+                        artifact_hashes=[requirement.sha256],
+                    ),
+                )
+            self.derive_training_dataset_requirements(
                 workflow_id,
                 actor="deterministic-orchestrator",
                 idempotency_key=f"{idempotency_key}:requirements",
             )
-            if isinstance(derived, WorkflowSnapshot):
-                return derived
             return self.get_build(workflow_id)
         if snapshot.current_stage in {
             WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE,
@@ -2932,6 +2985,18 @@ class WorkflowService:
         )
         if not set(decision.artifact_hashes).issubset(available):
             raise GuardNotSatisfied("Approval references artifacts that are no longer current.")
+        approved_specification_policy = None
+        if (
+            approval.approval_type == ApprovalType.DATASET_SPECIFICATION.value
+            and decision.decision
+            in {ApprovalDecisionValue.APPROVE, ApprovalDecisionValue.CHOOSE_ALTERNATIVE}
+            and decision.dataset_specification_policy is not None
+        ):
+            approved_specification_policy = (
+                TrainingDatasetSpecificationApprovalPolicy.model_validate(
+                    decision.dataset_specification_policy
+                )
+            )
         status_by_decision = {
             ApprovalDecisionValue.APPROVE: ApprovalStatus.APPROVED,
             ApprovalDecisionValue.REJECT: ApprovalStatus.REJECTED,
@@ -2990,9 +3055,41 @@ class WorkflowService:
                 draft = TrainingDatasetSpecificationDraft.model_validate(
                     _load_training_document(workflow.specification_draft_json)
                 )
+                if approved_specification_policy is not None:
+                    policy_payload = approved_specification_policy.model_dump(mode="json")
+                    policy_artifact = self.artifact_store._put_bytes(
+                        session,
+                        workflow_id=build.id,
+                        content=canonical_json(policy_payload).encode(),
+                        mime_type="application/json",
+                        artifact_type="dataset_specification_human_policy",
+                        logical_name=(
+                            "dataset-specification-human-policy-"
+                            f"{approved_specification_policy.policy_version}.json"
+                        ),
+                        producer=decision.reviewer_id,
+                        idempotency_key=f"{decision.idempotency_key}:human-policy",
+                    )
+                    transition_hashes.append(policy_artifact.sha256)
+                    append_event(
+                        session,
+                        build,
+                        event_type="training_dataset.human_policy.persisted",
+                        actor_type=ActorType.HUMAN.value,
+                        actor_id=decision.reviewer_id,
+                        idempotency_key=f"{decision.idempotency_key}:human-policy:event",
+                        payload={
+                            "artifact_id": policy_artifact.id,
+                            "sha256": policy_artifact.sha256,
+                            "policy_version": approved_specification_policy.policy_version,
+                        },
+                        from_state=build.current_stage,
+                        to_state=build.current_stage,
+                    )
                 specification = materialize_training_dataset_specification(
                     draft,
                     specification_id=deterministic_id("spec", build.id, approval.proposal_hash),
+                    approved_policy=approved_specification_policy,
                 )
                 payload = specification.model_dump(mode="json")
                 artifact = self.artifact_store._put_bytes(

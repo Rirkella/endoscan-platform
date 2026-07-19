@@ -130,12 +130,15 @@ function CompiledSpecificationWorkspace({ data }: { data: AdminTrainingDatasetWo
   </div>;
 }
 
-function TrainingDatasetWorkspace({ data }: { data: AdminTrainingDatasetWorkflow }) {
+function TrainingDatasetWorkspace({ data, artifacts }: { data: AdminTrainingDatasetWorkflow; artifacts: AdminArtifact[] }) {
   if (data.legacy) {
     return <section className="admin-panel"><h2>Legacy single-source discovery</h2><p>Historical records remain unchanged and use the original dataset-selection workflow.</p></section>;
   }
   const specification = record(data.target_specification);
   const requirements = records(record(data.component_requirements).requirements);
+  const plannedAgents = records(data.planned_discovery_agents);
+  const specificationArtifact = [...artifacts].reverse().find((item) => item.artifact_type === "training_dataset_specification");
+  const humanPolicyArtifact = [...artifacts].reverse().find((item) => item.artifact_type === "dataset_specification_human_policy");
   const sources = records(record(data.verified_source_inventory).sources);
   const cells = records(record(data.capability_matrix).cells);
   const review = record(data.assembly_review);
@@ -151,8 +154,9 @@ function TrainingDatasetWorkspace({ data }: { data: AdminTrainingDatasetWorkflow
     <div className="admin-training-workspace" data-testid="training-dataset-workspace">
       <CompiledSpecificationWorkspace data={data} />
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Target training dataset</h2><span>{data.benchmark_mode ?? "standard"}</span></div>
-        {Object.keys(specification).length ? <dl className="admin-candidate-facts"><div><dt>Prediction task</dt><dd>{String(specification.intended_prediction_task ?? "Unresolved")}</dd></div><div><dt>Prediction unit</dt><dd>{String(specification.prediction_unit ?? "Unresolved")}</dd></div><div><dt>Activity representation</dt><dd>{textList(specification.acceptable_activity_representations).join(", ") || "Unresolved"}</dd></div><div><dt>Required fields</dt><dd>{textList(specification.mandatory_output_fields).join(", ") || "Awaiting specification"}</dd></div></dl> : <p>Awaiting a strict, human-reviewed target specification.</p>}
+        {Object.keys(specification).length ? <><dl className="admin-candidate-facts"><div><dt>Specification</dt><dd>{String(specification.specification_id)} · version {String(specification.contract_version ?? "1.0.0")}</dd></div><div><dt>Immutable hash</dt><dd><code>{specificationArtifact?.sha256 ?? "not available"}</code></dd></div><div><dt>Human policy</dt><dd>version {String(specification.approved_policy_version ?? "not applied")} · <code>{humanPolicyArtifact?.sha256 ?? "not available"}</code></dd></div><div><dt>Prediction task</dt><dd>{String(specification.intended_prediction_task ?? "Unresolved")}</dd></div><div><dt>Prediction unit</dt><dd>{String(specification.prediction_unit ?? "Unresolved")}</dd></div><div><dt>Activity representation</dt><dd>{textList(specification.acceptable_activity_representations).join(", ") || "Unresolved"}</dd></div><div><dt>Required fields</dt><dd>{textList(specification.mandatory_output_fields).join(", ") || "Awaiting specification"}</dd></div><div><dt>Nullable fields</dt><dd>{textList(specification.nullable_output_fields).join(", ") || "None"}</dd></div><div><dt>Optional fields</dt><dd>{textList(specification.optional_output_fields).join(", ") || "None"}</dd></div></dl><h3>Approved human policy decisions</h3><ul>{textList(specification.approved_policy_decisions).map((item) => <li key={item}>{item}</li>)}</ul></> : <p>Awaiting a strict, human-reviewed target specification.</p>}
       </section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Planned source-discovery agents</h2><span>{plannedAgents.length} not started</span></div>{plannedAgents.map((item) => <article key={String(item.agent_name)}><h3>{String(item.agent_name)}</h3><p>{String(item.provider)} / {String(item.model)} · {String(item.maximum_turns)} turns · {String(item.maximum_tool_calls)} tools · {String(item.maximum_input_tokens)} input tokens · {String(item.maximum_output_tokens)} output tokens · ${String(item.maximum_cost_usd)} · {String(item.timeout_seconds)} s · {String(item.provider_retries)} retries</p><p>Tools: {textList(item.allowed_tools).join(", ") || "none"}</p><p>Official adapters: {textList(item.allowed_official_source_adapters).join(", ")}</p><p>Output: {String(item.output_schema_name)}</p></article>)}</section>
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Component requirements</h2><span>{requirements.length}</span></div>{requirements.length ? <ul>{requirements.map((item) => <li key={String(item.requirement_id)}><strong>{humanizeMachineValue(String(item.role))}</strong> — {item.mandatory ? "required" : "optional"}</li>)}</ul> : <p>No requirements derived yet.</p>}</section>
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Verified source inventory</h2><span>{sources.length}</span></div>{sources.length ? sources.map((source) => <article key={String(source.source_id)}><h3>{String(source.source_system)} · {String(source.stable_accession)}</h3><p>{textList(source.source_roles).map(humanizeMachineValue).join(", ")}</p><p>{textList(source.limitations).join(" ") || "No recorded limitation."}</p></article>) : <p>No discovered or verified sources. Concrete strategies remain locked.</p>}</section>
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Capability matrix</h2><span>{cells.length} cells</span></div>{cells.length ? <div className="admin-artifact-list">{cells.map((cell, index) => <article key={`${String(cell.source_id)}-${String(cell.component)}-${index}`}><strong>{String(cell.source_id)}</strong><span>{humanizeMachineValue(String(cell.component))}: {humanizeMachineValue(String(cell.status))}</span></article>)}</div> : <p>Awaiting deterministic inventory analysis.</p>}</section>
@@ -740,7 +744,7 @@ export function AdminEndpointDetail() {
 
       <div className="admin-detail-grid">
         <main className="admin-primary-column">
-          {trainingWorkflow && !isSpecificationRevision && <TrainingDatasetWorkspace data={trainingWorkflow} />}
+          {trainingWorkflow && !isSpecificationRevision && <TrainingDatasetWorkspace data={trainingWorkflow} artifacts={artifacts} />}
           <section className="admin-panel admin-decision-panel" aria-labelledby="decision-title">
             <div className="admin-decision-heading">
               <div>
@@ -887,7 +891,7 @@ export function AdminEndpointDetail() {
                   build.current_stage,
                 ) && (
                   <button disabled={busy} onClick={() => void continueTrainingDataset()}>
-                    Continue active stage
+                    {build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && artifacts.some((item) => item.artifact_type === "component_requirements") ? "Authorize source discovery" : build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" ? "Derive component requirements" : "Continue active stage"}
                   </button>
                 )}
               {canPause && <button disabled={busy} onClick={() => void command("pause")}>Pause</button>}

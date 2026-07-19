@@ -214,6 +214,7 @@ class ApprovalDecision(StrictContract):
     expected_version: int = Field(ge=0)
     idempotency_key: str = Field(min_length=8, max_length=160)
     artifact_hashes: list[str] = Field(min_length=1, max_length=100)
+    dataset_specification_policy: dict[str, Any] | None = None
 
 
 class ArtifactDescriptor(StrictContract):

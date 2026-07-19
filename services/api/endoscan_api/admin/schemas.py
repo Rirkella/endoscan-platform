@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,3 +40,4 @@ class ApprovalDecisionBody(AdminRequest):
     selected_alternative_id: str | None = Field(default=None, max_length=160)
     expected_version: int = Field(ge=0)
     artifact_hashes: list[str] = Field(min_length=1, max_length=100)
+    dataset_specification_policy: dict[str, Any] | None = None
