@@ -325,4 +325,513 @@ class VerifiedSourceRecord(StrictContract):
     source_references: list[str] = Field(min_length=1, max_length=100)
     evidence_quality: str = Field(min_length=1, max_length=1000)
     limitations: list[str] = Field(default_factory=list, max_length=100)
-    unresolved_questions: list[str] = Field(default_factory=list, max_lÛÍ¶¶‰Ëkºwµç}½Ù•É±…Á}½Õ¹Ğè¥¹Ğğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°”ôÀ¤(€€€Á…ÉÑ¥…±}½Ù•É±…Á}½Õ¹Ğè¥¹Ğğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°”ôÀ¤(€€€…Ñ¥Ù¥Ñå}½Ù•É…”è™±½…Ğğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°”ôÀ°±”ôÄ¤(€€€ÑÉ…¹ÍÉ¥ÁÑ½µ¥}½Ù•É…”è™±½…Ğğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°”ôÀ°±”ôÄ¤(€€€ÍÑÉÕÑÕÉ•}½Ù•É…”è™±½…Ğğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°”ôÀ°±”ôÄ¤(€€€±…ÍÍ}½Õ¹ÑÌè‘¥ÑmÍÑÈ°¥¹Ñt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ‘¥Ğ¤(€€€™•…ÑÕÉ•}Í¡•µ…}½µÁ…Ñ¥‰±”è‰½½°ğ9½¹”€ô9½¹”(€€€½¹‘¥Ñ¥½¹}½µÁ…Ñ¥‰¥±¥ÑäèÍÑÈğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°µ…á}±•¹Ñ ôÈÀÀÀ¤(€€€É•ÅÕ¥É•‘}‘½İ¹±½…‘Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€É•ÅÕ¥É•‘}½µÁÕÑ…Ñ¥½¹Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€•Ù¥‘•¹•}É•™•É•¹•Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€±¥µ¥Ñ…Ñ¥½¹Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤((€€€µ½‘•±}Ù…±¥‘…Ñ½È¡µ½‘”ô‰…™Ñ•Èˆ¤(€€€‘•˜•á…Ñ}Ù…±Õ•Í}É•ÅÕ¥É•}•á…Ñ}ÍÑ…ÑÕÌ¡Í•±˜¤€´ø)½¥¹…‰¥±¥Ñå¥…¹½ÍÑ¥Œè(€€€€€€€¥˜€ (€€€€€€€€€€€Í•±˜¹ÍÑ…ÑÕÌ¥Ì¹½Ğ)½¥¹…‰¥±¥ÑåMÑ…ÑÕÌ¹=5AUQ}aP(€€€€€€€€€€€…¹Í•±˜¹•á…Ñ}½Ù•É±…Á}½Õ¹Ğ¥Ì¹½Ğ9½¹”(€€€€€€€€¤è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰•á…Ğ½Ù•É±…Àµ…ä‰”É•Á½ÉÑ•½¹±ä™½È½µÁÕÑ•‘}•á…Ğ‘¥…¹½ÍÑ¥Ìˆ¤(€€€€€€€¥˜Í•±˜¹ÍÑ…ÑÕÌ¥Ì)½¥¹…‰¥±¥ÑåMÑ…ÑÕÌ¹=5AUQ}aP…¹Í•±˜¹•á…Ñ}½Ù•É±…Á}½Õ¹Ğ¥Ì9½¹”è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰½µÁÕÑ•‘}•á…Ğ‘¥…¹½ÍÑ¥ÌÉ•ÅÕ¥É”•á…Ñ}½Ù•É±…Á}½Õ¹Ğˆ¤(€€€€€€€É•ÑÕÉ¸Í•±˜(()±…ÍÌQÉ…¥¹¥¹…Ñ…Í•ÑAÉ•Á…É…Ñ¥½¹MÑ•À¡MÑÉ¥Ñ½¹ÑÉ…Ğ¤è(€€€ÍÑ•Á}¥èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÈ°µ…á}±•¹Ñ ôÄØÀ¤(€€€½É‘•Èè¥¹Ğ€ô¥•±¡”ôÄ¤(€€€…Ñ¥½¸èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÈÀÀÀ¤(€€€ÍÑ…ÑÕÌèAÉ•Á…É…Ñ¥½¹MÑ•ÁMÑ…ÑÕÌ(€€€Í½ÕÉ•}¥‘Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€Ñ…É•Ñ}™¥•±‘Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€•Ù¥‘•¹•}É•™•É•¹•Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€‰±½­•ÈèÍÑÈğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°µ…á}±•¹Ñ ôÈÀÀÀ¤(()±…ÍÌQÉ…¥¹¥¹…Ñ…Í•ÑAÉ•Á…É…Ñ¥½¹A±…¸¡MÑÉ¥Ñ½¹ÑÉ…Ğ¤è(€€€Á±…¹}¥èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÄØÀ¤(€€€ÍÑÉ…Ñ•å}¥èÍÑÈ(€€€ÍÑ•ÁÌè±¥ÍÑmQÉ…¥¹¥¹…Ñ…Í•ÑAÉ•Á…É…Ñ¥½¹MÑ•Át€ô¥•±¡µ¥¹}±•¹Ñ ôÄ°µ…á}±•¹Ñ ôÈÀÀ¤(€€€É•ÅÕ¥É•Í}¡Õµ…¹}…ÁÁÉ½Ù…±}‰•™½É•}ÑÉ…¥¹¥¹œè‰½½°€ôQÉÕ”((€€€µ½‘•±}Ù…±¥‘…Ñ½È¡µ½‘”ô‰…™Ñ•Èˆ¤(€€€‘•˜½É‘•É•‘}ÍÑ•ÁÌ¡Í•±˜¤€´øQÉ…¥¹¥¹…Ñ…Í•ÑAÉ•Á…É…Ñ¥½¹A±…¸è(€€€€€€€½É‘•ÉÌ€ôm¥Ñ•´¹½É‘•È™½È¥Ñ•´¥¸Í•±˜¹ÍÑ•ÁÍt(€€€€€€€¥˜±•¸¡½É‘•ÉÌ¤€„ô±•¸¡Í•Ğ¡½É‘•ÉÌ¤¤½ÈÍ½ÉÑ•¡½É‘•ÉÌ¤€„ô±¥ÍĞ¡É…¹” Ä°±•¸¡½É‘•ÉÌ¤€¬€Ä¤¤è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰ÁÉ•Á…É…Ñ¥½¸ÍÑ•ÁÌµÕÍĞ¡…Ù”Õ¹¥ÅÕ”½¹Ñ¥Õ½ÕÌ½É‘•ÈÙ…±Õ•Ìˆ¤(€€€€€€€É•ÑÕÉ¸Í•±˜(()±…ÍÌQÉ…¥¹¥¹…Ñ…Í•ÑÍÍ•µ‰±åMÑÉ…Ñ•ä¡MÑÉ¥Ñ½¹ÑÉ…Ğ¤è(€€€½¹ÑÉ…Ñ}Ù•ÉÍ¥½¸è1¥Ñ•É…±lˆÄ¸À¸À‰t€ôQI%9%9}QMQ}=9QIQ}YIM%=8(€€€ÍÑÉ…Ñ•å}¥èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÄØÀ¤(€€€Ñ…É•Ñ}ÍÁ•¥™¥…Ñ¥½¹}¥èÍÑÈ(€€€Í½ÕÉ•}¥¹Ù•¹Ñ½Éå}¥èÍÑÈ(€€€Í½ÕÉ•}¥¹Ù•¹Ñ½Éå}Ù•ÉÍ¥½¸è¥¹Ğ€ô¥•±¡”ôÄ¤(€€€Í½ÕÉ•}É…Á èQÉ…¥¹¥¹…Ñ…Í•ÑÍÍ•µ‰±åÉ…Á (€€€Í½ÕÉ•}É½±•Ìè‘¥ÑmÍÑÈ°±¥ÍÑm½µÁ½¹•¹ÑI½±•ut(€€€ÑÉ…¹Í™½Éµ…Ñ¥½¹Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÈÀÀ¤(€€€©½¥¹Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÈÀÀ¤(€€€¥‘•¹Ñ¥Ñå}Á½±¥äèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôĞÀÀÀ¤(€€€¡•µ¥…±}ÍÑ…¹‘…É‘¥é…Ñ¥½¹}Á½±¥äèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôĞÀÀÀ¤(€€€±…‰•±}Á½±¥äèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôĞÀÀÀ¤(€€€ÑÉ…¹ÍÉ¥ÁÑ½µ¥}½¹‘¥Ñ¥½¹}Á½±¥äèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôĞÀÀÀ¤(€€€É•Á•…Ñ•‘}Í¥¹…ÑÕÉ•}Á½±¥äèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôĞÀÀÀ¤(€€€•áÁ•Ñ•‘}½ÕÑÁÕÑ}É…¥¸èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÄÀÀÀ¤(€€€½Ù•É±…Á}‘¥…¹½ÍÑ¥Œè)½¥¹…‰¥±¥Ñå¥…¹½ÍÑ¥Œ(€€€•áÁ•Ñ•‘}½Ù•É…”è‘¥ÑmÍÑÈ°™±½…Ğğ¥¹ĞğÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ‘¥Ğ¤(€€€•áÁ•Ñ•‘}±…ÍÍ}‰…±…¹”è‘¥ÑmÍÑÈ°¥¹Ğğ™±½…ĞğÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ‘¥Ğ¤(€€€•Ù¥‘•¹•}ÅÕ…±¥ÑäèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôĞÀÀÀ¤(€€€½µÁÕÑ…Ñ¥½¹…±}É•ÅÕ¥É•µ•¹ÑÌè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€ÁÉ•Á…É…Ñ¥½¹}•™™½ÉĞèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÄ°µ…á}±•¹Ñ ôÄÀÀÀ¤(€€€Í¥•¹Ñ¥™¥}É¥Í­Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€Ñ•¡¹¥…±}É¥Í­Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€±¥•¹Í¥¹}…•ÍÍ}É¥Í­Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€Õ¹É•Í½±Ù•‘}ÅÕ•ÍÑ¥½¹Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€µ¥ÍÍ¥¹}½µÁ½¹•¹ÑÌè±¥ÍÑm½µÁ½¹•¹ÑI½±•t€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÔÀ¤(€€€Ñ…É•Ñ•‘}™½±±½İ}ÕÁ}Í•…É¡}É•ÅÕ•ÍÑÌè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÔÀ¤(€€€™…±±‰…­}ÍÑÉ…Ñ•å}¥èÍÑÈğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°µ…á}±•¹Ñ ôÄØÀ¤(€€€ÁÉ•Á…É…Ñ¥½¹}Á±…¸èQÉ…¥¹¥¹…Ñ…Í•ÑAÉ•Á…É…Ñ¥½¹A±…¸(€€€ÍÑ…ÑÕÌèMÑÉ…Ñ•åMÑ…ÑÕÌ(€€€É•ÅÕ¥É•Í}¡Õµ…¹}É•Ù¥•Üè‰½½°€ôQÉÕ”((€€€‘•˜Ù…±¥‘…Ñ•}¥¹Ù•¹Ñ½Éä¡Í•±˜°¥¹Ù•¹Ñ½ÉäèY•É¥™¥•‘M½ÕÉ•%¹Ù•¹Ñ½Éä¤€´ø9½¹”è(€€€€€€€¥˜€ (€€€€€€€€€€€Í•±˜¹Í½ÕÉ•}¥¹Ù•¹Ñ½Éå}¥€„ô¥¹Ù•¹Ñ½Éä¹¥¹Ù•¹Ñ½Éå}¥(€€€€€€€€€€€½ÈÍ•±˜¹Í½ÕÉ•}¥¹Ù•¹Ñ½Éå}Ù•ÉÍ¥½¸€„ô¥¹Ù•¹Ñ½Éä¹Ù•ÉÍ¥½¸(€€€€€€€€¤è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰…ÍÍ•µ‰±äÍÑÉ…Ñ•ä¥¹Ù•¹Ñ½Éä‰¥¹‘¥¹œ¥ÌÍÑ…±”ˆ¤(€€€€€€€Í•±˜¹Í½ÕÉ•}É…Á ¹Ù…±¥‘…Ñ•}¥¹Ù•¹Ñ½Éä¡¥¹Ù•¹Ñ½Éä¤(€€€€€€€Õ¹‘¥Í½Ù•É•€ôÍ½ÉÑ•¡Í•Ğ¡Í•±˜¹Í½ÕÉ•}É½±•Ì¤€´¥¹Ù•¹Ñ½Éä¹Í½ÕÉ•}¥‘Ì¤(€€€€€€€¥˜Õ¹‘¥Í½Ù•É•è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È¡˜‰ÍÑÉ…Ñ•äÉ•™•É•¹•ÌÕ¹‘¥Í½Ù•É•Í½ÕÉ•Ìèìœ°€œ¹©½¥¸¡Õ¹‘¥Í½Ù•É•¥ôˆ¤(()±…ÍÌÍÍ•µ‰±å…À¡MÑÉ¥Ñ½¹ÑÉ…Ğ¤è(€€€…Á}¥èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÄØÀ¤(€€€½µÁ½¹•¹Ğè½µÁ½¹•¹ÑI½±”ğ9½¹”€ô9½¹”(€€€‘•ÍÉ¥ÁÑ¥½¸èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÈÀÀÀ¤(€€€‰±½­¥¹œè‰½½°(€€€Ñ…É•Ñ•‘}Í•…É¡}É•ÅÕ•ÍĞèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÈÀÀÀ¤(€€€ÁÉ¥½É}ÅÕ•Éå}™¥¹•ÉÁÉ¥¹ÑÌè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(()±…ÍÌÍÍ•µ‰±å…ÁI•Á½ÉĞ¡MÑÉ¥Ñ½¹ÑÉ…Ğ¤è(€€€É•Á½ÉÑ}¥èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÄØÀ¤(€€€¥¹Ù•¹Ñ½Éå}¥èÍÑÈ(€€€¥¹Ù•¹Ñ½Éå}Ù•ÉÍ¥½¸è¥¹Ğ€ô¥•±¡”ôÄ¤(€€€…ÁÌè±¥ÍÑmÍÍ•µ‰±å…Át€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€‘¥Í½Ù•Éå}É½Õ¹è¥¹Ğ€ô¥•±¡”ôÀ¤(€€€µ…á¥µÕµ}‘¥Í½Ù•Éå}É½Õ¹‘Ìè¥¹Ğ€ô¥•±¡”ôÀ°±”ôÄÀ¤(€€€É•ÅÕ¥É•Í}¡Õµ…¹}Í½Á•}É•Ù¥•Üè‰½½°€ô…±Í”((€€€‘•˜¹•áÑ}ÅÕ•É¥•Ì¡Í•±˜°…±É•…‘å}•á•ÕÑ•èÍ•ÑmÍÑÉt¤€´ø±¥ÍÑmÍÑÉtè(€€€€€€€¥˜Í•±˜¹‘¥Í½Ù•Éå}É½Õ¹€øôÍ•±˜¹µ…á¥µÕµ}‘¥Í½Ù•Éå}É½Õ¹‘Ìè(€€€€€€€€€€€É•ÑÕÉ¸mt(€€€€€€€É•ÑÕÉ¸l(€€€€€€€€€€€¥Ñ•´¹Ñ…É•Ñ•‘}Í•…É¡}É•ÅÕ•ÍĞ(€€€€€€€€€€€™½È¥Ñ•´¥¸Í•±˜¹…ÁÌ(€€€€€€€€€€€¥˜¥Ñ•´¹Ñ…É•Ñ•‘}Í•…É¡}É•ÅÕ•ÍĞ¹½Ğ¥¸…±É•…‘å}•á•ÕÑ•(€€€€€€€t(()±…ÍÌQÉ…¥¹¥¹…Ñ…Í•ÑÍÍ•µ‰±åI•Ù¥•Ü¡MÑÉ¥Ñ½¹ÑÉ…Ğ¤è(€€€É•Ù¥•İ}¥èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÄØÀ¤(€€€ÍÁ•¥™¥…Ñ¥½¹}¥èÍÑÈ(€€€¥¹Ù•¹Ñ½Éå}¥èÍÑÈ(€€€¥¹Ù•¹Ñ½Éå}Ù•ÉÍ¥½¸è¥¹Ğ€ô¥•±¡”ôÄ¤(€€€ÍÑÉ…Ñ•¥•Ìè±¥ÍÑmQÉ…¥¹¥¹…Ñ…Í•ÑÍÍ•µ‰±åMÑÉ…Ñ•åt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÔÀ¤(€€€É•½µµ•¹‘•‘}ÍÑÉ…Ñ•å}¥èÍÑÈğ9½¹”€ô¥•±¡‘•™…Õ±Ğõ9½¹”°µ…á}±•¹Ñ ôÄØÀ¤(€€€‘•¥Í¥½¹}ÍÕµµ…ÉäèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôàÀÀÀ¤(€€€•Ù¥‘•¹•}ÕÍ•è±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÈÀÀ¤(€€€Õ¹É•Í½±Ù•‘}ÅÕ•ÍÑ¥½¹Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€¹½}™•…Í¥‰±•}ÍÑÉ…Ñ•äè‰½½°€ô…±Í”(€€€É•ÅÕ¥É•Í}¡Õµ…¹}É•Ù¥•Üè‰½½°€ôQÉÕ”((€€€µ½‘•±}Ù…±¥‘…Ñ½È¡µ½‘”ô‰…™Ñ•Èˆ¤(€€€‘•˜Ù…±¥‘…Ñ•}É•½µµ•¹‘…Ñ¥½¸¡Í•±˜¤€´øQÉ…¥¹¥¹…Ñ…Í•ÑÍÍ•µ‰±åI•Ù¥•Üè(€€€€€€€¥‘Ì€ôí¥Ñ•´¹ÍÑÉ…Ñ•å}¥™½È¥Ñ•´¥¸Í•±˜¹ÍÑÉ…Ñ•¥•Íô(€€€€€€€¥˜Í•±˜¹É•½µµ•¹‘•‘}ÍÑÉ…Ñ•å}¥…¹Í•±˜¹É•½µµ•¹‘•‘}ÍÑÉ…Ñ•å}¥¹½Ğ¥¸¥‘Ìè(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰É•½µµ•¹‘•ÍÑÉ…Ñ•äµÕÍĞ‰”¥¹±Õ‘•¥¸ÍÑÉ…Ñ•¥•Ìˆ¤(€€€€€€€¥˜Í•±˜¹¹½}™•…Í¥‰±•}ÍÑÉ…Ñ•ä…¹Í•±˜¹É•½µµ•¹‘•‘}ÍÑÉ…Ñ•å}¥è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰¹¼µ™•…Í¥‰±”É•Ù¥•Ü…¹¹½ĞÉ•½µµ•¹„ÍÑÉ…Ñ•äˆ¤(€€€€€€€É•ÑÕÉ¸Í•±˜(()±…ÍÌ	±¥¹‘	•¹¡µ…É­%¹¥Ñ¥…±½¹Ñ•áĞ¡MÑÉ¥Ñ½¹ÑÉ…Ğ¤è(€€€‰•¹¡µ…É­}µ½‘”èÍÑÈ€ô¥•± (€€€€€€€‘•™…Õ±Ğõ	1%9}QI%9%9}QMQ}%M=YId°µ¥¹}±•¹Ñ ôÄ°µ…á}±•¹Ñ ôÄÈÀ(€€€€¤(€€€•¹‘Á½¥¹Ñ}¹…µ”èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÌ°µ…á}±•¹Ñ ôÄØÀ¤(€€€‰¥½±½¥…±}½…°èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÄÀ°µ…á}±•¹Ñ ôĞÀÀÀ¤(€€€Ñ…É•Ñ}ÑÉ…¥¹¥¹}‘…Ñ…Í•Ñ}½¹ÑÉ…Ğè‘¥ÑmÍÑÈ°¹åt(€€€Í½ÕÉ•}…‘…ÁÑ•É}…Á…‰¥±¥Ñ¥•Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€…ÁÁÉ½Ù•‘}Í¥•¹Ñ¥™¥}Á½±¥¥•Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€…±±½İ•‘}Ñ½½±Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€Á±…¹¹•É}ÁÉ½Ù¥‘•ÈèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÄ°µ…á}±•¹Ñ ôàÀ¤(€€€Á±…¹¹•É}µ½‘•°èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÄ°µ…á}±•¹Ñ ôÄØÀ¤(€€€İ½É­•É}ÁÉ½Ù¥‘•ÈèÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÄ°µ…á}±•¹Ñ ôàÀ¤(€€€İ½É­•É}µ½‘•°èÍÑÈ€ô¥•±¡µ¥¹}±•¹Ñ ôÄ°µ…á}±•¹Ñ ôÄØÀ¤(€€€‰Õ‘•ÑÌè‘¥ÑmÍÑÈ°¹åt(€€€Í½ÕÉ•}¡¥¹ÑÌè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÀ¤(€€€…ÉÑ¥±•}¡¥¹Ğè9½¹”€ô9½¹”(€€€‘½¥}¡¥¹Ğè9½¹”€ô9½¹”(€€€…ÍÍ…å}¥‘}¡¥¹Ğè9½¹”€ô9½¹”(€€€…Ñ¥Ù¥Ñå}Í½ÕÉ•}¡¥¹Ğè9½¹”€ô9½¹”(€€€ÑÉ…¹ÍÉ¥ÁÑ½µ¥}Í½ÕÉ•}¡¥¹Ğè9½¹”€ô9½¹”(€€€•áÁ•Ñ•‘}½Õ¹Ñ}¡¥¹Ğè9½¹”€ô9½¹”(€€€•áÁ•Ñ•‘}½Ù•É±…Á}¡¥¹Ğè9½¹”€ô9½¹”(€€€•¹‘Á½¥¹Ñ}ÍÁ•¥™¥}µ…ÁÁ¥¹}¡¥¹Ğè9½¹”€ô9½¹”((€€€µ½‘•±}Ù…±¥‘…Ñ½È¡µ½‘”ô‰…™Ñ•Èˆ¤(€€€‘•˜™½É‰¥‘}Í½ÕÉ•}¡¥¹ÑÌ¡Í•±˜¤€´ø	±¥¹‘	•¹¡µ…É­%¹¥Ñ¥…±½¹Ñ•áĞè(€€€€€€€¥˜Í•±˜¹‰•¹¡µ…É­}µ½‘”€„ô	1%9}QI%9%9}QMQ}%M=YIdè(€€€€€€€€€€€É•ÑÕÉ¸Í•±˜(€€€€€€€¥˜Í•±˜¹Í½ÕÉ•}¡¥¹ÑÌè(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰‰±¥¹‰•¹¡µ…É¬½¹Ñ•áĞµÕÍĞ¹½Ğ½¹Ñ…¥¸Í½ÕÉ”¡¥¹ÑÌˆ¤(€€€€€€€Í•É¥…±¥é•€ôÍ•±˜¹µ½‘•±}‘ÕµÁ}©Í½¸ ¤¹…Í•™½± ¤(€€€€€€€™½É‰¥‘‘•¸€ô€ ‰‘½¤¹½Éœ¼ˆ°€‰ÁÕ‰µ•ˆ°€‰‰¥½…ÍÍ…ä¥ˆ°€‰­¹½İ¸…•ÍÍ¥½¸ˆ¤(€€€€€€€¥˜…¹ä¡Ñ½­•¸¥¸Í•É¥…±¥é•™½ÈÑ½­•¸¥¸™½É‰¥‘‘•¸¤è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰‰±¥¹‰•¹¡µ…É¬½¹Ñ•áĞ½¹Ñ…¥¹Ì„ÁÉ½¡¥‰¥Ñ•Í½ÕÉ”¡¥¹Ğˆ¤(€€€€€€€É•ÑÕÉ¸Í•±˜(()±…ÍÌMÁ•¥…±¥é•‘•¹Ñ•™¥¹¥Ñ¥½¸¡MÑÉ¥Ñ½¹ÑÉ…Ğ¤è(€€€…•¹Ñ}¹…µ”èÍÑÈ(€€€É½±”è1¥Ñ•É…±l‰Á±…¹¹•Èˆ°€‰İ½É­•È‰t(€€€½ÕÑÁÕÑ}Í¡•µ…}¹…µ”èÍÑÈ(€€€…±±½İ•‘}Ñ½½±Ìè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€É••¥Ù•Í}…ÉÑ¥™…ÑÌè±¥ÍÑmÍÑÉt€ô¥•±¡‘•™…Õ±Ñ}™…Ñ½Éäõ±¥ÍĞ°µ…á}±•¹Ñ ôÄÀÀ¤(€€€ÁÉ½‘Õ•Í}…ÉÑ¥™…ĞèÍÑÈ(()MA%1%i}9Q}MEU9€ôl(€€€MÁ•¥…±¥é•‘•¹Ñ•™¥¹¥Ñ¥½¸ (€€€€€€€…•¹Ñ}¹…µ”ô‰…Ñ…Í•ĞMÁ•¥™¥…Ñ¥½¸•¹Ğˆ°(€€€€€€€É½±”ô‰Á±…¹¹•Èˆ°(€€€€€€€½ÕÑÁÕÑ}Í¡•µ…}¹…µ”ô‰QÉ…¥¹¥¹…Ñ…Í•ÑMÁ•¥™¥…Ñ¥½¸ˆ°(€€€€€€€É••¥Ù•Í}…ÉÑ¥™…ÑÌõl‰•¹‘Á½¥¹Ñ}‘•™¥¹¥Ñ¥½¸‰t°(€€€€€€€ÁÉ½‘Õ•Í}…ÉÑ¥™…Ğô‰ÑÉ…¥¹¥¹}‘…Ñ…Í•Ñ}ÍÁ•¥™¥…Ñ¥½¸ˆ°(€€€€¤°(€€€MÁ•¥…±¥é•‘•¹Ñ•™¥¹¥Ñ¥½¸ (€€€€€€€…•¹Ñ}¹…µ”ô‰Ñ¥Ù¥ÑäÙ¥‘•¹”¥Í½Ù•Éä•¹Ğˆ°(€€€€€€€É½±”ô‰İ½É­•Èˆ°(€€€€€€€½ÕÑÁÕÑ}Í¡•µ…}¹…µ”ô‰Y•É¥™¥•‘M½ÕÉ•%¹Ù•¹Ñ½ÉåÉ…µ•¹Ğˆ°(€€€€€€€…±±½İ•‘}Ñ½½±Ìõl(€€€€€€€€€€€€‰Í•…É¡}…Ñ¥Ù¥Ñå}Í½ÕÉ•Ìˆ°(€€€€€€€€€€€€‰Ù…±¥‘…Ñ•}…Ñ¥Ù¥Ñå}Í½ÕÉ”ˆ°(€€€€€€€€€€€€‰™•Ñ¡}…Ñ¥Ù¥Ñå}Í½ÕÉ•}µ•Ñ…‘…Ñ„ˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}…Ñ¥Ù¥Ñå}É•ÍÕ±Ñ}…Ù…¥±…‰¥±¥Ñäˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}…Ñ¥Ù¥Ñå}¥‘•¹Ñ¥™¥•É}™¥•±‘Ìˆ°(€€€€€€€€€€€€‰ÍÕµµ…É¥é•}…Ñ¥Ù¥Ñå}½ÕÑ½µ•Ìˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}½Õ¹Ñ•É}ÍÉ••¹}É•±…Ñ¥½¹Í¡¥ÁÌˆ°(€€€€€€€t°(€€€€€€€É••¥Ù•Í}…ÉÑ¥™…ÑÌõl‰ÑÉ…¥¹¥¹}‘…Ñ…Í•Ñ}ÍÁ•¥™¥…Ñ¥½¸ˆ°€‰½µÁ½¹•¹Ñ}É•ÅÕ¥É•µ•¹ÑÌ‰t°(€€€€€€€ÁÉ½‘Õ•Í}…ÉÑ¥™…Ğô‰…Ñ¥Ù¥Ñå}Í½ÕÉ•}¥¹Ù•¹Ñ½Éå}™É…µ•¹Ğˆ°(€€€€¤°(€€€MÁ•¥…±¥é•‘•¹Ñ•™¥¹¥Ñ¥½¸ (€€€€€€€…•¹Ñ}¹…µ”ô‰QÉ…¹ÍÉ¥ÁÑ½µ¥ŒÙ¥‘•¹”¥Í½Ù•Éä•¹Ğˆ°(€€€€€€€É½±”ô‰İ½É­•Èˆ°(€€€€€€€½ÕÑÁÕÑ}Í¡•µ…}¹…µ”ô‰Y•É¥™¥•‘M½ÕÉ•%¹Ù•¹Ñ½ÉåÉ…µ•¹Ğˆ°(€€€€€€€…±±½İ•‘}Ñ½½±Ìõl(€€€€€€€€€€€€‰Í•…É¡}ÑÉ…¹ÍÉ¥ÁÑ½µ¥}Í½ÕÉ•Ìˆ°(€€€€€€€€€€€€‰Ù…±¥‘…Ñ•}ÑÉ…¹ÍÉ¥ÁÑ½µ¥}Í½ÕÉ”ˆ°(€€€€€€€€€€€€‰™•Ñ¡}ÑÉ…¹ÍÉ¥ÁÑ½µ¥}Í½ÕÉ•}µ•Ñ…‘…Ñ„ˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}Á•ÉÑÕÉ‰…Ñ¥½¹}‘•Í¥¸ˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}ÑÉ…¹ÍÉ¥ÁÑ½µ¥}¥‘•¹Ñ¥Ñå}™¥•±‘Ìˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}Í¥¹…ÑÕÉ•}½¹‘¥Ñ¥½¹Ìˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}ÁÉ½•ÍÍ•‘}µ…ÑÉ¥á}…Ù…¥±…‰¥±¥Ñäˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}É…İ}µ…ÑÉ¥á}…Ù…¥±…‰¥±¥Ñäˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}™•…ÑÕÉ•}Í¡•µ„ˆ°(€€€€€€€t°(€€€€€€€É••¥Ù•Í}…ÉÑ¥™…ÑÌõl‰ÑÉ…¥¹¥¹}‘…Ñ…Í•Ñ}ÍÁ•¥™¥…Ñ¥½¸ˆ°€‰½µÁ½¹•¹Ñ}É•ÅÕ¥É•µ•¹ÑÌ‰t°(€€€€€€€ÁÉ½‘Õ•Í}…ÉÑ¥™…Ğô‰ÑÉ…¹ÍÉ¥ÁÑ½µ¥}Í½ÕÉ•}¥¹Ù•¹Ñ½Éå}™É…µ•¹Ğˆ°(€€€€¤°(€€€MÁ•¥…±¥é•‘•¹Ñ•™¥¹¥Ñ¥½¸ (€€€€€€€…•¹Ñ}¹…µ”ô‰¡•µ¥…°%‘•¹Ñ¥Ñä…¹MÑÉÕÑÕÉ”M½ÕÉ”¥Í½Ù•Éä•¹Ğˆ°(€€€€€€€É½±”ô‰İ½É­•Èˆ°(€€€€€€€½ÕÑÁÕÑ}Í¡•µ…}¹…µ”ô‰Y•É¥™¥•‘M½ÕÉ•%¹Ù•¹Ñ½ÉåÉ…µ•¹Ğˆ°(€€€€€€€…±±½İ•‘}Ñ½½±Ìõl(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}Í½ÕÉ•}¥‘•¹Ñ¥Ñå}™¥•±‘Ìˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}Í½ÕÉ•}É•½É‘}…Ù…¥±…‰¥±¥Ñäˆ°(€€€€€€€€€€€€‰‰Õ¥±‘}½µÁ½Õ¹‘}µ…ÁÁ¥¹}µ…¹¥™•ÍĞˆ°(€€€€€€€€€€€€‰É•Í½±Ù•}½µÁ½Õ¹‘}¥‘•¹Ñ¥Ñå}Í…µÁ±”ˆ°(€€€€€€€t°(€€€€€€€É••¥Ù•Í}…ÉÑ¥™…ÑÌõl‰½µÁ½¹•¹Ñ}É•ÅÕ¥É•µ•¹ÑÌˆ°€‰‘¥Í½Ù•É•‘}Í½ÕÉ•}™É…µ•¹ÑÌ‰t°(€€€€€€€ÁÉ½‘Õ•Í}…ÉÑ¥™…Ğô‰¥‘•¹Ñ¥Ñå}Í½ÕÉ•}¥¹Ù•¹Ñ½Éå}™É…µ•¹Ğˆ°(€€€€¤°(€€€MÁ•¥…±¥é•‘•¹Ñ•™¥¹¥Ñ¥½¸ (€€€€€€€…•¹Ñ}¹…µ”ô‰MÕÁÁ½ÉÑ¥¹œ5•Ñ…‘…Ñ„¥Í½Ù•Éä•¹Ğˆ°(€€€€€€€É½±”ô‰İ½É­•Èˆ°(€€€€€€€½ÕÑÁÕÑ}Í¡•µ…}¹…µ”ô‰Y•É¥™¥•‘M½ÕÉ•%¹Ù•¹Ñ½ÉåÉ…µ•¹Ğˆ°(€€€€€€€…±±½İ•‘}Ñ½½±Ìõl(€€€€€€€€€€€€‰™•Ñ¡}…Ñ¥Ù¥Ñå}Í½ÕÉ•}µ•Ñ…‘…Ñ„ˆ°(€€€€€€€€€€€€‰™•Ñ¡}ÑÉ…¹ÍÉ¥ÁÑ½µ¥}Í½ÕÉ•}µ•Ñ…‘…Ñ„ˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}Í¥¹…ÑÕÉ•}½¹‘¥Ñ¥½¹Ìˆ°(€€€€€€€€€€€€‰¥¹ÍÁ•Ñ}Í½ÕÉ•}É•½É‘}…Ù…¥±…‰¥±¥Ñäˆ°(€€€€€€€t°(€€€€€€€É••¥Ù•Í}…ÉÑ¥™…ÑÌõl‰½µÁ½¹•¹Ñ}É•ÅÕ¥É•µ•¹ÑÌˆ°€‰‘¥Í½Ù•É•‘}Í½ÕÉ•}™É…µ•¹ÑÌ‰t°(€€€€€€€ÁÉ½‘Õ•Í}…ÉÑ¥™…Ğô‰ÍÕÁÁ½ÉÑ¥¹}µ•Ñ…‘…Ñ…}¥¹Ù•¹Ñ½Éå}™É…µ•¹Ğˆ°(€€€€¤°(€€€MÁ•¥…±¥é•‘•¹Ñ•™¥¹¥Ñ¥½¸ (€€€€€€€…•¹Ñ}¹…µ”ô‰QÉ…¥¹¥¹œ…Ñ…Í•ĞÍÍ•µ‰±äMÑÉ…Ñ•äA±…¹¹•Èˆ°(€€€€€€€É½±”ô‰Á±…¹¹•Èˆ°(€€€€€€€½ÕÑÁÕÑ}Í¡•µ…}¹…µ”ô‰QÉ…¥¹¥¹…Ñ…Í•ÑÍÍ•µ‰±åI•Ù¥•Üˆ°(€€€€€€€É••¥Ù•Í}…ÉÑ¥™…ÑÌõl(€€€€€€€€€€€€‰ÑÉ…¥¹¥¹}‘…Ñ…Í•Ñ}ÍÁ•¥™¥…Ñ¥½¸ˆ°(€€€€€€€€€€€€‰½µÁ½¹•¹Ñ}É•ÅÕ¥É•µ•¹ÑÌˆ°(€€€€€€€€€€€€‰Ù•É¥™¥•‘}Í½ÕÉ•}¥¹Ù•¹Ñ½Éäˆ°(€€€€€€€€€€€€‰Í½ÕÉ•}…Á…‰¥±¥Ñå}µ…ÑÉ¥àˆ°(€€€€€€€€€€€€‰©½¥¹…‰¥±¥Ñå}‘¥…¹½ÍÑ¥Ìˆ°(€€€€€€€t°(€€€€€€€ÁÉ½‘Õ•Í}…ÉÑ¥™…Ğô‰…ÍÍ•µ‰±å}ÍÑÉ…Ñ•å}É•Ù¥•Üˆ°(€€€€¤°(€€€MÁ•¥…±¥é•‘•¹Ñ•™¥¹¥Ñ¥½¸ (€€€€€€€…•¹Ñ}¹…µ”ô‰ÍÍ•µ‰±äMÑÉ…Ñ•äÙ…±Õ…Ñ¥½¸•¹Ğˆ°(€€€€€€€É½±”ô‰Á±…¹¹•Èˆ°(€€€€€€€½ÕÑÁÕÑ}Í¡•µ…}¹…µ”ô‰QÉ…¥¹¥¹…Ñ…Í•ÑÍÍ•µ‰±åI•Ù¥•Üˆ°(€€€€€€€É••¥Ù•Í}…ÉÑ¥™…ÑÌõl(€€€€€€€€€€€€‰ÑÉ…¥¹¥¹}‘…Ñ…Í•Ñ}ÍÁ•¥™¥…Ñ¥½¸ˆ°(€€€€€€€€€€€€‰Ù•É¥™¥•‘}Í½ÕÉ•}¥¹Ù•¹Ñ½Éäˆ°(€€€€€€€€€€€€‰Í½ÕÉ•}…Á…‰¥±¥Ñå}µ…ÑÉ¥àˆ°(€€€€€€€€€€€€‰…ÍÍ•µ‰±å}ÍÑÉ…Ñ•¥•Ìˆ°(€€€€€€€€€€€€‰©½¥¹…‰¥±¥Ñå}‘¥…¹½ÍÑ¥Ìˆ°(€€€€€€€t°(€€€€€€€ÁÉ½‘Õ•Í}…ÉÑ¥™…Ğô‰…ÍÍ•µ‰±å}ÍÑÉ…Ñ•å}½µÁ…É¥Í½¸ˆ°(€€€€¤°)t(()±…ÍÌ¥Í½Ù•Éå	•™½É•MÑÉ…Ñ•åÕ…Éè(€€€€ˆˆ‰ÕÑ¡½É¥Ñ…Ñ¥Ù”‘•Ñ•Éµ¥¹¥ÍÑ¥ŒÕ…ÉÕÍ•‰•™½É”…¹ä½¹É•Ñ”ÍÑÉ…Ñ•äÉÕ¸¸ˆˆˆ((€€€ÍÑ…Ñ¥µ•Ñ¡½(€€€‘•˜Ù…±¥‘…Ñ” (€€€€€€€ÍÁ•¥™¥…Ñ¥½¸èQÉ…¥¹¥¹…Ñ…Í•ÑMÁ•¥™¥…Ñ¥½¸ğ9½¹”°(€€€€€€€É•ÅÕ¥É•µ•¹ÑÌèQÉ…¥¹¥¹…Ñ…Í•Ñ½µÁ½¹•¹ÑI•ÅÕ¥É•µ•¹ÑÌğ9½¹”°(€€€€€€€¥¹Ù•¹Ñ½ÉäèY•É¥™¥•‘M½ÕÉ•%¹Ù•¹Ñ½Éäğ9½¹”°(€€€€€€€…Á…‰¥±¥Ñå}µ…ÑÉ¥àèM½ÕÉ•…Á…‰¥±¥Ñå5…ÑÉ¥àğ9½¹”°(€€€€¤€´ø9½¹”è(€€€€€€€¥˜ÍÁ•¥™¥…Ñ¥½¸¥Ì9½¹”è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰Ñ…É•ĞÑÉ…¥¹¥¹œµ‘…Ñ…Í•ĞÍÁ•¥™¥…Ñ¥½¸¥ÌÉ•ÅÕ¥É•‰•™½É”Á±…¹¹¥¹œˆ¤(€€€€€€€¥˜É•ÅÕ¥É•µ•¹ÑÌ¥Ì9½¹”è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰½µÁ½¹•¹ĞÉ•ÅÕ¥É•µ•¹ÑÌ…É”É•ÅÕ¥É•‰•™½É”Á±…¹¹¥¹œˆ¤(€€€€€€€¥˜¥¹Ù•¹Ñ½Éä¥Ì9½¹”è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰Ù•É¥™¥•Í½ÕÉ”¥¹Ù•¹Ñ½Éä¥ÌÉ•ÅÕ¥É•‰•™½É”Á±…¹¹¥¹œˆ¤(€€€€€€€¥˜…Á…‰¥±¥Ñå}µ…ÑÉ¥à¥Ì9½¹”è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰Í½ÕÉ”…Á…‰¥±¥Ñäµ…ÑÉ¥à¥ÌÉ•ÅÕ¥É•‰•™½É”Á±…¹¹¥¹œˆ¤(€€€€€€€¥˜…Á…‰¥±¥Ñå}µ…ÑÉ¥à¹¥¹Ù•¹Ñ½Éå}¥€„ô¥¹Ù•¹Ñ½Éä¹¥¹Ù•¹Ñ½Éå}¥è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰…Á…‰¥±¥Ñäµ…ÑÉ¥à¥Ì¹½Ğ‰½Õ¹Ñ¼Ñ¡”Ù•É¥™¥•¥¹Ù•¹Ñ½Éäˆ¤(€€€€€€€¥˜…Á…‰¥±¥Ñå}µ…ÑÉ¥à¹¥¹Ù•¹Ñ½Éå}Ù•ÉÍ¥½¸€„ô¥¹Ù•¹Ñ½Éä¹Ù•ÉÍ¥½¸è(€€€€€€€€€€€É…¥Í”Y…±Õ•ÉÉ½È ‰…Á…‰¥±¥Ñäµ…ÑÉ¥à¥¹Ù•¹Ñ½Éä‰¥¹‘¥¹œ¥ÌÍÑ…±”ˆ¤(()‘•˜Ù…±¥‘…Ñ•}ÍÑÉ…Ñ•å}Í½ÕÉ•Ì (€€€ÍÑÉ…Ñ•¥•Ìè±¥ÍÑmQÉ…¥¹¥¹…Ñ…Í•ÑÍÍ•µ‰±åMÑÉ…Ñ•åt°¥¹Ù•¹Ñ½ÉäèY•É¥™¥•‘M½ÕÉ•%¹Ù•¹Ñ½Éä(¤€´ø9½¹”è(€€€™½ÈÍÑÉ…Ñ•ä¥¸ÍÑÉ…Ñ•¥•Ìè(€€€€€€€ÍÑÉ…Ñ•ä¹Ù…±¥‘…Ñ•}¥¹Ù•¹Ñ½Éä¡¥¹Ù•¹Ñ½Éä¤(
+    unresolved_questions: list[str] = Field(default_factory=list, max_length=100)
+    validation_status: SourceValidationStatus
+    artifact_hashes: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def roles_match_capabilities(self) -> VerifiedSourceRecord:
+        capability_roles = {item.component for item in self.capabilities}
+        if not set(self.source_roles).issubset(capability_roles):
+            raise ValueError("every source role must have a capability record")
+        return self
+
+
+class VerifiedSourceInventory(StrictContract):
+    contract_version: Literal["1.0.0"] = TRAINING_DATASET_CONTRACT_VERSION
+    inventory_id: str = Field(min_length=3, max_length=160)
+    version: int = Field(ge=1)
+    specification_id: str
+    sources: list[VerifiedSourceRecord] = Field(default_factory=list, max_length=500)
+    discovery_complete_for_roles: list[ComponentRole] = Field(default_factory=list, max_length=50)
+    missing_roles: list[ComponentRole] = Field(default_factory=list, max_length=50)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_sources(self) -> VerifiedSourceInventory:
+        ids = [item.source_id for item in self.sources]
+        if len(ids) != len(set(ids)):
+            raise ValueError("verified source IDs must be unique")
+        return self
+
+    @property
+    def source_ids(self) -> set[str]:
+        return {item.source_id for item in self.sources}
+
+
+class VerifiedSourceInventoryFragment(StrictContract):
+    """Bounded agent output; validation and merging remain deterministic."""
+
+    fragment_id: str = Field(min_length=3, max_length=160)
+    component_roles: list[ComponentRole] = Field(min_length=1, max_length=20)
+    candidate_records: list[VerifiedSourceRecord] = Field(default_factory=list, max_length=100)
+    evidence_used: list[str] = Field(default_factory=list, max_length=200)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+    unresolved_questions: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CapabilityMatrixCell(StrictContract):
+    source_id: str
+    component: ComponentRole
+    status: CapabilityStatus
+    fields: list[str] = Field(default_factory=list, max_length=100)
+    evidence_references: list[str] = Field(default_factory=list, max_length=100)
+
+
+class SourceCapabilityMatrix(StrictContract):
+    contract_version: Literal["1.0.0"] = TRAINING_DATASET_CONTRACT_VERSION
+    inventory_id: str
+    inventory_version: int = Field(ge=1)
+    components: list[ComponentRole]
+    cells: list[CapabilityMatrixCell] = Field(default_factory=list, max_length=10_000)
+
+    @model_validator(mode="after")
+    def unique_cells(self) -> SourceCapabilityMatrix:
+        keys = [(item.source_id, item.component) for item in self.cells]
+        if len(keys) != len(set(keys)):
+            raise ValueError("capability matrix cells must be unique")
+        return self
+
+
+def build_capability_matrix(
+    inventory: VerifiedSourceInventory,
+    requirements: TrainingDatasetComponentRequirements,
+) -> SourceCapabilityMatrix:
+    components = list(dict.fromkeys(item.role for item in requirements.requirements))
+    cells: list[CapabilityMatrixCell] = []
+    for source in inventory.sources:
+        by_role = {item.component: item for item in source.capabilities}
+        for component in components:
+            capability = by_role.get(component)
+            cells.append(
+                CapabilityMatrixCell(
+                    source_id=source.source_id,
+                    component=component,
+                    status=capability.status if capability else CapabilityStatus.UNAVAILABLE,
+                    fields=capability.fields if capability else [],
+                    evidence_references=capability.evidence_references if capability else [],
+                )
+            )
+    return SourceCapabilityMatrix(
+        inventory_id=inventory.inventory_id,
+        inventory_version=inventory.version,
+        components=components,
+        cells=cells,
+    )
+
+
+class AssemblyGraphNode(StrictContract):
+    node_id: str = Field(min_length=1, max_length=160)
+    node_type: GraphNodeType
+    label: str = Field(min_length=1, max_length=500)
+    source_id: str | None = Field(default=None, max_length=160)
+    source_roles: list[ComponentRole] = Field(default_factory=list, max_length=30)
+    produces_fields: list[str] = Field(default_factory=list, max_length=200)
+    operation: str | None = Field(default=None, max_length=2000)
+    unresolved_gaps: list[str] = Field(default_factory=list, max_length=100)
+    human_decisions: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def source_node_requires_source(self) -> AssemblyGraphNode:
+        if self.node_type is GraphNodeType.SOURCE and not self.source_id:
+            raise ValueError("source graph nodes require source_id")
+        if self.node_type is not GraphNodeType.SOURCE and self.source_id:
+            raise ValueError("only source graph nodes may reference source_id")
+        return self
+
+
+class AssemblyGraphEdge(StrictContract):
+    from_node: str
+    to_node: str
+    transferred_fields: list[str] = Field(default_factory=list, max_length=200)
+    join_keys: list[str] = Field(default_factory=list, max_length=50)
+    condition: str | None = Field(default=None, max_length=1000)
+
+
+class TrainingDatasetAssemblyGraph(StrictContract):
+    contract_version: Literal["1.0.0"] = TRAINING_DATASET_CONTRACT_VERSION
+    graph_id: str = Field(min_length=3, max_length=160)
+    inventory_id: str
+    inventory_version: int = Field(ge=1)
+    target_specification_id: str
+    target_fields: list[str] = Field(min_length=1, max_length=200)
+    nodes: list[AssemblyGraphNode] = Field(min_length=1, max_length=1000)
+    edges: list[AssemblyGraphEdge] = Field(default_factory=list, max_length=5000)
+
+    @model_validator(mode="after")
+    def validate_graph(self) -> TrainingDatasetAssemblyGraph:
+        ids = [node.node_id for node in self.nodes]
+        if len(ids) != len(set(ids)):
+            raise ValueError("assembly graph node IDs must be unique")
+        known = set(ids)
+        invalid_edges = [
+            edge for edge in self.edges if edge.from_node not in known or edge.to_node not in known
+        ]
+        if invalid_edges:
+            raise ValueError("assembly graph edges must reference existing nodes")
+        indegree = dict.fromkeys(ids, 0)
+        outgoing: dict[str, list[str]] = defaultdict(list)
+        for edge in self.edges:
+            outgoing[edge.from_node].append(edge.to_node)
+            indegree[edge.to_node] += 1
+        queue = deque(node_id for node_id, degree in indegree.items() if degree == 0)
+        visited = 0
+        while queue:
+            current = queue.popleft()
+            visited += 1
+            for target in outgoing[current]:
+                indegree[target] -= 1
+                if indegree[target] == 0:
+                    queue.append(target)
+        if visited != len(ids):
+            raise ValueError("assembly graph must be acyclic")
+        terminal = [
+            node for node in self.nodes if node.node_type is GraphNodeType.FINAL_CANDIDATE_TABLE
+        ]
+        if len(terminal) != 1:
+            raise ValueError("assembly graph must contain exactly one final candidate-table node")
+        missing = sorted(set(self.target_fields) - set(terminal[0].produces_fields))
+        if missing:
+            raise ValueError(
+                f"final candidate table does not cover target fields: {', '.join(missing)}"
+            )
+        return self
+
+    def validate_inventory(self, inventory: VerifiedSourceInventory) -> None:
+        if (
+            self.inventory_id != inventory.inventory_id
+            or self.inventory_version != inventory.version
+        ):
+            raise ValueError("assembly graph inventory binding is stale")
+        references = {node.source_id for node in self.nodes if node.source_id}
+        undiscovered = sorted(references - inventory.source_ids)
+        if undiscovered:
+            raise ValueError(
+                f"assembly graph references undiscovered sources: {', '.join(undiscovered)}"
+            )
+
+
+class JoinabilityDiagnostic(StrictContract):
+    diagnostic_id: str = Field(min_length=3, max_length=160)
+    status: JoinabilityStatus
+    source_ids: list[str] = Field(min_length=1, max_length=100)
+    identifier_type: str | None = Field(default=None, max_length=160)
+    exact_overlap_count: int | None = Field(default=None, ge=0)
+    partial_overlap_count: int | None = Field(default=None, ge=0)
+    activity_coverage: float | None = Field(default=None, ge=0, le=1)
+    transcriptomic_coverage: float | None = Field(default=None, ge=0, le=1)
+    structure_coverage: float | None = Field(default=None, ge=0, le=1)
+    class_counts: dict[str, int] = Field(default_factory=dict)
+    feature_schema_compatible: bool | None = None
+    condition_compatibility: str | None = Field(default=None, max_length=2000)
+    required_downloads: list[str] = Field(default_factory=list, max_length=100)
+    required_computations: list[str] = Field(default_factory=list, max_length=100)
+    evidence_references: list[str] = Field(default_factory=list, max_length=100)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def exact_values_require_exact_status(self) -> JoinabilityDiagnostic:
+        if (
+            self.status is not JoinabilityStatus.COMPUTED_EXACT
+            and self.exact_overlap_count is not None
+        ):
+            raise ValueError("exact overlap may be reported only for computed_exact diagnostics")
+        if self.status is JoinabilityStatus.COMPUTED_EXACT and self.exact_overlap_count is None:
+            raise ValueError("computed_exact diagnostics require exact_overlap_count")
+        return self
+
+
+class TrainingDatasetPreparationStep(StrictContract):
+    step_id: str = Field(min_length=2, max_length=160)
+    order: int = Field(ge=1)
+    action: str = Field(min_length=3, max_length=2000)
+    status: PreparationStepStatus
+    source_ids: list[str] = Field(default_factory=list, max_length=100)
+    target_fields: list[str] = Field(default_factory=list, max_length=100)
+    evidence_references: list[str] = Field(default_factory=list, max_length=100)
+    blocker: str | None = Field(default=None, max_length=2000)
+
+
+class TrainingDatasetPreparationPlan(StrictContract):
+    plan_id: str = Field(min_length=3, max_length=160)
+    strategy_id: str
+    steps: list[TrainingDatasetPreparationStep] = Field(min_length=1, max_length=200)
+    requires_human_approval_before_training: bool = True
+
+    @model_validator(mode="after")
+    def ordered_steps(self) -> TrainingDatasetPreparationPlan:
+        orders = [item.order for item in self.steps]
+        if len(orders) != len(set(orders)) or sorted(orders) != list(range(1, len(orders) + 1)):
+            raise ValueError("preparation steps must have unique contiguous order values")
+        return self
+
+
+class TrainingDatasetAssemblyStrategy(StrictContract):
+    contract_version: Literal["1.0.0"] = TRAINING_DATASET_CONTRACT_VERSION
+    strategy_id: str = Field(min_length=3, max_length=160)
+    target_specification_id: str
+    source_inventory_id: str
+    source_inventory_version: int = Field(ge=1)
+    source_graph: TrainingDatasetAssemblyGraph
+    source_roles: dict[str, list[ComponentRole]]
+    transformations: list[str] = Field(default_factory=list, max_length=200)
+    joins: list[str] = Field(default_factory=list, max_length=200)
+    identity_policy: str = Field(min_length=3, max_length=4000)
+    chemical_standardization_policy: str = Field(min_length=3, max_length=4000)
+    label_policy: str = Field(min_length=3, max_length=4000)
+    transcriptomic_condition_policy: str = Field(min_length=3, max_length=4000)
+    repeated_signature_policy: str = Field(min_length=3, max_length=4000)
+    expected_output_grain: str = Field(min_length=3, max_length=1000)
+    overlap_diagnostic: JoinabilityDiagnostic
+    expected_coverage: dict[str, float | int | str] = Field(default_factory=dict)
+    expected_class_balance: dict[str, int | float | str] = Field(default_factory=dict)
+    evidence_quality: str = Field(min_length=3, max_length=4000)
+    computational_requirements: list[str] = Field(default_factory=list, max_length=100)
+    preparation_effort: str = Field(min_length=1, max_length=1000)
+    scientific_risks: list[str] = Field(default_factory=list, max_length=100)
+    technical_risks: list[str] = Field(default_factory=list, max_length=100)
+    licensing_access_risks: list[str] = Field(default_factory=list, max_length=100)
+    unresolved_questions: list[str] = Field(default_factory=list, max_length=100)
+    missing_components: list[ComponentRole] = Field(default_factory=list, max_length=50)
+    targeted_follow_up_search_requests: list[str] = Field(default_factory=list, max_length=50)
+    fallback_strategy_id: str | None = Field(default=None, max_length=160)
+    preparation_plan: TrainingDatasetPreparationPlan
+    status: StrategyStatus
+    requires_human_review: bool = True
+
+    def validate_inventory(self, inventory: VerifiedSourceInventory) -> None:
+        if (
+            self.source_inventory_id != inventory.inventory_id
+            or self.source_inventory_version != inventory.version
+        ):
+            raise ValueError("assembly strategy inventory binding is stale")
+        self.source_graph.validate_inventory(inventory)
+        undiscovered = sorted(set(self.source_roles) - inventory.source_ids)
+        if undiscovered:
+            raise ValueError(f"strategy references undiscovered sources: {', '.join(undiscovered)}")
+
+
+class AssemblyGap(StrictContract):
+    gap_id: str = Field(min_length=3, max_length=160)
+    component: ComponentRole | None = None
+    description: str = Field(min_length=3, max_length=2000)
+    blocking: bool
+    targeted_search_request: str = Field(min_length=3, max_length=2000)
+    prior_query_fingerprints: list[str] = Field(default_factory=list, max_length=100)
+
+
+class AssemblyGapReport(StrictContract):
+    report_id: str = Field(min_length=3, max_length=160)
+    inventory_id: str
+    inventory_version: int = Field(ge=1)
+    gaps: list[AssemblyGap] = Field(default_factory=list, max_length=100)
+    discovery_round: int = Field(ge=0)
+    maximum_discovery_rounds: int = Field(ge=0, le=10)
+    requires_human_scope_review: bool = False
+
+    def next_queries(self, already_executed: set[str]) -> list[str]:
+        if self.discovery_round >= self.maximum_discovery_rounds:
+            return []
+        return [
+            item.targeted_search_request
+            for item in self.gaps
+            if item.targeted_search_request not in already_executed
+        ]
+
+
+class TrainingDatasetAssemblyReview(StrictContract):
+    review_id: str = Field(min_length=3, max_length=160)
+    specification_id: str
+    inventory_id: str
+    inventory_version: int = Field(ge=1)
+    strategies: list[TrainingDatasetAssemblyStrategy] = Field(default_factory=list, max_length=50)
+    recommended_strategy_id: str | None = Field(default=None, max_length=160)
+    decision_summary: str = Field(min_length=3, max_length=8000)
+    evidence_used: list[str] = Field(default_factory=list, max_length=200)
+    unresolved_questions: list[str] = Field(default_factory=list, max_length=100)
+    no_feasible_strategy: bool = False
+    requires_human_review: bool = True
+
+    @model_validator(mode="after")
+    def validate_recommendation(self) -> TrainingDatasetAssemblyReview:
+        ids = {item.strategy_id for item in self.strategies}
+        if self.recommended_strategy_id and self.recommended_strategy_id not in ids:
+            raise ValueError("recommended strategy must be included in strategies")
+        if self.no_feasible_strategy and self.recommended_strategy_id:
+            raise ValueError("no-feasible review cannot recommend a strategy")
+        return self
+
+
+class BlindBenchmarkInitialContext(StrictContract):
+    benchmark_mode: str = Field(
+        default=BLIND_TRAINING_DATASET_DISCOVERY, min_length=1, max_length=120
+    )
+    endpoint_name: str = Field(min_length=3, max_length=160)
+    biological_goal: str = Field(min_length=10, max_length=4000)
+    target_training_dataset_contract: dict[str, Any]
+    source_adapter_capabilities: list[str] = Field(default_factory=list, max_length=100)
+    approved_scientific_policies: list[str] = Field(default_factory=list, max_length=100)
+    allowed_tools: list[str] = Field(default_factory=list, max_length=100)
+    planner_provider: str = Field(min_length=1, max_length=80)
+    planner_model: str = Field(min_length=1, max_length=160)
+    worker_provider: str = Field(min_length=1, max_length=80)
+    worker_model: str = Field(min_length=1, max_length=160)
+    budgets: dict[str, Any]
+    source_hints: list[str] = Field(default_factory=list, max_length=0)
+    article_hint: None = None
+    doi_hint: None = None
+    assay_id_hint: None = None
+    activity_source_hint: None = None
+    transcriptomic_source_hint: None = None
+    expected_count_hint: None = None
+    expected_overlap_hint: None = None
+    endpoint_specific_mapping_hint: None = None
+
+    @model_validator(mode="after")
+    def forbid_source_hints(self) -> BlindBenchmarkInitialContext:
+        if self.benchmark_mode != BLIND_TRAINING_DATASET_DISCOVERY:
+            return self
+        if self.source_hints:
+            raise ValueError("blind benchmark context must not contain source hints")
+        serialized = self.model_dump_json().casefold()
+        forbidden = ("doi.org/", "pubmed", "bioassay id", "known accession")
+        if any(token in serialized for token in forbidden):
+            raise ValueError("blind benchmark context contains a prohibited source hint")
+        return self
+
+
+class SpecializedAgentDefinition(StrictContract):
+    agent_name: str
+    role: Literal["planner", "worker"]
+    output_schema_name: str
+    allowed_tools: list[str] = Field(default_factory=list, max_length=100)
+    receives_artifacts: list[str] = Field(default_factory=list, max_length=100)
+    produces_artifact: str
+
+
+SPECIALIZED_AGENT_SEQUENCE = [
+    SpecializedAgentDefinition(
+        agent_name="Dataset Specification Agent",
+        role="planner",
+        output_schema_name="TrainingDatasetSpecification",
+        receives_artifacts=["endpoint_definition"],
+        produces_artifact="training_dataset_specification",
+    ),
+    SpecializedAgentDefinition(
+        agent_name="Activity Evidence Discovery Agent",
+        role="worker",
+        output_schema_name="VerifiedSourceInventoryFragment",
+        allowed_tools=[
+            "search_activity_sources",
+            "validate_activity_source",
+            "fetch_activity_source_metadata",
+            "inspect_activity_result_availability",
+            "inspect_activity_identifier_fields",
+            "summarize_activity_outcomes",
+            "inspect_counter_screen_relationships",
+        ],
+        receives_artifacts=["training_dataset_specification", "component_requirements"],
+        produces_artifact="activity_source_inventory_fragment",
+    ),
+    SpecializedAgentDefinition(
+        agent_name="Transcriptomic Evidence Discovery Agent",
+        role="worker",
+        output_schema_name="VerifiedSourceInventoryFragment",
+        allowed_tools=[
+            "search_transcriptomic_sources",
+            "validate_transcriptomic_source",
+            "fetch_transcriptomic_source_metadata",
+            "inspect_perturbation_design",
+            "inspect_transcriptomic_identity_fields",
+            "inspect_signature_conditions",
+            "inspect_processed_matrix_availability",
+            "inspect_raw_matrix_availability",
+            "inspect_feature_schema",
+        ],
+        receives_artifacts=["training_dataset_specification", "component_requirements"],
+        produces_artifact="transcriptomic_source_inventory_fragment",
+    ),
+    SpecializedAgentDefinition(
+        agent_name="Chemical Identity and Structure Source Discovery Agent",
+        role="worker",
+        output_schema_name="VerifiedSourceInventoryFragment",
+        allowed_tools=[
+            "inspect_source_identity_fields",
+            "inspect_source_record_availability",
+            "build_compound_mapping_manifest",
+            "resolve_compound_identity_sample",
+        ],
+        receives_artifacts=["component_requirements", "discovered_source_fragments"],
+        produces_artifact="identity_source_inventory_fragment",
+    ),
+    SpecializedAgentDefinition(
+        agent_name="Supporting Metadata Discovery Agent",
+        role="worker",
+        output_schema_name="VerifiedSourceInventoryFragment",
+        allowed_tools=[
+            "fetch_activity_source_metadata",
+            "fetch_transcriptomic_source_metadata",
+            "inspect_signature_conditions",
+            "inspect_source_record_availability",
+        ],
+        receives_artifacts=["component_requirements", "discovered_source_fragments"],
+        produces_artifact="supporting_metadata_inventory_fragment",
+    ),
+    SpecializedAgentDefinition(
+        agent_name="Training Dataset Assembly Strategy Planner",
+        role="planner",
+        output_schema_name="TrainingDatasetAssemblyReview",
+        receives_artifacts=[
+            "training_dataset_specification",
+            "component_requirements",
+            "verified_source_inventory",
+            "source_capability_matrix",
+            "joinability_diagnostics",
+        ],
+        produces_artifact="assembly_strategy_review",
+    ),
+    SpecializedAgentDefinition(
+        agent_name="Assembly Strategy Evaluation Agent",
+        role="planner",
+        output_schema_name="TrainingDatasetAssemblyReview",
+        receives_artifacts=[
+            "training_dataset_specification",
+            "verified_source_inventory",
+            "source_capability_matrix",
+            "assembly_strategies",
+            "joinability_diagnostics",
+        ],
+        produces_artifact="assembly_strategy_comparison",
+    ),
+]
+
+
+class DiscoveryBeforeStrategyGuard:
+    """Authoritative deterministic guard used before any concrete strategy run."""
+
+    @staticmethod
+    def validate(
+        specification: TrainingDatasetSpecification | None,
+        requirements: TrainingDatasetComponentRequirements | None,
+        inventory: VerifiedSourceInventory | None,
+        capability_matrix: SourceCapabilityMatrix | None,
+    ) -> None:
+        if specification is None:
+            raise ValueError("target training-dataset specification is required before planning")
+        if requirements is None:
+            raise ValueError("component requirements are required before planning")
+        if inventory is None:
+            raise ValueError("verified source inventory is required before planning")
+        if capability_matrix is None:
+            raise ValueError("source capability matrix is required before planning")
+        if capability_matrix.inventory_id != inventory.inventory_id:
+            raise ValueError("capability matrix is not bound to the verified inventory")
+        if capability_matrix.inventory_version != inventory.version:
+            raise ValueError("capability matrix inventory binding is stale")
+
+
+def validate_strategy_sources(
+    strategies: list[TrainingDatasetAssemblyStrategy], inventory: VerifiedSourceInventory
+) -> None:
+    for strategy in strategies:
+        strategy.validate_inventory(inventory)

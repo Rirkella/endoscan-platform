@@ -281,8 +281,582 @@ function sourceDiagnostics(run: AdminAgentRun): AdminSourceToolDiagnostic[] {
   return (run.tool_calls ?? []).flatMap((call) => {
     const result = call.result;
     if (!result || typeof result !== "object" || Array.isArray(result)) return [];
-    const diagnostic = (result as Record<string, unknown>óŸ:¶‰ËkºwµçQÑ½¸ùô(€€€€€€€€€€€€€í…¹I•ÑÉä€˜˜€ñ‰ÕÑÑ½¸‘¥Í…‰±•õí‰ÕÍåô½¹±¥¬õì ¤€ôøÙ½¥½µµ…¹ ‰É•ÑÉäˆ¥ôùI•ÑÉä™…¥±•ÍÑ•Àğ½‰ÕÑÑ½¸ùô(€€€€€€€€€€€€€í…¹…¹•°€˜˜€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µ‘…¹•Èµ½ÕÑ±¥¹”ˆ‘¥Í…‰±•õí‰ÕÍåô½¹±¥¬õì¡•Ù•¹Ğ¤€ôøÉ•ÅÕ•ÍÑ½¹™¥Éµ…Ñ¥½¸ ‰…¹•°ˆ°Õ¹‘•™¥¹•°•Ù•¹Ğ¹ÕÉÉ•¹ÑQ…É•Ğ¥ôù…¹•°İ½É­™±½Üğ½‰ÕÑÑ½¸ùô(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÍ•½¹‘…Éäˆ‘¥Í…‰±•õí‰ÕÍåô½¹±¥¬õì ¤€ôøÙ½¥±½… ¥ôùI•™É•Í ğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€í¥µÁ½ÉĞ¹µ•Ñ„¹•¹Ø¹X€˜˜ÉÕ¹5½‘”€„ôô€‰É•Á±…äˆ€˜˜€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÍ•½¹‘…Éäˆ‘¥Í…‰±•õí‰ÕÍåô½¹±¥¬õì ¤€ôøÙ½¥É•™É•Í¡M½ÕÉ•5•Ñ…‘…Ñ„ ¥ôùI•™É•Í Í½ÕÉ”µ•Ñ…‘…Ñ„ğ½‰ÕÑÑ½¸ùô(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€ğ½Í•Ñ¥½¸ø((€€€€€€€€€ì¡‘•¥Í¥½¹MÕµµ…ÉäñğÕ¹É•Í½±Ù•‘EÕ•ÍÑ¥½¹Ì¹±•¹Ñ €ø€À¤€˜˜€ (€€€€€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°ˆ…É¥„µ±…‰•±±•‘‰äô‰‘•¥Í¥½¸µÍÕµµ…ÉäµÑ¥Ñ±”ˆø(€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°µ¡•…‘¥¹œˆøñ È¥ô‰‘•¥Í¥½¸µÍÕµµ…ÉäµÑ¥Ñ±”ˆù•¥Í¥½¸ÍÕµµ…Éäğ½ ÈøñÍÁ…¸ù!Õµ…¸É•Ù¥•ÜÉ•ÅÕ¥É•ğ½ÍÁ…¸øğ½‘¥Øø(€€€€€€€€€€€€€í‘•¥Í¥½¹MÕµµ…Éä€˜˜€ñÀùí‘•¥Í¥½¹MÕµµ…Éåôğ½Àùô(€€€€€€€€€€€€€íÕ¹É•Í½±Ù•‘EÕ•ÍÑ¥½¹Ì¹±•¹Ñ €ø€À€˜˜€ğøñ ÌùU¹É•Í½±Ù•ÅÕ•ÍÑ¥½¹Ìğ½ ÌøñÕ°ùíÕ¹É•Í½±Ù•‘EÕ•ÍÑ¥½¹Ì¹µ…À ¡¥Ñ•´¤€ôø€ñ±¤­•äõí¥Ñ•µôùí¥Ñ•µôğ½±¤ø¥ôğ½Õ°øğ¼ùô(€€€€€€€€€€€€ğ½Í•Ñ¥½¸ø(€€€€€€€€€€¥ô(€€€€€€€€ğ½µ…¥¸ø((€€€€€€€€ñ…Í¥‘”±…ÍÍ9…µ”ô‰…‘µ¥¸µÍ•½¹‘…Éäµ½±Õµ¸ˆø(€€€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°ˆ…É¥„µ±…‰•±±•‘‰äô‰…•¹ĞµÍÕµµ…ÉäµÑ¥Ñ±”ˆø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°µ¡•…‘¥¹œˆøñ È¥ô‰…•¹ĞµÍÕµµ…ÉäµÑ¥Ñ±”ˆù•¹Ğ…Ñ¥Ù¥Ñäğ½ ÈøñÍÁ…¸ùíÉÕ¹Ì¹±•¹Ñ¡ôÉÕ¹íÉÕ¹Ì¹±•¹Ñ €ôôô€Ä€ü€ˆˆ€è€‰Ì‰ôğ½ÍÁ…¸øğ½‘¥Øø(€€€€€€€€€€€íÑÉ…”€ü€ (€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µ…•¹ĞµÍÕµµ…Éäˆø(€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÉÕ¸µ¥‘•¹Ñ¥™¥•Èˆø(€€€€€€€€€€€€€€€€€€ñÍÁ…¸ùIÕ¸íÍ¡½ÉÑIÕ¹%¡ÑÉ…”¹¥¥ôğ½ÍÁ…¸ø(€€€€€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸(€€€€€€€€€€€€€€€€€€€ÑåÁ”ô‰‰ÕÑÑ½¸ˆ(€€€€€€€€€€€€€€€€€€€±…ÍÍ9…µ”ô‰…‘µ¥¸µ½Áäµ‰ÕÑÑ½¸ˆ(€€€€€€€€€€€€€€€€€€€…É¥„µ±…‰•°õí½Áä™Õ±°ÉÕ¸%€‘íÑÉ…”¹¥‘õô(€€€€€€€€€€€€€€€€€€€½¹±¥¬õì ¤€ôøÙ½¥½Áå%‘•¹Ñ¥™¥•È ‰ÉÕ¸ˆ°ÑÉ…”¹¥¥ô(€€€€€€€€€€€€€€€€€€ùí½Á¥•‘%‘•¹Ñ¥™¥•È€ôôô€‰ÉÕ¸ˆ€ü€‰½Á¥•ˆ€è€‰½Áä‰ôğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€€€ñ ÌùíÑÉ…”¹…•¹Ñ}¹…µ•ôğ½ Ìø(€€€€€€€€€€€€€€€€ñÍÁ…¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÍÑ…ÑÕÌˆùíÉÕ¹MÑ…ÑÕÍ1…‰•°¡ÑÉ…”°ÉÕ¹5½‘”°¡…Í…¹‘¥‘…Ñ•I•½µµ•¹‘…Ñ¥½¸¥ôğ½ÍÁ…¸ø(€€€€€€€€€€€€€€€€ñ‘°ø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù5½‘”ğ½‘Ğøñ‘ùí½¹™¥ÕÉ•‘5½‘•1…‰•°¡ÉÕ¹5½‘”¥ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù¥¹…°ÉÕ¸ÍÑ…ÑÕÌğ½‘Ğøñ‘ùí¡Õµ…¹¥é•5…¡¥¹•Y…±Õ”¡ÑÉ…”¹ÍÑ…ÑÕÌ¥ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù=ÕÑÁÕĞğ½‘Ğøñ‘ùí¡…Í½µÁ±•Ñ•‘=ÕÑÁÕĞ€ü€‘í…¹‘¥‘…Ñ•Ì¹±•¹Ñ¡ô…¹‘¥‘…Ñ•ÌÁÉ•Á…É•‘€€è€‰9¼É•½µµ•¹‘…Ñ¥½¸…Ù…¥±…‰±”‰ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù•¹ĞÉÕ¹Ìğ½‘Ğøñ‘ùíÉÕ¹Ì¹±•¹Ñ¡ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù5½‘•°ÑÕÉ¹Ìğ½‘Ğøñ‘ùíÑÉ…”¹ÑÕÉ¹Íôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘ĞùAÉ½Ù¥‘•ÈÉ•ÑÉ¥•Ìğ½‘Ğøñ‘ùíÁÉ½Ù¥‘•ÉI•ÑÉ¥•Íôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘ĞùQ½½°…±±Ìğ½‘Ğøñ‘ùí…•¹ÑQ½½±Ì¹±•¹Ñ¡ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù…¹‘¥‘…Ñ”¥¹ÍÁ•Ñ¥½¸ğ½‘Ğøñ‘ùí¥¹ÍÁ•Ñ¥½¹½Õ¹ÑÌ€ü€‘í¥¹ÍÁ•Ñ¥½¹½Õ¹ÑÌ¹¥¹ÍÁ•Ñ•‘ô¥¹ÍÁ•Ñ•€¼€‘í¥¹ÍÁ•Ñ¥½¹½Õ¹ÑÌ¹™…¥±•‘ôÕ¹É•Í½±Ù•‘€€è€‰9½ĞÉ•…¡•‰ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘ĞùÕÉ…Ñ¥½¸ğ½‘Ğøñ‘ùì¡ÑÉ…”¹‘ÕÉ…Ñ¥½¹}µÌ€¼€ÄÀÀÀ¤¹Ñ½¥á• È¥ôÌğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘ĞùAÉ½Ù¥‘•Èğ½‘Ğøñ‘ùíÑÉ…”¹ÁÉ½Ù¥‘•Éôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù5½‘•°ğ½‘Ğøñ‘ùíÑÉ…”¹µ½‘•±}¥‘•¹Ñ¥™¥•Éôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù%¹ÁÕĞÑ½­•¹Ìğ½‘Ğøñ‘ùíÕÍ…•9Õµ‰•È¡ÑÉ…”°€‰¥¹ÁÕÑ}Ñ½­•¹Ìˆ¥ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù=ÕÑÁÕĞÑ½­•¹Ìğ½‘Ğøñ‘ùíÕÍ…•9Õµ‰•È¡ÑÉ…”°€‰½ÕÑÁÕÑ}Ñ½­•¹Ìˆ¥ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù…¡•¥¹ÁÕĞÑ½­•¹Ìğ½‘Ğøñ‘ùíÕÍ…•9Õµ‰•È¡ÑÉ…”°€‰…¡•‘}Ñ½­•¹Ìˆ¥ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘ĞùÍÑ¥µ…Ñ•½ÍĞğ½‘Ğøñ‘ø‘ì¡ÕÍ…•9Õµ‰•È¡ÑÉ…”°€‰½ÍÑ}•¹ÑÌˆ¤€¼€ÄÀÀ¤¹Ñ½¥á• Ğ¥ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€ğ½‘°ø(€€€€€€€€€€€€€€€í•½M•…É¡•Ì¹±•¹Ñ €ø€À€˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÑÉ…”µÍÕµµ…Éäˆøñ ĞùI•¹‘•É•<ÅÕ•É¥•Ìğ½ Ğøñ½°ùí•½M•…É¡•Ì¹µ…À ¡Í•…É °¥¹‘•à¤€ôø€ñ±¤­•äõí€‘íÍ•…É ¹É•¹‘•É•‘EÕ•Éåô´‘í¥¹‘•áõôøñÍÑÉ½¹œùíÍ•…É ¹ÍÑÉ…Ñ•åI•…Í½¹ôğ½ÍÑÉ½¹œøñ½‘”ùíÍ•…É ¹É•¹‘•É•‘EÕ•Éåôğ½½‘”øñÍÁ…¸ùíÍ•…É ¹É•ÍÕ±Ñ½Õ¹ÑôÉ•ÍÕ±ÑÌ€¼íÍ•…É ¹…¡•MÑ…ÑÕÍôğ½ÍÁ…¸øğ½±¤ø¥ôğ½½°øğ½‘¥Øùô(€€€€€€€€€€€€€€€íÑÕÉ¹áÁ½ÍÕÉ•Ì¹±•¹Ñ €ø€À€˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÑÉ…”µÍÕµµ…Éäˆøñ ĞùQ½½±Ì•áÁ½Í•Á•ÈÑÕÉ¸ğ½ Ğøñ½°ùíÑÕÉ¹áÁ½ÍÕÉ•Ì¹µ…À ¡ÑÕÉ¸¤€ôø€ñ±¤­•äõí€‘íÑÕÉ¸¹ÑÕÉ¹ô´‘íÑÕÉ¸¹ÍÕ‰ÍÑ…•õôøñÍÑÉ½¹œùQÕÉ¸íÑÕÉ¸¹ÑÕÉ¹ôèí¡Õµ…¹¥é•5…¡¥¹•Y…±Õ”¡ÑÕÉ¸¹ÍÕ‰ÍÑ…”¥ôğ½ÍÑÉ½¹œøñÍÁ…¸ùíÑÕÉ¸¹Ñ½½±Ì¹±•¹Ñ €ø€À€üÑÕÉ¸¹Ñ½½±Ì¹µ…À¡Ñ½½±1…‰•°¤¹©½¥¸ ˆ°€ˆ¤€è€‰¥¹…°ÍÑÉÕÑÕÉ•½ÕÑÁÕĞ½¹±ä‰ôğ½ÍÁ…¸øğ½±¤ø¥ôğ½½°øğ½‘¥Øùô(€€€€€€€€€€€€€€€í¹½Éµ…±¥é…Ñ¥½¹]…É¹¥¹½Õ¹Ğ€ø€À€˜˜€ñÀ±…ÍÍ9…µ”ô‰…‘µ¥¸µÍ•½¹‘…Éäµ¹½Ñ”ˆùí½¹ÑÉ½±±•‘Y½…‰Õ±…Éå]…É¹¥¹½Õ¹Ğ€ø€À€ü€‘í½¹ÑÉ½±±•‘Y½…‰Õ±…Éå]…É¹¥¹½Õ¹Ñô½¹ÑÉ½±±•µÙ½…‰Õ±…Éä€‘í½¹ÑÉ½±±•‘Y½…‰Õ±…Éå]…É¹¥¹½Õ¹Ğ€ôôô€Ä€ü€‰Ù…±Õ”İ…Ìˆ€è€‰Ù…±Õ•Ìİ•É”‰ô¹½Éµ…±¥é•‰•™½É”•á•ÕÑ¥½¸¹€€è•µÁÑå=ÁÑ¥½¹…±¥±Ñ•É]…É¹¥¹½Õ¹Ğ€ôôô¹½Éµ…±¥é…Ñ¥½¹]…É¹¥¹½Õ¹Ğ€ü€‘í•µÁÑå=ÁÑ¥½¹…±¥±Ñ•É]…É¹¥¹½Õ¹Ñô•µÁÑä½ÁÑ¥½¹…°€‘í•µÁÑå=ÁÑ¥½¹…±¥±Ñ•É]…É¹¥¹½Õ¹Ğ€ôôô€Ä€ü€‰™¥±Ñ•Èİ…Ìˆ€è€‰™¥±Ñ•ÉÌİ•É”‰ôÉ•µ½Ù•‰•™½É”•á•ÕÑ¥½¸¹€€è€‘í¹½Éµ…±¥é…Ñ¥½¹]…É¹¥¹½Õ¹Ñô½ÁÑ¥½¹…°™¥±Ñ•È€‘í¹½Éµ…±¥é…Ñ¥½¹]…É¹¥¹½Õ¹Ğ€ôôô€Ä€ü€‰Ù…±Õ”İ…Ìˆ€è€‰Ù…±Õ•Ìİ•É”‰ôÍ…™•±ä¹½Éµ…±¥é•‰•™½É”•á•ÕÑ¥½¸¹ôğ½Àùô(€€€€€€€€€€€€€€€í‘•Ù•±½Á•É¥…¹½ÍÑ¥Œ€˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÑÉ…”µÍÕµµ…Éäˆøñ ĞùM…™”‘¥…¹½ÍÑ¥Œğ½ ĞøñÀùí‘•Ù•±½Á•É¥…¹½ÍÑ¥ôğ½Àøğ½‘¥Øùô(€€€€€€€€€€€€€€€íÍ¥•¹Ñ¥™¥M½ÕÉ•¥…¹½ÍÑ¥Ì¹±•¹Ñ €ø€À€˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÑÉ…”µÍÕµµ…Éäˆøñ ĞùM¥•¹Ñ¥™¥ŒµÍ½ÕÉ”‘¥…¹½ÍÑ¥Ìğ½ ĞùíÍ¥•¹Ñ¥™¥M½ÕÉ•¥…¹½ÍÑ¥Ì¹µ…À ¡‘¥…¹½ÍÑ¥Œ°¥¹‘•à¤€ôø€ñM½ÕÉ•¥…¹½ÍÑ¥•Ñ…¥±Ì‘¥…¹½ÍÑ¥Œõí‘¥…¹½ÍÑ¥ô­•äõí€‘í‘¥…¹½ÍÑ¥Œ¹Ñ½½±}¹…µ•ô´‘í¥¹‘•áõô€¼ø¥ôğ½‘¥Øùô(€€€€€€€€€€€€€€€€ñ½°¥ô‰…•¹ĞµÑ½½±Ìˆ±…ÍÍ9…µ”ô‰…‘µ¥¸µÑ½½°µ±¥ÍĞˆùí…•¹ÑQ½½±Ì¹µ…À ¡Ñ½½°¤€ôø€ñ±¤­•äõíÑ½½°¹¥‘ôøñÍÁ…¸ùíÑ½½±1…‰•°¡Ñ½½°¹Ñ½½±}¹…µ”¥ôğ½ÍÁ…¸øñÍµ…±°ùíÑ½½°¹ÍÑ…ÑÕÍôğ½Íµ…±°øğ½±¤ø¥ôğ½½°ø(€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µ¥¹±¥¹”µ…Ñ¥½¹Ìˆø(€€€€€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µ±¥¹¬µ‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôøÍ•ÑM¡½İQÉ…” ¡Ù…±Õ”¤€ôø€…Ù…±Õ”¥ôùíÍ¡½İQÉ…”€ü€‰!¥‘”ÑÉ…”ˆ€è€‰Y¥•ÜÑÉ…”‰ôğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€€€€€ñ„¡É•˜ôˆ…•¹ĞµÑ½½±ÌˆùY¥•ÜÑ½½±ÌÕÍ•ğ½„ø(€€€€€€€€€€€€€€€€€€ñ„¡É•˜ôˆ…ÉÑ¥™…ÑÌˆùY¥•Ü•¹•É…Ñ•…ÉÑ¥™…Ğğ½„ø(€€€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€€€€íÍ¡½İQÉ…”€˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÑÉ…”µÍÕµµ…Éäˆ¥ô‰…•¹ĞµÑÉ…”ˆøñ ĞùQÉ…”•Ù•¹ÑÌğ½ Ğøñ½°ùì¡ÑÉ…”¹ÑÉ…”ü¹•Ù•¹ÑÌ€üümt¤¹µ…À ¡•Ù•¹Ğ°¥¹‘•à¤€ôø€ñ±¤­•äõí¥¹‘•áôùíÑåÁ•½˜•Ù•¹Ğ¹•Ù•¹Ñ}ÑåÁ”€ôôô€‰ÍÑÉ¥¹œˆ€ü¡Õµ…¹¥é•5…¡¥¹•Y…±Õ”¡•Ù•¹Ğ¹•Ù•¹Ñ}ÑåÁ”¹É•Á±…” ½p¸½œ°€‰|ˆ¤¤€èQÉ…”•Ù•¹Ğ€‘í¥¹‘•à€¬€Åõôğ½±¤ø¥ôğ½½°ùí¹½Éµ…±¥é…Ñ¥½¹MÕµµ…É¥•Ì¹µ…À ¡ÍÕµµ…Éä°¥¹‘•à¤€ôø€ñÍ•Ñ¥½¸­•äõí€‘íÍÕµµ…Éä¹Ñ½½±9…µ•ô´‘í¥¹‘•áõôøñ ÔùíÑ½½±1…‰•°¡ÍÕµµ…Éä¹Ñ½½±9…µ”¥ô¥¹ÁÕĞ¹½Éµ…±¥é…Ñ¥½¸ğ½ ÔøñÀùíÍÕµµ…Éä¹İ…É¹¥¹½‘•Ì¹±•¹Ñ¡ôİ…É¹¥¹íÍÕµµ…Éä¹İ…É¹¥¹½‘•Ì¹±•¹Ñ €ôôô€Ä€ü€ˆˆ€è€‰Ì‰ôèíÍÕµµ…Éä¹İ…É¹¥¹½‘•Ì¹©½¥¸ ˆ°€ˆ¥ôğ½Àøñ‘°øñ‘¥Øøñ‘Ğù5½‘•°µÍÕÁÁ±¥•…ÉÕµ•¹ÑÌğ½‘Ğøñ‘øñ½‘”ùí)M=8¹ÍÑÉ¥¹¥™ä¡ÍÕµµ…Éä¹½É¥¥¹…±ÉÕµ•¹ÑÌ¥ôğ½½‘”øğ½‘øğ½‘¥Øøñ‘¥Øøñ‘Ğùá•ÕÑ•…ÉÕµ•¹ÑÌğ½‘Ğøñ‘øñ½‘”ùí)M=8¹ÍÑÉ¥¹¥™ä¡ÍÕµµ…Éä¹¹½Éµ…±¥é•‘ÉÕµ•¹ÑÌ¥ôğ½½‘”øğ½‘øğ½‘¥Øøğ½‘°øñÕ°±…ÍÍ9…µ”ô‰…‘µ¥¸µ¹½Éµ…±¥é…Ñ¥½¸µ±¥ÍĞˆùíÍÕµµ…Éä¹İ…É¹¥¹Ì¹µ…À ¡İ…É¹¥¹œ°İ…É¹¥¹%¹‘•à¤€ôø€ñ±¤­•äõí€‘íİ…É¹¥¹œ¹½‘•ô´‘íİ…É¹¥¹œ¹™¥•±‘ô´‘íİ…É¹¥¹%¹‘•áõôøñÍÑÉ½¹œùíİ…É¹¥¹œ¹™¥•±‘ôğ½ÍÑÉ½¹œøñÍÁ…¸ùíİ…É¹¥¹œ¹½É¥¥¹…°€üü€‰¹½ĞÉ•½É‘•‰ôƒŠHíİ…É¹¥¹œ¹¹½Éµ…±¥é•€üü€‰¹½Ğ•á•ÕÑ•‰ôğ½ÍÁ…¸øñÍµ…±°ùíİ…É¹¥¹œ¹½‘•õíİ…É¹¥¹œ¹Á½±¥åY•ÉÍ¥½¸€ü€ƒ
-Ü€‘íİ…É¹¥¹œ¹Á½±¥åY•ÉÍ¥½¹õ€€è€ˆ‰ôğ½Íµ…±°øğ½±¤ø¥ôğ½Õ°øğ½Í•Ñ¥½¸ø¥ôğ½‘¥Øùô(€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€¤€è€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µ•µÁÑäˆù9¼…•¹ĞÉÕ¸å•Ğ¸ğ½‘¥Øùô(€€€€€€€€€€ğ½Í•Ñ¥½¸ø((€€€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°ˆ¥ô‰…ÉÑ¥™…ÑÌˆ…É¥„µ±…‰•±±•‘‰äô‰…ÉÑ¥™…ÑÌµÑ¥Ñ±”ˆø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°µ¡•…‘¥¹œˆøñ È¥ô‰…ÉÑ¥™…ÑÌµÑ¥Ñ±”ˆù•¹•É…Ñ•…ÉÑ¥™…ÑÌğ½ ÈøñÍÁ…¸ùí…ÉÑ¥™…ÑÌ¹±•¹Ñ¡ôğ½ÍÁ…¸øğ½‘¥Øø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µ…ÉÑ¥™…Ğµ±¥ÍĞˆùí…ÉÑ¥™…ÑÌ¹µ…À ¡…ÉÑ¥™…Ğ¤€ôø€ñ…ÉÑ¥±”­•äõí…ÉÑ¥™…Ğ¹¥‘ôøñ‘¥ØøñÍÑÉ½¹œùí…ÉÑ¥™…Ğ¹±½¥…±}¹…µ•ôğ½ÍÑÉ½¹œøñÍÁ…¸ùí¡Õµ…¹¥é•5…¡¥¹•Y…±Õ”¡…ÉÑ¥™…Ğ¹…ÉÑ¥™…Ñ}ÑåÁ”¥ôƒ
-Üí…ÉÑ¥™…Ğ¹ÁÉ½‘Õ•Éôğ½ÍÁ…¸øğ½‘¥Øøğ½…ÉÑ¥±”ø¥ôğ½‘¥Øø(€€€€€€€€€€ğ½Í•Ñ¥½¸ø((€€€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°ˆ¥ô‰Ñ•¡¹¥…°µ…Õ‘¥Ğˆ…É¥„µ±…‰•±±•‘‰äô‰…Ñ¥Ù¥ÑäµÑ¥Ñ±”ˆø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÑ…‰ÌˆÉ½±”ô‰Ñ…‰±¥ÍĞˆ…É¥„µ±…‰•°ô‰	Õ¥±¡¥ÍÑ½Éäˆø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸¥ô‰…Ñ¥Ù¥ÑäµÑ…ˆˆÉ½±”ô‰Ñ…ˆˆ…É¥„µÍ•±•Ñ•õí…Ñ¥Ù¥ÑåQ…ˆ€ôôô€‰…Ñ¥Ù¥Ñä‰ô…É¥„µ½¹ÑÉ½±Ìô‰…Ñ¥Ù¥ÑäµÁ…¹•°ˆÑ…‰%¹‘•àõí…Ñ¥Ù¥ÑåQ…ˆ€ôôô€‰…Ñ¥Ù¥Ñäˆ€ü€À€è€´Åô½¹-•å½İ¸õí¡…¹‘±•Q…‰-•åô½¹±¥¬õì ¤€ôøÍ•ÑÑ¥Ù¥ÑåQ…ˆ ‰…Ñ¥Ù¥Ñäˆ¥ôùÑ¥Ù¥Ñäğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸¥ô‰…Õ‘¥ĞµÑ…ˆˆÉ½±”ô‰Ñ…ˆˆ…É¥„µÍ•±•Ñ•õí…Ñ¥Ù¥ÑåQ…ˆ€ôôô€‰…Õ‘¥Ğ‰ô…É¥„µ½¹ÑÉ½±Ìô‰…Õ‘¥ĞµÁ…¹•°ˆÑ…‰%¹‘•àõí…Ñ¥Ù¥ÑåQ…ˆ€ôôô€‰…Õ‘¥Ğˆ€ü€À€è€´Åô½¹-•å½İ¸õí¡…¹‘±•Q…‰-•åô½¹±¥¬õì ¤€ôøÍ•ÑÑ¥Ù¥ÑåQ…ˆ ‰…Õ‘¥Ğˆ¥ôùQ•¡¹¥…°…Õ‘¥Ğ±½œğ½‰ÕÑÑ½¸ø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€í…Ñ¥Ù¥ÑåQ…ˆ€ôôô€‰…Ñ¥Ù¥Ñäˆ€ü€ (€€€€€€€€€€€€€€ñ‘¥Ø¥ô‰…Ñ¥Ù¥ÑäµÁ…¹•°ˆÉ½±”ô‰Ñ…‰Á…¹•°ˆ…É¥„µ±…‰•±±•‘‰äô‰…Ñ¥Ù¥ÑäµÑ…ˆˆø(€€€€€€€€€€€€€€€€ñ È¥ô‰…Ñ¥Ù¥ÑäµÑ¥Ñ±”ˆ±…ÍÍ9…µ”ô‰ÍÈµ½¹±äˆùÑ¥Ù¥Ñäğ½ Èø(€€€€€€€€€€€€€€€€ñ½°±…ÍÍ9…µ”ô‰…‘µ¥¸µ…Ñ¥Ù¥Ñäµ±¥ÍĞˆø(€€€€€€€€€€€€€€€€€í‘¥ÍÁ±…åÙ•¹ÑÌ¹µ…À ¡•Ù•¹Ğ¤€ôø€ñ±¤­•äõí•Ù•¹Ğ¹¥‘ôøñÍÁ…¸±…ÍÍ9…µ”ô‰…‘µ¥¸µ…Ñ¥Ù¥Ñäµµ…É­•Èˆ…É¥„µ¡¥‘‘•¸€¼øñ‘¥ØøñÍÑÉ½¹œùí…Ñ¥Ù¥Ñå1…‰•°¡•Ù•¹Ğ¥ôğ½ÍÑÉ½¹œøñÀùí…Ñ½É1…‰•°¡•Ù•¹Ğ¹…Ñ½É}ÑåÁ”¥ôƒ
-Üí¹•Ü…Ñ”¡•Ù•¹Ğ¹É•…Ñ•‘}…Ğ¤¹Ñ½1½…±•MÑÉ¥¹œ ¥ôğ½Àøğ½‘¥Øøğ½±¤ø¥ô(€€€€€€€€€€€€€€€€ğ½½°ø(€€€€€€€€€€€€€€€í•Ù•¹ÑÌ¹±•¹Ñ €ø€Ø€˜˜€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µ±¥¹¬µ‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôøÍ•ÑÕ±±Ñ¥Ù¥Ñä ¡Ù…±Õ”¤€ôø€…Ù…±Õ”¥ôùí™Õ±±Ñ¥Ù¥Ñä€ü€‰M¡½ÜÉ••¹Ğ…Ñ¥Ù¥Ñäˆ€è€‰M¡½Ü™Õ±°…Ñ¥Ù¥Ñä‰ôğ½‰ÕÑÑ½¸ùô(€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€¤€è€ (€€€€€€€€€€€€€€ñ‘¥Ø¥ô‰…Õ‘¥ĞµÁ…¹•°ˆÉ½±”ô‰Ñ…‰Á…¹•°ˆ…É¥„µ±…‰•±±•‘‰äô‰…Õ‘¥ĞµÑ…ˆˆø(€€€€€€€€€€€€€€€€ñ‘°±…ÍÍ9…µ”ô‰…‘µ¥¸µ…Õ‘¥Ğµ¥‘•¹Ñ¥™¥•ÉÌˆø(€€€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù	Õ¥±%ğ½‘Ğøñ‘ùí‰Õ¥±¹¥‘ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€€íÑÉ…”€˜˜€ñ‘¥Øøñ‘ĞùÕÉÉ•¹ĞÉÕ¸%ğ½‘Ğøñ‘ùíÑÉ…”¹¥‘ôğ½‘øğ½‘¥Øùô(€€€€€€€€€€€€€€€€ğ½‘°ø(€€€€€€€€€€€€€€€€ñ½°±…ÍÍ9…µ”ô‰…‘µ¥¸µ…Õ‘¥Ğµ±¥ÍĞˆø(€€€€€€€€€€€€€€€€€íl¸¸¹•Ù•¹ÑÍt¹É•Ù•ÉÍ” ¤¹µ…À ¡•Ù•¹Ğ¤€ôø€ñ±¤­•äõí•Ù•¹Ğ¹¥‘ôøñ‘¥ØøñÍÑÉ½¹œùí•Ù•¹Ğ¹•Ù•¹Ñ}ÑåÁ•ôğ½ÍÑÉ½¹œøñÑ¥µ”ùí¹•Ü…Ñ”¡•Ù•¹Ğ¹É•…Ñ•‘}…Ğ¤¹Ñ½1½…±•MÑÉ¥¹œ ¥ôğ½Ñ¥µ”øğ½‘¥Øøñ‘°øñ‘¥Øøñ‘ĞùQÉ…¹Í¥Ñ¥½¸ğ½‘Ğøñ‘ùí•Ù•¹Ğ¹™É½µ}ÍÑ…Ñ”€üü€‰¹½¹”‰ôÑ¼í•Ù•¹Ğ¹Ñ½}ÍÑ…Ñ”€üü€‰¹½¹”‰ôğ½‘øğ½‘¥Øøñ‘¥Øøñ‘ĞùÑ½Èğ½‘Ğøñ‘ùí•Ù•¹Ğ¹…Ñ½É}ÑåÁ•ô€¼í•Ù•¹Ğ¹…Ñ½É}¥‘ôğ½‘øğ½‘¥Øøñ‘¥Øøñ‘ĞùÙ•¹Ğ%ğ½‘Ğøñ‘ùí•Ù•¹Ğ¹¥‘ôğ½‘øğ½‘¥Øøñ‘¥Øøñ‘ĞùÙ•¹Ğ¡…Í ğ½‘Ğøñ‘ùí•Ù•¹Ğ¹•Ù•¹Ñ}¡…Í¡ôğ½‘øğ½‘¥Øøğ½‘°øğ½±¤ø¥ô(€€€€€€€€€€€€€€€€ğ½½°ø(€€€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€€€¥ô(€€€€€€€€€€ğ½Í•Ñ¥½¸ø((€€€€€€€€€€ñ‘•Ñ…¥±Ì±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°…‘µ¥¸µÑ•¡¹¥…°µ‘•Ñ…¥±Ìˆø(€€€€€€€€€€€€ñÍÕµµ…ÉäùQ•¡¹¥…°‘•Ñ…¥±Ìğ½ÍÕµµ…Éäø(€€€€€€€€€€€€ñ‘°ø(€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù5…¡¥¹”ÍÑ…Ñ”ğ½‘Ğøñ‘ùí‰Õ¥±¹ÕÉÉ•¹Ñ}ÍÑ…•ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù]½É­™±½ÜÙ•ÉÍ¥½¸ğ½‘Ğøñ‘ùí‰Õ¥±¹Ù•ÉÍ¥½¹ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù	Õ¥±%ğ½‘Ğøñ‘ùí‰Õ¥±¹¥‘ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€íÑÉ…”€˜˜€ñ‘¥Øøñ‘ĞùÕÉÉ•¹ĞÉÕ¸%ğ½‘Ğøñ‘ùíÑÉ…”¹¥‘ôğ½‘øğ½‘¥Øùô(€€€€€€€€€€€€€íÁ•¹‘¥¹œ€˜˜€ñ‘¥Øøñ‘ĞùAÉ½Á½Í…°‰¥¹‘¥¹œğ½‘Ğøñ‘ùíÁ•¹‘¥¹œ¹ÁÉ½Á½Í…±}¡…Í¡ôğ½‘øğ½‘¥Øùô(€€€€€€€€€€€€ğ½‘°ø(€€€€€€€€€€ğ½‘•Ñ…¥±Ìø((€€€€€€€€€í•ÉÉ½ÉÌ¹±•¹Ñ €ø€À€˜˜€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°…‘µ¥¸µ•ÉÉ½ÉÌµÁ…¹•°ˆøñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°µ¡•…‘¥¹œˆøñ Èù]½É­™±½Ü•ÉÉ½ÉÌğ½ ÈøñÍÁ…¸ùí•ÉÉ½ÉÌ¹±•¹Ñ¡ôğ½ÍÁ…¸øğ½‘¥Øùí•ÉÉ½ÉÌ¹µ…À ¡¥Ñ•´¤€ôø€ñ…ÉÑ¥±”±…ÍÍ9…µ”ô‰…‘µ¥¸µ•ÉÉ½ÈµÉ½Üˆ­•äõí¥Ñ•´¹¥‘ôøñÍÑÉ½¹œùí¡Õµ…¹¥é•5…¡¥¹•Y…±Õ”¡¥Ñ•´¹½‘”¥ôğ½ÍÑÉ½¹œøñÀùí¥Ñ•´¹Í…™•}µ•ÍÍ…•ôğ½ÀøñÍÁ…¸ùí¥Ñ•´¹É•ÑÉå…‰±”€ü€‰I•ÑÉå…‰±”ˆ€è€‰Q•Éµ¥¹…°‰ôğ½ÍÁ…¸ùí¥Ñ•´¹‘•Ñ…¥°ü¹Í½ÕÉ•}‘¥…¹½ÍÑ¥Œ€˜˜€ñM½ÕÉ•¥…¹½ÍÑ¥•Ñ…¥±Ì‘¥…¹½ÍÑ¥Œõí¥Ñ•´¹‘•Ñ…¥°¹Í½ÕÉ•}‘¥…¹½ÍÑ¥ô€¼ùôğ½…ÉÑ¥±”ø¥ôğ½Í•Ñ¥½¸ùô((€€€€€€€€€í¥µÁ½ÉĞ¹µ•Ñ„¹•¹Ø¹X€˜˜€ (€€€€€€€€€€€€ñ‘•Ñ…¥±Ì±…ÍÍ9…µ”ô‰…‘µ¥¸µÁ…¹•°…‘µ¥¸µ‘•Ù•±½Á•ÈµÑ½½±Ìˆø(€€€€€€€€€€€€€€ñÍÕµµ…Éäù•Ù•±½Á•ÈÑ½½±Ì€ñÍÁ…¸ùQ•ÍĞ½¹±äğ½ÍÁ…¸øğ½ÍÕµµ…Éäø(€€€€€€€€€€€€€€ñÀùM¥µÕ±…Ñ¥½¸µ½¹±äÉ•½Ù•Éä½¹ÑÉ½±Ì¸Q¡•Í”…Ñ¥½¹Ì…É”¹½ĞÁ…ÉĞ½˜Ñ¡”ÁÉ½‘ÕÑ¥½¸İ½É­™±½Ü¸ğ½Àø(€€€€€€€€€€€€€í…¹…¥°€ü€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µ‘…¹•Èµ½ÕÑ±¥¹”ˆ‘¥Í…‰±•õí‰ÕÍåô½¹±¥¬õì ¤€ôøÙ½¥½µµ…¹ ‰Í¥µÕ±…Ñ”µ™…¥±ÕÉ”ˆ¥ôùQÉ¥•È½¹ÑÉ½±±•™…¥±ÕÉ”ğ½‰ÕÑÑ½¸ø€è€ñÍÁ…¸ù9¼Ñ•ÍĞ…Ñ¥½¸¥ÌÙ…±¥¥¸Ñ¡¥ÌÍÑ…Ñ”¸ğ½ÍÁ…¸ùô(€€€€€€€€€€€€ğ½‘•Ñ…¥±Ìø(€€€€€€€€€€¥ô(€€€€€€€€ğ½…Í¥‘”ø(€€€€€€ğ½‘¥Øø((€€€€€í½¹™¥Éµ…Ñ¥½¸€˜˜€ (€€€€€€€€ñ‘µ¥¹5½‘…°(€€€€€€€€€Ñ¥Ñ±”õí½¹™¥Éµ…Ñ¥½¸¹­¥¹€ôôô€‰…ÁÁÉ½Ù”ˆ€ü€¡¥ÍÍÍ•µ‰±åÁÁÉ½Ù…°€ü€‰½¹™¥É´…ÍÍ•µ‰±äÍÑÉ…Ñ•ä…ÁÁÉ½Ù…°ˆ€è¥ÍMÁ•¥™¥…Ñ¥½¹ÁÁÉ½Ù…°€ü€‰½¹™¥É´Ñ…É•ĞÍÁ•¥™¥…Ñ¥½¸…ÁÁÉ½Ù…°ˆ€è€‰½¹™¥É´‘…Ñ…Í•Ğ…ÁÁÉ½Ù…°ˆ¤€è½¹™¥Éµ…Ñ¥½¸¹­¥¹€ôôô€‰…¹•°ˆ€ü€‰…¹•°Ñ¡¥Ìİ½É­™±½Üüˆ€è½¹™¥É´€‘í¡Õµ…¹¥é•5…¡¥¹•Y…±Õ”¡½¹™¥Éµ…Ñ¥½¸¹­¥¹¤¹Ñ½1½İ•É…Í” ¥õô(€€€€€€€€€‘•ÍÉ¥ÁÑ¥½¸õí½¹™¥Éµ…Ñ¥½¸¹­¥¹€ôôô€‰…ÁÁÉ½Ù”ˆ€ü€¡¥ÍÍÍ•µ‰±åÁÁÉ½Ù…°€ü€‰Q¡¥Ì…ÁÁÉ½Ù•Ì½¹±äÑ¡”Ù•É¥™¥•Í½ÕÉ”É…Á …¹ÁÉ•Á…É…Ñ¥½¸ÍÑÉ…Ñ•äì¥Ğ‘½•Ì¹½Ğ…ÕÑ¡½É¥é”ÑÉ…¥¹¥¹œ¸ˆ€è€‰I•Ù¥•ÜÑ¡”Í•±•Ñ•ÁÉ½Á½Í…°…¹…ÁÁÉ½Ù…°Í½Á”‰•™½É”½¹Ñ¥¹Õ¥¹œ¸ˆ¤€è€‰Q¡¥Ì‘•¥Í¥½¸İ¥±°‰”É•½É‘•¥¸Ñ¡”¥µµÕÑ…‰±”…Õ‘¥Ğ¡¥ÍÑ½Éä¸‰ô(€€€€€€€€€½¹±½Í”õì ¤€ôøÍ•Ñ½¹™¥Éµ…Ñ¥½¸¡¹Õ±°¥ô(€€€€€€€€€É•ÑÕÉ¹½ÕÌõí½¹™¥Éµ…Ñ¥½¹QÉ¥•È¹ÕÉÉ•¹Ñô(€€€€€€€€ø(€€€€€€€€€í½¹™¥Éµ…Ñ¥½¸¹­¥¹€ôôô€‰…¹•°ˆ€ü€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µ½¹™¥Éµ…Ñ¥½¸ˆø(€€€€€€€€€€€€€€ñÀù	Õ¥±íÍ¡½ÉÑ	Õ¥±‘%¡‰Õ¥±¹¥¥ôİ¥±°‰”…¹•±±•¸½µÁ±•Ñ•…ÉÑ¥™…ÑÌ…¹…Õ‘¥Ğ¡¥ÍÑ½Éäİ¥±°É•µ…¥¸…Ù…¥±…‰±”¸ğ½Àø(€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µµ½‘…°µ…Ñ¥½¹Ìˆøñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÍ•½¹‘…Éäˆ½¹±¥¬õì ¤€ôøÍ•Ñ½¹™¥Éµ…Ñ¥½¸¡¹Õ±°¥ôù-••Àİ½É­™±½Üğ½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µ‘…¹•Èˆ‘¥Í…‰±•õí‰ÕÍåô½¹±¥¬õì ¤€ôøÙ½¥½µµ…¹ ‰…¹•°ˆ¥ôù…¹•°İ½É­™±½Üğ½‰ÕÑÑ½¸øğ½‘¥Øø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€¤€è€ (€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µ½¹™¥Éµ…Ñ¥½¸ˆø(€€€€€€€€€€€€€€ñ‘°ø(€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘ĞùM•±•Ñ•…¹‘¥‘…Ñ”ğ½‘Ğøñ‘ùíÍ•±•Ñ•‘…¹‘¥‘…Ñ”€ü€‘í…¹‘¥‘…Ñ•1…‰•°¡Í•±•Ñ•‘…¹‘¥‘…Ñ”°Í•±•Ñ•‘%¹‘•à¥ôƒ
-Ü€‘íÍ•±•Ñ•‘…¹‘¥‘…Ñ”¹Ñ¥Ñ±•õ€€è€‰9¼…¹‘¥‘…Ñ”‰ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘ĞùÙ¥‘•¹”‰¥¹‘¥¹œğ½‘Ğøñ‘ùÕÉÉ•¹Ğ¥µµÕÑ…‰±”…¹‘¥‘…Ñ”…ÉÑ¥™…Ğğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘ĞùÁÁÉ½Ù…°Í½Á”ğ½‘Ğøñ‘ùí¥ÍÍÍ•µ‰±åÁÁÉ½Ù…°€ü€‰Y•É¥™¥•Í½ÕÉ”É…Á …¹‘•Ñ•Éµ¥¹¥ÍÑ¥ŒÁÉ•Á…É…Ñ¥½¸ÍÑÉ…Ñ•ä½¹±äˆ€è¥ÍMÁ•¥™¥…Ñ¥½¹ÁÁÉ½Ù…°€ü€‰Q…É•ĞÑÉ…¥¹¥¹œµ‘…Ñ„½¹ÑÉ…Ğ½¹±äˆ€è€‰…Ñ…Í•ĞÍ•±•Ñ¥½¸™½ÈÑ¡¥Ì‰Õ¥±½¹±ä‰ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€€€ñ‘¥Øøñ‘Ğù9•áĞÍÑ…”ğ½‘Ğøñ‘ùí½¹™¥Éµ…Ñ¥½¸¹­¥¹€ôôô€‰…ÁÁÉ½Ù”ˆ€ü€¡¥ÍÍÍ•µ‰±åÁÁÉ½Ù…°€ü€‰½µÁ±•Ñ”…ÍÍ•µ‰±äÉ•Ù¥•Üì½¹ÍÑÉÕÑ¥½¸…¹ÑÉ…¥¹¥¹œÉ•µ…¥¸‘•™•ÉÉ•ˆ€è¥ÍMÁ•¥™¥…Ñ¥½¹ÁÁÉ½Ù…°€ü€‰•É¥Ù”½µÁ½¹•¹ĞÉ•ÅÕ¥É•µ•¹ÑÌˆ€è€‰AÉ•Á…É”Ñ¡”Í•±•Ñ•‘…Ñ…Í•Ğˆ¤€è½¹™¥Éµ…Ñ¥½¸¹­¥¹€ôôô€‰É•ÅÕ•ÍÑ}É•Ù¥Í¥½¸ˆ€ü€‰I•Ù¥Í”Ñ¡”ÁÉ•Á…É•½µÁ…É¥Í½¸ˆ€è½¹™¥Éµ…Ñ¥½¸¹­¥¹€ôôô€‰¡½½Í•}…±Ñ•É¹…Ñ¥Ù”ˆ€ü€‰I•½ÉÑ¡”…±Ñ•É¹…Ñ¥Ù”Í•±•Ñ¥½¸ˆ€è€‰MÑ½ÀÑ¡¥ÌÁÉ½Á½Í…°‰ôğ½‘øğ½‘¥Øø(€€€€€€€€€€€€€€ğ½‘°ø(€€€€€€€€€€€€€í½µµ•¹Ğ€˜˜€ñÀøñÍÑÉ½¹œùI•Ù¥•İ•È½µµ•¹Ğèğ½ÍÑÉ½¹œøí½µµ•¹Ñôğ½Àùô(€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰…‘µ¥¸µµ½‘…°µ…Ñ¥½¹Ìˆøñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰…‘µ¥¸µÍ•½¹‘…Éäˆ½¹±¥¬õì ¤€ôøÍ•Ñ½¹™¥Éµ…Ñ¥½¸¡¹Õ±°¥ôù¼‰…¬ğ½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸±…ÍÍ9…µ”õí½¹™¥Éµ…Ñ¥½¸¹­¥¹€ôôô€‰É•©•Ğˆ€ü€‰…‘µ¥¸µ‘…¹•Èˆ€è€‰…‘µ¥¸µÁÉ¥µ…Éä‰ô‘¥Í…‰±•õí‰ÕÍåô½¹±¥¬õì ¤€ôø½¹™¥Éµ…Ñ¥½¸¹…ÁÁÉ½Ù…°€˜˜Ù½¥‘•¥‘”¡½¹™¥Éµ…Ñ¥½¸¹…ÁÁÉ½Ù…°°½¹™¥Éµ…Ñ¥½¸¹­¥¹…Ì•¥Í¥½¸¥ôù½¹™¥É´‘•¥Í¥½¸ğ½‰ÕÑÑ½¸øğ½‘¥Øø(€€€€€€€€€€€€ğ½‘¥Øø(€€€€€€€€€€¥ô(€€€€€€€€ğ½‘µ¥¹5½‘…°ø(€€€€€€¥ô(€€€€ğ½Í•Ñ¥½¸ø(€€¤ì)ô
+    const diagnostic = (result as Record<string, unknown>).source_diagnostic;
+    const output = (result as Record<string, unknown>).output;
+    const candidateDiagnostics = output && typeof output === "object" && !Array.isArray(output)
+      && Array.isArray((output as Record<string, unknown>).results)
+      ? ((output as Record<string, unknown>).results as Array<Record<string, unknown>>).flatMap((item) => {
+        const itemDiagnostic = item?.source_diagnostic;
+        return itemDiagnostic && typeof itemDiagnostic === "object" && !Array.isArray(itemDiagnostic)
+          ? [itemDiagnostic as AdminSourceToolDiagnostic]
+          : [];
+      })
+      : [];
+    return [
+      ...(diagnostic && typeof diagnostic === "object" && !Array.isArray(diagnostic)
+        ? [diagnostic as AdminSourceToolDiagnostic]
+        : []),
+      ...candidateDiagnostics,
+    ];
+  });
+}
+
+function SourceDiagnosticDetails({ diagnostic }: { diagnostic: AdminSourceToolDiagnostic }) {
+  return <dl className="admin-source-diagnostic">
+    <div><dt>Source</dt><dd>{diagnostic.source_host}{diagnostic.safe_url_path}</dd></div>
+    <div><dt>HTTP</dt><dd>{diagnostic.http_method} Â· {diagnostic.http_status ?? "not received"}</dd></div>
+    <div><dt>Final host</dt><dd>{diagnostic.final_approved_host ?? "not reached"}</dd></div>
+    <div><dt>Source MIME</dt><dd>{diagnostic.content_type ?? "unknown"} Â· {diagnostic.response_byte_count ?? 0} bytes</dd></div>
+    <div><dt>Artifact MIME</dt><dd>{diagnostic.artifact_content_type ?? "not stored"}</dd></div>
+    <div><dt>Parser</dt><dd>{diagnostic.parser_outcome ? humanizeMachineValue(diagnostic.parser_outcome) : "not reached"}</dd></div>
+    <div><dt>Artifact</dt><dd>{diagnostic.source_artifact_id ?? "not stored"}</dd></div>
+    <div><dt>Cache</dt><dd>{diagnostic.cache_status ? humanizeMachineValue(diagnostic.cache_status) : "not available"}</dd></div>
+    <div><dt>Category</dt><dd>{humanizeMachineValue(diagnostic.source_error_category)}</dd></div>
+    <div><dt>Exception</dt><dd>{diagnostic.exception_class ?? "none"}</dd></div>
+    <div><dt>Attempt</dt><dd>{diagnostic.attempt_number} Â· {diagnostic.request_duration_ms} ms</dd></div>
+    <div><dt>Retry policy</dt><dd>{diagnostic.retryable ? "Retryable" : "Terminal"}</dd></div>
+    {diagnostic.developer_message && <div><dt>Developer note</dt><dd>{diagnostic.developer_message}</dd></div>}
+  </dl>;
+}
+
+export function AdminEndpointDetail() {
+  const { buildId = "" } = useParams();
+  const confirmationTrigger = useRef<HTMLElement | null>(null);
+  const [build, setBuild] = useState<AdminBuild | null>(null);
+  const [events, setEvents] = useState<AdminTimelineEvent[]>([]);
+  const [artifacts, setArtifacts] = useState<AdminArtifact[]>([]);
+  const [approvals, setApprovals] = useState<AdminApproval[]>([]);
+  const [runs, setRuns] = useState<AdminAgentRun[]>([]);
+  const [trace, setTrace] = useState<AdminAgentRun | null>(null);
+  const [errors, setErrors] = useState<AdminWorkflowError[]>([]);
+  const [trainingWorkflow, setTrainingWorkflow] = useState<AdminTrainingDatasetWorkflow | null>(null);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [recommendedCandidateId, setRecommendedCandidateId] = useState<string | null | undefined>(undefined);
+  const [runMode, setRunMode] = useState<"live" | "cached" | "replay">("replay");
+  const [simulationLabel, setSimulationLabel] = useState<string | null>(null);
+  const [decisionSummary, setDecisionSummary] = useState("");
+  const [unresolvedQuestions, setUnresolvedQuestions] = useState<string[]>([]);
+  const [comment, setComment] = useState("");
+  const [selected, setSelected] = useState("");
+  const [activityTab, setActivityTab] = useState<"activity" | "audit">("activity");
+  const [fullActivity, setFullActivity] = useState(false);
+  const [showTrace, setShowTrace] = useState(false);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copiedIdentifier, setCopiedIdentifier] = useState<"build" | "run" | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [nextBuild, nextEvents, nextArtifacts, nextApprovals, nextRuns, nextErrors, nextTrainingWorkflow] =
+        await Promise.all([
+          api.adminGetBuild(buildId),
+          api.adminTimeline(buildId),
+          api.adminArtifacts(buildId),
+          api.adminApprovals(buildId),
+          api.adminAgentRuns(buildId),
+          api.adminErrors(buildId),
+          api.adminTrainingDatasetWorkflow(buildId).catch(() => ({
+            schema_version: "1.0.0" as const,
+            workflow_id: buildId,
+            workflow_kind: "legacy_single_source_discovery",
+            legacy: true,
+            label: "Legacy single-source discovery",
+          })),
+        ]);
+      setBuild(nextBuild);
+      setEvents(nextEvents);
+      setArtifacts(nextArtifacts);
+      setApprovals(nextApprovals);
+      setRuns(nextRuns);
+      setErrors(nextErrors);
+      setTrainingWorkflow(nextTrainingWorkflow);
+      const persistedRunMode = nextRuns.at(-1)?.run_mode ?? undefined;
+      const candidateArtifact = [...nextArtifacts]
+        .reverse()
+        .find((item) => item.artifact_type === "dataset_candidates");
+      if (candidateArtifact) {
+        const preview = await api.adminArtifactPreview(candidateArtifact.id);
+        const content = preview.content as CandidateArtifact;
+        setCandidates(content.candidates ?? []);
+        setRecommendedCandidateId(content.recommended_candidate_id);
+        setSelected((current) => current || content.candidates?.[0]?.candidate_id || "");
+        setRunMode(persistedRunMode ?? content.run_mode ?? (content.live_discovery ? "live" : "replay"));
+        setSimulationLabel(content.simulation_label ?? null);
+        setDecisionSummary(content.decision_summary ?? "");
+        setUnresolvedQuestions(content.unresolved_questions ?? []);
+      } else {
+        setCandidates([]);
+        setRecommendedCandidateId(undefined);
+        setRunMode(persistedRunMode ?? "replay");
+        setSimulationLabel(null);
+        setDecisionSummary("");
+        setUnresolvedQuestions([]);
+      }
+      if (nextRuns.length > 0) setTrace(await api.adminAgentRun(nextRuns.at(-1)!.id));
+      else setTrace(null);
+      setError(null);
+    } catch {
+      setError("Build details could not be loaded. Check the local service and try again.");
+    }
+  }, [buildId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function command(action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure") {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminCommand(build.id, action, build.version);
+      await load();
+      setConfirmation(null);
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : `Unable to ${action}.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decide(approval: AdminApproval, decision: Decision) {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminDecideApproval(
+        approval,
+        build.version,
+        decision,
+        comment,
+        decision === "choose_alternative" ? selected : undefined,
+      );
+      setComment("");
+      setConfirmation(null);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The review decision could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshSourceMetadata() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminRefreshSourceMetadata(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "Source metadata could not be refreshed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyIdentifier(kind: "build" | "run", value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedIdentifier(kind);
+    } catch {
+      setError(`Unable to copy the full ${kind} ID.`);
+    }
+  }
+
+  const pending = approvals.find((item) => item.status === "pending") ?? null;
+  const recommended = useMemo(
+    () => recommendedCandidateId === null
+      ? undefined
+      : recommendedCandidateId
+        ? candidates.find((item) => item.candidate_id === recommendedCandidateId)
+        : candidates.find((item, index) => candidateStatus(item, index) === "Recommended") ?? candidates[0],
+    [candidates, recommendedCandidateId],
+  );
+  const agentTools = useMemo(
+    () => trace?.tools ?? [],
+    [trace],
+  );
+
+  if (!build) {
+    return <section className="admin-page"><div className="admin-empty" role="status">{error ?? "Loading build..."}</div></section>;
+  }
+
+  const progress = stageProgress(build);
+  const displayEvents = fullActivity ? [...events].reverse() : [...events].reverse().slice(0, 6);
+  const canFail = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
+  const canPause = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
+  const canCancel = !["CANCELLED", "COMPLETED"].includes(build.current_stage);
+  const canRetry = build.current_stage === "FAILED" && errors.at(-1)?.retryable === true;
+  const selectedIndex = Math.max(0, candidates.findIndex((candidate) => candidate.candidate_id === selected));
+  const selectedCandidate = candidates[selectedIndex];
+  const developerDiagnostic = trace ? safeDeveloperDiagnostic(trace) : null;
+  const scientificSourceDiagnostics = trace ? sourceDiagnostics(trace) : [];
+  const providerRetries = trace ? traceEventCount(trace, "provider.retry") : 0;
+  const geoSearches = trace ? geoSearchSummaries(trace) : [];
+  const turnExposures = trace ? turnExposureSummaries(trace) : [];
+  const inspectionCounts = trace ? candidateInspectionCounts(trace) : null;
+  const normalizationSummaries = trace ? toolNormalizationSummaries(trace) : [];
+  const normalizationWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.length,
+    0,
+  );
+  const emptyOptionalFilterWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.filter(
+      (code) => code === "empty_optional_search_term_removed",
+    ).length,
+    0,
+  );
+  const controlledVocabularyWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.filter(
+      (code) => code === "controlled_vocabulary_alias_canonicalized",
+    ).length,
+    0,
+  );
+  const hasCompletedOutput = trace?.status === "completed" || trace?.status === "approval_required";
+  const hasCandidateRecommendation = Boolean(pending && recommended && candidates.length > 0);
+  const isAssemblyApproval = pending?.approval_type === "training_dataset_assembly_strategy";
+  const isSpecificationApproval = pending?.approval_type === "dataset_specification";
+
+  function requestConfirmation(kind: Confirmation["kind"], approval?: AdminApproval, trigger?: HTMLElement) {
+    confirmationTrigger.current = trigger ?? null;
+    setConfirmation({ kind, approval });
+  }
+
+  function handleTabKey(event: KeyboardEvent<HTMLButtonElement>) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const order: Array<"activity" | "audit"> = ["activity", "audit"];
+    let index = order.indexOf(activityTab);
+    if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = order.length - 1;
+    else index = (index + (event.key === "ArrowRight" ? 1 : -1) + order.length) % order.length;
+    setActivityTab(order[index]);
+    requestAnimationFrame(() => document.getElementById(`${order[index]}-tab`)?.focus());
+  }
+
+  return (
+    <section className="admin-page admin-detail-page" aria-labelledby="admin-build-title">
+      <Link className="admin-back" to="/admin/endpoints">Back to endpoint builds</Link>
+      <header className="admin-heading admin-detail-heading">
+        <div>
+          <div className="admin-title-meta">
+            <span className="admin-identifier">
+              <span>Build {shortBuildId(build.id)}</span>
+              <button
+                type="button"
+                className="admin-copy-button"
+                aria-label={`Copy full build ID ${build.id}`}
+                onClick={() => void copyIdentifier("build", build.id)}
+              >{copiedIdentifier === "build" ? "Copied" : "Copy"}</button>
+            </span>
+            <span>Updated {relativeTime(build.updated_at)}</span>
+          </div>
+          <h1 id="admin-build-title">{build.endpoint_name}</h1>
+          <p>{build.biological_goal}</p>
+        </div>
+        <div className="admin-build-status-summary">
+          <span className="admin-status admin-status-detail">{buildStatusLabel(build)}</span>
+          <strong>{stageLabel(build.current_stage)}</strong>
+          <span>Local administrator</span>
+          <span className="admin-mode-badge">{modeLabel(runMode)}</span>
+        </div>
+      </header>
+
+      {error && <div className="admin-error" role="alert">{error}</div>}
+
+      <section className="admin-stepper-panel" aria-labelledby="workflow-progress-title">
+        <div className="admin-panel-heading">
+          <div><h2 id="workflow-progress-title">Workflow progress</h2><p>{progress.completed} of {progress.total} stages completed</p></div>
+          <span aria-live="polite">Current: {stageLabel(build.current_stage)}</span>
+        </div>
+        <ol className="admin-stepper" aria-label="Endpoint build stages">
+          {WORKFLOW_STAGES.map((stage, index) => {
+            const state = index < progress.index ? "completed" : index === progress.index ? (build.current_stage === "FAILED" ? "failed" : "current") : "waiting";
+            return (
+              <li key={stage.label} className={`admin-step admin-step-${state}`} aria-current={state === "current" ? "step" : undefined}>
+                <span className="admin-step-marker" aria-hidden>{state === "completed" ? "Done" : index + 1}</span>
+                <span><strong>{stage.label}</strong><small>{state}</small></span>
+              </li>
+            );
+          })}
+          {progress.unknown && (
+            <li className="admin-step admin-step-current" aria-current="step">
+              <span className="admin-step-marker" aria-hidden>+</span>
+              <span><strong>{stageLabel(build.current_stage)}</strong><small>future stage</small></span>
+            </li>
+          )}
+        </ol>
+      </section>
+
+      <div className="admin-detail-grid">
+        <main className="admin-primary-column">
+          {trainingWorkflow && <TrainingDatasetWorkspace data={trainingWorkflow} />}
+          <section className="admin-panel admin-decision-panel" aria-labelledby="decision-title">
+            <div className="admin-decision-heading">
+              <div>
+                <span className="admin-section-kicker">Human decision</span>
+                <h2 id="decision-title">{isAssemblyApproval ? "Assembly strategy review required" : isSpecificationApproval ? "Target specification review required" : pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
+                <p>{isAssemblyApproval ? "Approve only the immutable verified source graph and deterministic preparation plan; training remains deferred." : isSpecificationApproval ? "Review the target structure before any source discovery or strategy planning begins." : pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
+              </div>
+              {pending && <span className="admin-review-flag">Action required</span>}
+            </div>
+            {pending && (isAssemblyApproval || isSpecificationApproval) ? (
+              <div className="admin-approval-card">
+                <div className="admin-recommendation"><span>{isAssemblyApproval ? "Verified assembly proposal" : "Target contract"}</span><h3>{pending.request.proposed_decision}</h3><p>{pending.request.evidence_summary}</p></div>
+                <div className="admin-decision-evidence"><div><h3>Approval scope</h3><p>{pending.request.requested_action}</p></div><div><h3>Limitations</h3><ul>{pending.request.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div></div>
+                <label className="admin-comment-field">Reviewer comment<textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Required for rejection or revision" /></label>
+                <div className="admin-approval-actions">
+                  <button className="admin-primary" disabled={busy} onClick={(event) => requestConfirmation("approve", pending, event.currentTarget)}>{isAssemblyApproval ? "Approve assembly strategy" : "Approve target specification"}</button>
+                  <button className="admin-secondary" disabled={busy || !comment} onClick={(event) => requestConfirmation("request_revision", pending, event.currentTarget)}>Request revised strategy</button>
+                  <button className="admin-danger-outline" disabled={busy || !comment} onClick={(event) => requestConfirmation("reject", pending, event.currentTarget)}>Reject</button>
+                </div>
+              </div>
+            ) : pending && hasCandidateRecommendation ? (
+              <div className="admin-approval-card">
+                <div className="admin-recommendation">
+                  <span>Recommended candidate</span>
+                  <strong>{recommended ? candidateLabel(recommended, Math.max(0, candidates.indexOf(recommended))) : "No candidate"}</strong>
+                  <h3>{recommended?.title ?? pending.request.proposed_decision}</h3>
+                  <p>{recommended?.description ?? recommended?.biological_context ?? pending.request.evidence_summary}</p>
+                </div>
+                <div className="admin-decision-evidence">
+                  <div>
+                    <h3>Why it is recommended</h3>
+                    <ul>{[...(recommended?.strengths ?? []), pending.request.agent_recommendation].map((item) => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                  <div>
+                    <h3>Limitations</h3>
+                    <ul>{[...(recommended?.limitations ?? []), ...pending.request.limitations].filter((item, index, all) => all.indexOf(item) === index).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                </div>
+                <label className="admin-comment-field">
+                  Reviewer comment
+                  <textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Required for rejection, revision, or selecting another candidate" />
+                </label>
+                <div className="admin-approval-actions">
+                  <button className="admin-primary" disabled={busy} onClick={(event) => requestConfirmation("approve", pending, event.currentTarget)}>Approve dataset</button>
+                  <button className="admin-secondary" disabled={busy || !comment} onClick={(event) => requestConfirmation("request_revision", pending, event.currentTarget)}>Request revision</button>
+                  <button className="admin-danger-outline" disabled={busy || !comment} onClick={(event) => requestConfirmation("reject", pending, event.currentTarget)}>Reject</button>
+                  {candidates.length > 1 && <button className="admin-link-button" disabled={busy || !selected || !comment} onClick={(event) => requestConfirmation("choose_alternative", pending, event.currentTarget)}>Select another candidate</button>}
+                </div>
+              </div>
+            ) : pending ? (
+              <div className="admin-approval-card admin-no-candidate-review">
+                <div className="admin-recommendation">
+                  <span>No dataset recommendation</span>
+                  <h3>Bounded GEO searches found no suitable candidate</h3>
+                  <p>{pending.request.evidence_summary}</p>
+                </div>
+                <div className="admin-decision-evidence">
+                  <div><h3>Limitations</h3><ul>{pending.request.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                  <div><h3>Proposed next search</h3><p>{pending.request.agent_recommendation}</p></div>
+                </div>
+                <label className="admin-comment-field">Reviewer comment<textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Required to request a revised search" /></label>
+                <div className="admin-approval-actions">
+                  <button className="admin-secondary" disabled={busy || !comment} onClick={(event) => requestConfirmation("request_revision", pending, event.currentTarget)}>Request revised search</button>
+                  <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>
+                </div>
+              </div>
+            ) : hasCompletedOutput && candidates.length === 0 ? (
+              <div className="admin-approval-card admin-no-candidate-review">
+                <div className="admin-recommendation">
+                  <span>No dataset recommendation</span>
+                  <h3>Bounded GEO searches found no suitable candidate</h3>
+                  <p>{decisionSummary || "The bounded discovery completed without a public_valid recommendation."}</p>
+                </div>
+              </div>
+            ) : <div className="admin-empty">The next workflow action is shown below.</div>}
+          </section>
+
+          {candidates.length > 0 && (
+            <section className="admin-panel" aria-labelledby="candidate-comparison-title">
+              <div className="admin-panel-heading">
+                <div><h2 id="candidate-comparison-title">Candidate comparison</h2><p>{runMode === "replay" ? simulationLabel ?? "Prepared replay fixture; not live scientific discovery." : "Official-source metadata prepared for human scientific review."}</p></div>
+                <span>{candidates.length} candidates</span>
+              </div>
+              <div className="admin-candidate-grid">
+                {candidates.map((candidate, index) => {
+                  const status = candidateStatus(candidate, index);
+                  return (
+                    <article className={`admin-candidate-card ${selected === candidate.candidate_id ? "candidate-selected" : ""}`} key={candidate.candidate_id}>
+                      <div className="admin-card-title-row">
+                        <span className={`admin-candidate-status admin-candidate-${status.toLowerCase().replace(/ /g, "-")}`}>{status}</span>
+                        <span className="admin-fixture-label">{runMode === "replay" ? "Prepared replay fixture" : candidate.accession_verified ? "Official accession verified" : "Verification required"}</span>
+                      </div>
+                      <h3>{candidateLabel(candidate, index)}</h3>
+                      <p>{candidate.title}</p>
+                      <dl className="admin-candidate-facts">
+                        <div><dt>Source</dt><dd>{candidate.source.startsWith("https://") ? <a href={candidate.source} target="_blank" rel="noreferrer">NCBI GEO</a> : candidate.source}</dd></div>
+                        <div><dt>Organism</dt><dd>{candidate.organism?.join(", ") || "Not specified"}</dd></div>
+                        <div><dt>Samples</dt><dd>{candidate.sample_count ?? "Not supplied"}</dd></div>
+                        <div><dt>Controls</dt><dd>{candidate.treatment_control_evidence ?? (candidate.controls_available == null ? "Not verified" : candidate.controls_available ? "Available" : "Unavailable")}</dd></div>
+                        <div><dt>Data type</dt><dd>{candidate.data_type ?? "Not specified"}</dd></div>
+                        <div><dt>Context</dt><dd>{candidate.biological_context ?? candidate.context ?? "Not specified"}</dd></div>
+                        <div><dt>Dose / time</dt><dd>{candidate.dose_time_evidence ?? "Not verified"}</dd></div>
+                      </dl>
+                      <h4>Cautions</h4>
+                      <ul>{candidate.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <label className="admin-candidate-choice">
+                        <input type="radio" name="candidate" checked={selected === candidate.candidate_id} onChange={() => setSelected(candidate.candidate_id)} />
+                        Select {candidateLabel(candidate, index)}
+                      </label>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          <section className="admin-panel" aria-labelledby="workflow-actions-title">
+            <div className="admin-panel-heading"><h2 id="workflow-actions-title">Workflow actions</h2><span>Only valid actions are shown</span></div>
+            <div className="admin-actions" aria-label="Workflow controls">
+              {build.current_stage === "DRAFT" && <button disabled={busy} onClick={() => void command("start")}>Start workflow</button>}
+              {canPause && <button disabled={busy} onClick={() => void command("pause")}>Pause</button>}
+              {build.current_stage === "PAUSED" && <button disabled={busy} onClick={() => void command("resume")}>Resume</button>}
+              {canRetry && <button disabled={busy} onClick={() => void command("retry")}>Retry failed step</button>}
+              {canCancel && <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>}
+              <button className="admin-secondary" disabled={busy} onClick={() => void load()}>Refresh</button>
+              {import.meta.env.DEV && runMode !== "replay" && <button className="admin-secondary" disabled={busy} onClick={() => void refreshSourceMetadata()}>Refresh source metadata</button>}
+            </div>
+          </section>
+
+          {(decisionSummary || unresolvedQuestions.length > 0) && (
+            <section className="admin-panel" aria-labelledby="decision-summary-title">
+              <div className="admin-panel-heading"><h2 id="decision-summary-title">Decision summary</h2><span>Human review required</span></div>
+              {decisionSummary && <p>{decisionSummary}</p>}
+              {unresolvedQuestions.length > 0 && <><h3>Unresolved questions</h3><ul>{unresolvedQuestions.map((item) => <li key={item}>{item}</li>)}</ul></>}
+            </section>
+          )}
+        </main>
+
+        <aside className="admin-secondary-column">
+          <section className="admin-panel" aria-labelledby="agent-summary-title">
+            <div className="admin-panel-heading"><h2 id="agent-summary-title">Agent activity</h2><span>{runs.length} run{runs.length === 1 ? "" : "s"}</span></div>
+            {trace ? (
+              <div className="admin-agent-summary">
+                <div className="admin-run-identifier">
+                  <span>Run {shortRunId(trace.id)}</span>
+                  <button
+                    type="button"
+                    className="admin-copy-button"
+                    aria-label={`Copy full run ID ${trace.id}`}
+                    onClick={() => void copyIdentifier("run", trace.id)}
+                  >{copiedIdentifier === "run" ? "Copied" : "Copy"}</button>
+                </div>
+                <h3>{trace.agent_name}</h3>
+                <span className="admin-status">{runStatusLabel(trace, runMode, hasCandidateRecommendation)}</span>
+                <dl>
+                  <div><dt>Mode</dt><dd>{configuredModeLabel(runMode)}</dd></div>
+                  <div><dt>Final run status</dt><dd>{humanizeMachineValue(trace.status)}</dd></div>
+                  <div><dt>Output</dt><dd>{hasCompletedOutput ? `${candidates.length} candidates prepared` : "No recommendation available"}</dd></div>
+                  <div><dt>Agent runs</dt><dd>{runs.length}</dd></div>
+                  <div><dt>Model turns</dt><dd>{trace.turns}</dd></div>
+                  <div><dt>Provider retries</dt><dd>{providerRetries}</dd></div>
+                  <div><dt>Tool calls</dt><dd>{agentTools.length}</dd></div>
+                  <div><dt>Candidate inspection</dt><dd>{inspectionCounts ? `${inspectionCounts.inspected} inspected / ${inspectionCounts.failed} unresolved` : "Not reached"}</dd></div>
+                  <div><dt>Duration</dt><dd>{(trace.duration_ms / 1000).toFixed(2)} s</dd></div>
+                  <div><dt>Provider</dt><dd>{trace.provider}</dd></div>
+                  <div><dt>Model</dt><dd>{trace.model_identifier}</dd></div>
+                  <div><dt>Input tokens</dt><dd>{usageNumber(trace, "input_tokens")}</dd></div>
+                  <div><dt>Output tokens</dt><dd>{usageNumber(trace, "output_tokens")}</dd></div>
+                  <div><dt>Cached input tokens</dt><dd>{usageNumber(trace, "cached_tokens")}</dd></div>
+                  <div><dt>Estimated cost</dt><dd>${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}</dd></div>
+                </dl>
+                {geoSearches.length > 0 && <div className="admin-trace-summary"><h4>Rendered GEO queries</h4><ol>{geoSearches.map((search, index) => <li key={`${search.renderedQuery}-${index}`}><strong>{search.strategyReason}</strong><code>{search.renderedQuery}</code><span>{search.resultCount} results / {search.cacheStatus}</span></li>)}</ol></div>}
+                {turnExposures.length > 0 && <div className="admin-trace-summary"><h4>Tools exposed per turn</h4><ol>{turnExposures.map((turn) => <li key={`${turn.turn}-${turn.substage}`}><strong>Turn {turn.turn}: {humanizeMachineValue(turn.substage)}</strong><span>{turn.tools.length > 0 ? turn.tools.map(toolLabel).join(", ") : "Final structured output only"}</span></li>)}</ol></div>}
+                {normalizationWarningCount > 0 && <p className="admin-secondary-note">{controlledVocabularyWarningCount > 0 ? `${controlledVocabularyWarningCount} controlled-vocabulary ${controlledVocabularyWarningCount === 1 ? "value was" : "values were"} normalized before execution.` : emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
+                {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
+                {scientificSourceDiagnostics.length > 0 && <div className="admin-trace-summary"><h4>Scientific-source diagnostics</h4>{scientificSourceDiagnostics.map((diagnostic, index) => <SourceDiagnosticDetails diagnostic={diagnostic} key={`${diagnostic.tool_name}-${index}`} />)}</div>}
+                <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
+                <div className="admin-inline-actions">
+                  <button className="admin-link-button" onClick={() => setShowTrace((value) => !value)}>{showTrace ? "Hide trace" : "View trace"}</button>
+                  <a href="#agent-tools">View tools used</a>
+                  <a href="#artifacts">View generated artifact</a>
+                </div>
+                {showTrace && <div className="admin-trace-summary" id="agent-trace"><h4>Trace events</h4><ol>{(trace.trace?.events ?? []).map((event, index) => <li key={index}>{typeof event.event_type === "string" ? humanizeMachineValue(event.event_type.replace(/\./g, "_")) : `Trace event ${index + 1}`}</li>)}</ol>{normalizationSummaries.map((summary, index) => <section key={`${summary.toolName}-${index}`}><h5>{toolLabel(summary.toolName)} input normalization</h5><p>{summary.warningCodes.length} warning{summary.warningCodes.length === 1 ? "" : "s"}: {summary.warningCodes.join(", ")}</p><dl><div><dt>Model-supplied arguments</dt><dd><code>{JSON.stringify(summary.originalArguments)}</code></dd></div><div><dt>Executed arguments</dt><dd><code>{JSON.stringify(summary.normalizedArguments)}</code></dd></div></dl><ul className="admin-normalization-list">{summary.warnings.map((warning, warningIndex) => <li key={`${warning.code}-${warning.field}-${warningIndex}`}><strong>{warning.field}</strong><span>{warning.original ?? "not recorded"} â†’ {warning.normalized ?? "not executed"}</span><small>{warning.code}{warning.policyVersion ? ` Â· ${warning.policyVersion}` : ""}</small></li>)}</ul></section>)}</div>}
+              </div>
+            ) : <div className="admin-empty">No agent run yet.</div>}
+          </section>
+
+          <section className="admin-panel" id="artifacts" aria-labelledby="artifacts-title">
+            <div className="admin-panel-heading"><h2 id="artifacts-title">Generated artifacts</h2><span>{artifacts.length}</span></div>
+            <div className="admin-artifact-list">{artifacts.map((artifact) => <article key={artifact.id}><div><strong>{artifact.logical_name}</strong><span>{humanizeMachineValue(artifact.artifact_type)} Â· {artifact.producer}</span></div></article>)}</div>
+          </section>
+
+          <section className="admin-panel" id="technical-audit" aria-labelledby="activity-title">
+            <div className="admin-tabs" role="tablist" aria-label="Build history">
+              <button id="activity-tab" role="tab" aria-selected={activityTab === "activity"} aria-controls="activity-panel" tabIndex={activityTab === "activity" ? 0 : -1} onKeyDown={handleTabKey} onClick={() => setActivityTab("activity")}>Activity</button>
+              <button id="audit-tab" role="tab" aria-selected={activityTab === "audit"} aria-controls="audit-panel" tabIndex={activityTab === "audit" ? 0 : -1} onKeyDown={handleTabKey} onClick={() => setActivityTab("audit")}>Technical audit log</button>
+            </div>
+            {activityTab === "activity" ? (
+              <div id="activity-panel" role="tabpanel" aria-labelledby="activity-tab">
+                <h2 id="activity-title" className="sr-only">Activity</h2>
+                <ol className="admin-activity-list">
+                  {displayEvents.map((event) => <li key={event.id}><span className="admin-activity-marker" aria-hidden /><div><strong>{activityLabel(event)}</strong><p>{actorLabel(event.actor_type)} Â· {new Date(event.created_at).toLocaleString()}</p></div></li>)}
+                </ol>
+                {events.length > 6 && <button className="admin-link-button" onClick={() => setFullActivity((value) => !value)}>{fullActivity ? "Show recent activity" : "Show full activity"}</button>}
+              </div>
+            ) : (
+              <div id="audit-panel" role="tabpanel" aria-labelledby="audit-tab">
+                <dl className="admin-audit-identifiers">
+                  <div><dt>Build ID</dt><dd>{build.id}</dd></div>
+                  {trace && <div><dt>Current run ID</dt><dd>{trace.id}</dd></div>}
+                </dl>
+                <ol className="admin-audit-list">
+                  {[...events].reverse().map((event) => <li key={event.id}><div><strong>{event.event_type}</strong><time>{new Date(event.created_at).toLocaleString()}</time></div><dl><div><dt>Transition</dt><dd>{event.from_state ?? "none"} to {event.to_state ?? "none"}</dd></div><div><dt>Actor</dt><dd>{event.actor_type} / {event.actor_id}</dd></div><div><dt>Event ID</dt><dd>{event.id}</dd></div><div><dt>Event hash</dt><dd>{event.event_hash}</dd></div></dl></li>)}
+                </ol>
+              </div>
+            )}
+          </section>
+
+          <details className="admin-panel admin-technical-details">
+            <summary>Technical details</summary>
+            <dl>
+              <div><dt>Machine state</dt><dd>{build.current_stage}</dd></div>
+              <div><dt>Workflow version</dt><dd>{build.version}</dd></div>
+              <div><dt>Build ID</dt><dd>{build.id}</dd></div>
+              {trace && <div><dt>Current run ID</dt><dd>{trace.id}</dd></div>}
+              {pending && <div><dt>Proposal binding</dt><dd>{pending.proposal_hash}</dd></div>}
+            </dl>
+          </details>
+
+          {errors.length > 0 && <section className="admin-panel admin-errors-panel"><div className="admin-panel-heading"><h2>Workflow errors</h2><span>{errors.length}</span></div>{errors.map((item) => <article className="admin-error-row" key={item.id}><strong>{humanizeMachineValue(item.code)}</strong><p>{item.safe_message}</p><span>{item.retryable ? "Retryable" : "Terminal"}</span>{item.detail?.source_diagnostic && <SourceDiagnosticDetails diagnostic={item.detail.source_diagnostic} />}</article>)}</section>}
+
+          {import.meta.env.DEV && (
+            <details className="admin-panel admin-developer-tools">
+              <summary>Developer tools <span>Test only</span></summary>
+              <p>Simulation-only recovery controls. These actions are not part of the production workflow.</p>
+              {canFail ? <button className="admin-danger-outline" disabled={busy} onClick={() => void command("simulate-failure")}>Trigger controlled failure</button> : <span>No test action is valid in this state.</span>}
+            </details>
+          )}
+        </aside>
+      </div>
+
+      {confirmation && (
+        <AdminModal
+          title={confirmation.kind === "approve" ? (isAssemblyApproval ? "Confirm assembly strategy approval" : isSpecificationApproval ? "Confirm target specification approval" : "Confirm dataset approval") : confirmation.kind === "cancel" ? "Cancel this workflow?" : `Confirm ${humanizeMachineValue(confirmation.kind).toLowerCase()}`}
+          description={confirmation.kind === "approve" ? (isAssemblyApproval ? "This approves only the verified source graph and preparation strategy; it does not authorize training." : "Review the selected proposal and approval scope before continuing.") : "This decision will be recorded in the immutable audit history."}
+          onClose={() => setConfirmation(null)}
+          returnFocus={confirmationTrigger.current}
+        >
+          {confirmation.kind === "cancel" ? (
+            <div className="admin-confirmation">
+              <p>Build {shortBuildId(build.id)} will be cancelled. Completed artifacts and audit history will remain available.</p>
+              <div className="admin-modal-actions"><button className="admin-secondary" onClick={() => setConfirmation(null)}>Keep workflow</button><button className="admin-danger" disabled={busy} onClick={() => void command("cancel")}>Cancel workflow</button></div>
+            </div>
+          ) : (
+            <div className="admin-confirmation">
+              <dl>
+                <div><dt>Selected candidate</dt><dd>{selectedCandidate ? `${candidateLabel(selectedCandidate, selectedIndex)} Â· ${selectedCandidate.title}` : "No candidate"}</dd></div>
+                <div><dt>Evidence binding</dt><dd>Current immutable candidate artifact</dd></div>
+                <div><dt>Approval scope</dt><dd>{isAssemblyApproval ? "Verified source graph and deterministic preparation strategy only" : isSpecificationApproval ? "Target training-data contract only" : "Dataset selection for this build only"}</dd></div>
+                <div><dt>Next stage</dt><dd>{confirmation.kind === "approve" ? (isAssemblyApproval ? "Complete assembly review; construction and training remain deferred" : isSpecificationApproval ? "Derive component requirements" : "Prepare the selected dataset") : confirmation.kind === "request_revision" ? "Revise the prepared comparison" : confirmation.kind === "choose_alternative" ? "Record the alternative selection" : "Stop this proposal"}</dd></div>
+              </dl>
+              {comment && <p><strong>Reviewer comment:</strong> {comment}</p>}
+              <div className="admin-modal-actions"><button className="admin-secondary" onClick={() => setConfirmation(null)}>Go back</button><button className={confirmation.kind === "reject" ? "admin-danger" : "admin-primary"} disabled={busy} onClick={() => confirmation.approval && void decide(confirmation.approval, confirmation.kind as Decision)}>Confirm decision</button></div>
+            </div>
+          )}
+        </AdminModal>
+      )}
+    </section>
+  );
+}

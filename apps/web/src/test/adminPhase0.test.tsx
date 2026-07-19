@@ -322,4 +322,703 @@ describe("Phase-0 build detail information architecture", () => {
 
   it("uses the latest persisted run identifier when multiple attempts exist", async () => {
     const olderRun = { ...run, id: "run-11111111-1111-4111-8111-111111111111" };
-    insëN¹¶‰ËkºwµçP¤¹Ñ½!…Ù•Q•áÑ½¹Ñ•¹Ğ ˆÈˆ¤ì(€€€•áÁ•Ğ¡İ¥Ñ¡¥¸¡…Ñ¥Ù¥Ñä¤¹•Ñ	åQ•áĞ ‰AÉ½Ù¥‘•ÈÉ•ÑÉ¥•Ìˆ¤¹Á…É•¹Ñ±•µ•¹Ğ¤¹Ñ½!…Ù•Q•áÑ½¹Ñ•¹Ğ ˆÀˆ¤ì(€€€•áÁ•Ğ¡İ¥Ñ¡¥¸¡…Ñ¥Ù¥Ñä¤¹•Ñ	åQ•áĞ ‰Q½½°…±±Ìˆ¤¹Á…É•¹Ñ±•µ•¹Ğ¤¹Ñ½!…Ù•Q•áÑ½¹Ñ•¹Ğ ˆÄˆ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ‰I•¹‘•É•<ÅÕ•É¥•Ìˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ½½á¥‘…Ñ¥Ù”ÍÑÉ•ÍÌ¸©!½µ¼Í…Á¥•¹Ì¼¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ¼ÈÉ•ÍÕ±ÑÌ¼¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åI½±” ‰‰ÕÑÑ½¸ˆ°ì¹…µ”è€‰I•™É•Í Í½ÕÉ”µ•Ñ…‘…Ñ„ˆô¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åQ•áĞ ½¡…¥¸½˜Ñ¡½Õ¡Ğ½¤¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åI½±” ‰‰ÕÑÑ½¸ˆ°ì¹…µ”è€‰ÁÁÉ½Ù”‘…Ñ…Í•Ğˆô¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€ô¤ì((€¥Ğ ‰ÁÉ•Í•¹ÑÌÍ…™”½ÁÑ¥½¹…°µ™¥±Ñ•È¹½Éµ…±¥é…Ñ¥½¸½¹±ä…ÌÍ•½¹‘…ÉäÑÉ…”‘•Ñ…¥°ˆ°…Íå¹Œ€ ¤€ôøì(€€€½¹ÍĞ½É¥¥¹…±ÉÕµ•¹ÑÌ€ôì(€€€€€Í¥•¹Ñ¥™¥}Ñ•ÉµÌèl‰½á¥‘…Ñ¥Ù”ÍÑÉ•ÍÌ‰t°(€€€€€½É…¹¥Íµ}…±Ñ•É¹…Ñ¥Ù•Ìèl‰!½µ¼Í…Á¥•¹Ì‰t°(€€€€€ÍÑÕ‘å}ÑåÁ•}…±Ñ•É¹…Ñ¥Ù•Ìèl‰•áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä…ÉÉ…ä‰t°(€€€€€•±±}Ñ¥ÍÍÕ•}Ñ•ÉµÌèlˆ‰t°(€€€€€ÑÉ•…Ñµ•¹Ñ}Ñ•ÉµÌèl‰I=L‰t°(€€€€€µ…á¥µÕµ}É•ÍÕ±ÑÌè€Ô°(€€€€€ÁÕ‰±¥…Ñ¥½¹}‘…Ñ•}ÍÑ…ÉĞè¹Õ±°°(€€€€€ÁÕ‰±¥…Ñ¥½¹}‘…Ñ•}•¹è¹Õ±°°(€€€€€ÍÑÉ…Ñ•å}É•…Í½¸è€‰½ÕÍ•½á¥‘…Ñ¥Ù”µÍÑÉ•ÍÌÍ•…É ¸ˆ°(€€€ôì(€€€½¹ÍĞ¹½Éµ…±¥é•‘IÕ¸è‘µ¥¹•¹ÑIÕ¸€ôì(€€€€€€¸¸¹ÉÕ¸°(€€€€€ÁÉ½Ù¥‘•Èè€‰½Á•¹…¤ˆ°(€€€€€µ½‘•±}¥‘•¹Ñ¥™¥•Èè€‰ÁĞ´Ô¸Ğµµ¥¹¤ˆ°(€€€€€ÉÕ¹}µ½‘”è€‰±¥Ù”ˆ°(€€€€€ÑÕÉ¹Ìè€È°(€€€€€Ñ½½±Ìèmì¥è€‰Ñ½½°µ¹½Éµ…±¥é•ˆ°Ñ½½±}¹…µ”è€‰Í•…É¡}•½}Í•É¥•Ìˆ°ÍÑ…ÑÕÌè€‰½µÁ±•Ñ•ˆ°‘ÕÉ…Ñ¥½¹}µÌè€ÈÀõt°(€€€€€Ñ½½±}…±±Ìèmì(€€€€€€€Ñ½½±}¹…µ”è€‰Í•…É¡}•½}Í•É¥•Ìˆ°(€€€€€€€É•ÍÕ±Ğèì(€€€€€€€€€½ÕÑÁÕĞèì(€€€€€€€€€€€É•¹‘•É•‘}ÅÕ•Éäè€œ‰½á¥‘…Ñ¥Ù”ÍÑÉ•ÍÌ‰m±°¥•±‘Ítœ°(€€€€€€€€€€€É•ÍÕ±Ñ}½Õ¹Ğè€Ä°(€€€€€€€€€€€…¡•}ÍÑ…ÑÕÌè€‰…¡•ˆ°(€€€€€€€€€€€ÍÑÉ…Ñ•å}É•…Í½¸è€‰½ÕÍ•½á¥‘…Ñ¥Ù”µÍÑÉ•ÍÌÍ•…É ¸ˆ°(€€€€€€€€€ô°(€€€€€€€€€½É¥¥¹…±}…ÉÕµ•¹ÑÌè½É¥¥¹…±ÉÕµ•¹ÑÌ°(€€€€€€€€€¹½Éµ…±¥é•‘}…ÉÕµ•¹ÑÌèì€¸¸¹½É¥¥¹…±ÉÕµ•¹ÑÌ°•±±}Ñ¥ÍÍÕ•}Ñ•ÉµÌèmtô°(€€€€€€€€€¹½Éµ…±¥é…Ñ¥½¹}İ…É¹¥¹Ìèmì(€€€€€€€€€€€Í¡•µ…}Ù•ÉÍ¥½¸è€ˆÄ¸À¸Àˆ°(€€€€€€€€€€€½‘”è€‰•µÁÑå}½ÁÑ¥½¹…±}Í•…É¡}Ñ•Éµ}É•µ½Ù•ˆ°(€€€€€€€€€€€™¥•±è€‰•±±}Ñ¥ÍÍÕ•}Ñ•ÉµÌˆ°(€€€€€€€€€€€½É¥¥¹…±}¥¹‘•àè€À°(€€€€€€€€€õt°(€€€€€€€ô°(€€€€€õt°(€€€ôì(€€€¥¹ÍÑ…±±•Ñ¡5½¬¡ì(€€€€€€¸¸¹‘•Ñ…¥±I½ÕÑ•Ì  ¤€ôø‰Õ¥± ¤¤°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…•¹ĞµÉÕ¹Ítèì‰½‘äèm¹½Éµ…±¥é•‘IÕ¹tô°(€€€€€mP€½…Á¤½…‘µ¥¸½…•¹ĞµÉÕ¹Ì¼‘íÉÕ¹%‘õtèì‰½‘äè¹½Éµ…±¥é•‘IÕ¸ô°(€€€ô¤ì(€€€½¹ÍĞÕÍ•È€ôÕÍ•ÉÙ•¹Ğ¹Í•ÑÕÀ ¤ì(€€€É•¹‘•ÉÁÀ¡€½…‘µ¥¸½•¹‘Á½¥¹ÑÌ¼‘í‰Õ¥±‘%‘õ€¤ì((€€€•áÁ•Ğ¡…İ…¥ĞÍÉ••¸¹™¥¹‘	åQ•áĞ ¼Ä•µÁÑä½ÁÑ¥½¹…°™¥±Ñ•Èİ…ÌÉ•µ½Ù•‰•™½É”•á•ÕÑ¥½¸½¤¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åQ•áĞ ½Ñ½½°¥¹ÁÕĞ¥¹Ù…±¥½¤¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€…İ…¥ĞÕÍ•È¹±¥¬¡ÍÉ••¸¹•Ñ	åI½±” ‰‰ÕÑÑ½¸ˆ°ì¹…µ”è€‰Y¥•ÜÑÉ…”ˆô¤¤ì(€€€•áÁ•Ğ¡…İ…¥ĞÍÉ••¸¹™¥¹‘±±	åQ•áĞ ½•µÁÑå}½ÁÑ¥½¹…±}Í•…É¡}Ñ•Éµ}É•µ½Ù•¼¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ¼‰•±±}Ñ¥ÍÍÕ•}Ñ•ÉµÌˆéqlˆ‰qt¼¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ¼‰•±±}Ñ¥ÍÍÕ•}Ñ•ÉµÌˆéqmqt¼¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€ô¤ì((€¥Ğ ‰ÁÉ•Í•¹ÑÌ½¹ÑÉ½±±•µÙ½…‰Õ±…Éä…¹½¹¥…±¥é…Ñ¥½¸…Ì„½µÁ…Ğ¹½Ñ”…¹‘•Ñ…¥±•ÑÉ…”ˆ°…Íå¹Œ€ ¤€ôøì(€€€½¹ÍĞ½É¥¥¹…±ÉÕµ•¹ÑÌ€ôì(€€€€€Í¥•¹Ñ¥™¥}Ñ•ÉµÌèl‰½á¥‘…Ñ¥Ù”ÍÑÉ•ÍÌˆ°€‰ÑÉ…¹ÍÉ¥ÁÑ½µ¥Œ‰t°(€€€€€½É…¹¥Íµ}…±Ñ•É¹…Ñ¥Ù•Ìèl‰!½µ¼Í…Á¥•¹Ìˆ°€‰5ÕÌµÕÍÕ±ÕÌ‰t°(€€€€€ÍÑÕ‘å}ÑåÁ•}…±Ñ•É¹…Ñ¥Ù•Ìèl‰•áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä…ÉÉ…äˆ°€‰¡¥ Ñ¡É½Õ¡ÁÕĞÍ•ÅÕ•¹¥¹œ‰t°(€€€€€•±±}Ñ¥ÍÍÕ•}Ñ•ÉµÌèmt°(€€€€€ÑÉ•…Ñµ•¹Ñ}Ñ•ÉµÌèmt°(€€€€€µ…á¥µÕµ}É•ÍÕ±ÑÌè€Ô°(€€€€€ÁÕ‰±¥…Ñ¥½¹}‘…Ñ•}ÍÑ…ÉĞè¹Õ±°°(€€€€€ÁÕ‰±¥…Ñ¥½¹}‘…Ñ•}•¹è¹Õ±°°(€€€€€ÍÑÉ…Ñ•å}É•…Í½¸è€‰¥¹‰½Õ¹‘•½á¥‘…Ñ¥Ù”µÍÑÉ•ÍÌÑÉ…¹ÍÉ¥ÁÑ½µ¥Œ<M•É¥•Ì¸ˆ°(€€€ôì(€€€½¹ÍĞ¹½Éµ…±¥é•‘IÕ¸è‘µ¥¹•¹ÑIÕ¸€ôì(€€€€€€¸¸¹ÉÕ¸°(€€€€€ÁÉ½Ù¥‘•Èè€‰½Á•¹…¤ˆ°(€€€€€µ½‘•±}¥‘•¹Ñ¥™¥•Èè€‰ÁĞ´Ô¸Ğµµ¥¹¤ˆ°(€€€€€ÉÕ¹}µ½‘”è€‰±¥Ù”ˆ°(€€€€€Ñ½½±Ìèmì¥è€‰Ñ½½°µÙ½…‰Õ±…Éäˆ°Ñ½½±}¹…µ”è€‰Í•…É¡}•½}Í•É¥•Ìˆ°ÍÑ…ÑÕÌè€‰½µÁ±•Ñ•ˆ°‘ÕÉ…Ñ¥½¹}µÌè€ÈÀõt°(€€€€€Ñ½½±}…±±Ìèmì(€€€€€€€Ñ½½±}¹…µ”è€‰Í•…É¡}•½}Í•É¥•Ìˆ°(€€€€€€€É•ÍÕ±Ğèì(€€€€€€€€€½ÕÑÁÕĞèì(€€€€€€€€€€€É•¹‘•É•‘}ÅÕ•Éäè€œ‰áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä…ÉÉ…äˆ=H€‰áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä¡¥ Ñ¡É½Õ¡ÁÕĞÍ•ÅÕ•¹¥¹œˆœ°(€€€€€€€€€€€É•ÍÕ±Ñ}½Õ¹Ğè€À°(€€€€€€€€€€€…¡•}ÍÑ…ÑÕÌè€‰…¡•ˆ°(€€€€€€€€€€€ÍÑÉ…Ñ•å}É•…Í½¸è€‰	½Õ¹‘•½¹ÑÉ½±±•µÙ½…‰Õ±…ÉäÍ•…É ¸ˆ°(€€€€€€€€€ô°(€€€€€€€€€½É¥¥¹…±}…ÉÕµ•¹ÑÌè½É¥¥¹…±ÉÕµ•¹ÑÌ°(€€€€€€€€€¹½Éµ…±¥é•‘}…ÉÕµ•¹ÑÌèì(€€€€€€€€€€€€¸¸¹½É¥¥¹…±ÉÕµ•¹ÑÌ°(€€€€€€€€€€€ÍÑÕ‘å}ÑåÁ•}…±Ñ•É¹…Ñ¥Ù•Ìèl(€€€€€€€€€€€€€€‰áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä…ÉÉ…äˆ°(€€€€€€€€€€€€€€‰áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä¡¥ Ñ¡É½Õ¡ÁÕĞÍ•ÅÕ•¹¥¹œˆ°(€€€€€€€€€€€t°(€€€€€€€€€ô°(€€€€€€€€€¹½Éµ…±¥é…Ñ¥½¹}İ…É¹¥¹Ìèl(€€€€€€€€€€€ì(€€€€€€€€€€€€€½‘”è€‰½¹ÑÉ½±±•‘}Ù½…‰Õ±…Éå}…±¥…Í}…¹½¹¥…±¥é•ˆ°(€€€€€€€€€€€€€™¥•±è€‰ÍÑÕ‘å}ÑåÁ•}…±Ñ•É¹…Ñ¥Ù•Ìˆ°(€€€€€€€€€€€€€½É¥¥¹…±}¥¹‘•àè€À°(€€€€€€€€€€€€€½É¥¥¹…°è€‰•áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä…ÉÉ…äˆ°(€€€€€€€€€€€€€¹½Éµ…±¥é•è€‰áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä…ÉÉ…äˆ°(€€€€€€€€€€€€€Á½±¥å}Ù•ÉÍ¥½¸è€‰Á¡…Í”Äµ½¹ÑÉ½±±•µÙ½…‰Õ±…ÉäµØÄˆ°(€€€€€€€€€€€ô°(€€€€€€€€€€€ì(€€€€€€€€€€€€€½‘”è€‰½¹ÑÉ½±±•‘}Ù½…‰Õ±…Éå}…±¥…Í}…¹½¹¥…±¥é•ˆ°(€€€€€€€€€€€€€™¥•±è€‰ÍÑÕ‘å}ÑåÁ•}…±Ñ•É¹…Ñ¥Ù•Ìˆ°(€€€€€€€€€€€€€½É¥¥¹…±}¥¹‘•àè€Ä°(€€€€€€€€€€€€€½É¥¥¹…°è€‰¡¥ Ñ¡É½Õ¡ÁÕĞÍ•ÅÕ•¹¥¹œˆ°(€€€€€€€€€€€€€¹½Éµ…±¥é•è€‰áÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä¡¥ Ñ¡É½Õ¡ÁÕĞÍ•ÅÕ•¹¥¹œˆ°(€€€€€€€€€€€€€Á½±¥å}Ù•ÉÍ¥½¸è€‰Á¡…Í”Äµ½¹ÑÉ½±±•µÙ½…‰Õ±…ÉäµØÄˆ°(€€€€€€€€€€€ô°(€€€€€€€€€t°(€€€€€€€ô°(€€€€€õt°(€€€ôì(€€€¥¹ÍÑ…±±•Ñ¡5½¬¡ì(€€€€€€¸¸¹‘•Ñ…¥±I½ÕÑ•Ì  ¤€ôø‰Õ¥± ¤¤°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…•¹ĞµÉÕ¹Ítèì‰½‘äèm¹½Éµ…±¥é•‘IÕ¹tô°(€€€€€mP€½…Á¤½…‘µ¥¸½…•¹ĞµÉÕ¹Ì¼‘íÉÕ¹%‘õtèì‰½‘äè¹½Éµ…±¥é•‘IÕ¸ô°(€€€ô¤ì(€€€½¹ÍĞÕÍ•È€ôÕÍ•ÉÙ•¹Ğ¹Í•ÑÕÀ ¤ì(€€€É•¹‘•ÉÁÀ¡€½…‘µ¥¸½•¹‘Á½¥¹ÑÌ¼‘í‰Õ¥±‘%‘õ€¤ì((€€€•áÁ•Ğ¡…İ…¥ĞÍÉ••¸¹™¥¹‘	åQ•áĞ ˆÈ½¹ÑÉ½±±•µÙ½…‰Õ±…ÉäÙ…±Õ•Ìİ•É”¹½Éµ…±¥é•‰•™½É”•á•ÕÑ¥½¸¸ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åQ•áĞ ½Ñ½½°¥¹ÁÕĞ¥¹Ù…±¥½¤¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€…İ…¥ĞÕÍ•È¹±¥¬¡ÍÉ••¸¹•Ñ	åI½±” ‰‰ÕÑÑ½¸ˆ°ì¹…µ”è€‰Y¥•ÜÑÉ…”ˆô¤¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ½Á¡…Í”Äµ½¹ÑÉ½±±•µÙ½…‰Õ±…ÉäµØÄ¼¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ½¡¥ Ñ¡É½Õ¡ÁÕĞÍ•ÅÕ•¹¥¹œƒŠHáÁÉ•ÍÍ¥½¸ÁÉ½™¥±¥¹œ‰ä¡¥ Ñ¡É½Õ¡ÁÕĞÍ•ÅÕ•¹¥¹œ¼¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€ô¤ì((€¥Ğ ‰Í¡½İÌ„ÍÑÉÕÑÕÉ•¹¼µ…¹‘¥‘…Ñ”½ÕÑ½µ”İ¥Ñ¡½ÕĞ„‘…Ñ…Í•Ğ…ÁÁÉ½Ù…°…Ñ¥½¸ˆ°…Íå¹Œ€ ¤€ôøì(€€€½¹ÍĞÍ•…É¡I•Ù¥•Üè‘µ¥¹ÁÁÉ½Ù…°€ôì(€€€€€€¸¸¹…ÁÁÉ½Ù…°°(€€€€€ÍÑ…”è€‰]%Q%9}MI!}IY%\ˆ°(€€€€€…ÁÁÉ½Ù…±}ÑåÁ”è€‰Í•…É¡}É•Ù¥Í¥½¸ˆ°(€€€€€É•ÅÕ•ÍĞèì(€€€€€€€€¸¸¹…ÁÁÉ½Ù…°¹É•ÅÕ•ÍĞ°(€€€€€€€•Ù¥‘•¹•}ÍÕµµ…Éäè€‰¥Ù”ÁÕ‰±¥ŒµÙ…±¥…¹‘¥‘…Ñ•Ìİ•É”¥¹ÍÁ•Ñ•İ¥Ñ¡½ÕĞ„ÍÕ¥Ñ…‰±”É•ÍÕ±Ğ¸ˆ°(€€€€€€€…•¹Ñ}É•½µµ•¹‘…Ñ¥½¸è€‰Q…É•Ğ‘¥É•Ğ½á¥‘…¹ĞÁ•ÉÑÕÉ‰…Ñ¥½¹Ìİ¥Ñ µ…Ñ¡•½¹ÑÉ½±Ì¸ˆ°(€€€€€€€É•ÅÕ•ÍÑ•‘}…Ñ¥½¸è€‰I•ÅÕ•ÍĞ„É•Ù¥Í•Í•…É ½È…¹•°Ñ¡”İ½É­™±½Ü¸ˆ°(€€€€€ô°(€€€ôì(€€€½¹ÍĞ¹½…¹‘¥‘…Ñ•IÕ¸è‘µ¥¹•¹ÑIÕ¸€ôì(€€€€€€¸¸¹ÉÕ¸°(€€€€€ÁÉ½Ù¥‘•Èè€‰½Á•¹…¤ˆ°(€€€€€µ½‘•±}¥‘•¹Ñ¥™¥•Èè€‰ÁĞ´Ô¸Ğµµ¥¹¤ˆ°(€€€€€ÉÕ¹}µ½‘”è€‰±¥Ù”ˆ°(€€€€€ÍÑ…ÑÕÌè€‰½µÁ±•Ñ•ˆ°(€€€€€ÑÕÉ¹Ìè€Ì°(€€€€€Ñ½½±Ìèl(€€€€€€€ì¥è€‰Ñ½½°µÍ•…É ´Äˆ°Ñ½½±}¹…µ”è€‰Í•…É¡}•½}Í•É¥•Ìˆ°ÍÑ…ÑÕÌè€‰½µÁ±•Ñ•ˆ°‘ÕÉ…Ñ¥½¹}µÌè€ÈÀô°(€€€€€€€ì¥è€‰Ñ½½°µÙ…±¥‘…Ñ¥½¸ˆ°Ñ½½±}¹…µ”è€‰Ù…±¥‘…Ñ•}•½}…•ÍÍ¥½¹Ìˆ°ÍÑ…ÑÕÌè€‰½µÁ±•Ñ•ˆ°‘ÕÉ…Ñ¥½¹}µÌè€ÈÀô°(€€€€€€€ì¥è€‰Ñ½½°µ¥¹ÍÁ•Ñ¥½¸ˆ°Ñ½½±}¹…µ”è€‰¥¹ÍÁ•Ñ}•½}…¹‘¥‘…Ñ•Ìˆ°ÍÑ…ÑÕÌè€‰½µÁ±•Ñ•ˆ°‘ÕÉ…Ñ¥½¹}µÌè€ÈÀô°(€€€€€t°(€€€€€Ñ½½±}…±±Ìèmì(€€€€€€€Ñ½½±}¹…µ”è€‰¥¹ÍÁ•Ñ}•½}…¹‘¥‘…Ñ•Ìˆ°(€€€€€€€É•ÍÕ±Ğèì½ÕÑÁÕĞèì¥¹ÍÁ•Ñ•‘}½Õ¹Ğè€Ô°™…¥±•‘}½Õ¹Ğè€Àôô°(€€€€€õt°(€€€€€ÑÉ…”èì•Ù•¹ÑÌèl(€€€€€€€ì•Ù•¹Ñ}ÑåÁ”è€‰ÁÉ½Ù¥‘•È¹ÑÕÉ¸¹ÍÑ…ÉÑ•ˆ°‘•Ñ…¥°èìÑÕÉ¸è€Ä°‘¥Í½Ù•Éå}ÍÕ‰ÍÑ…”è€‰Í•…É¡}Á±…¹¹¥¹œˆ°Ñ½½±Í}•áÁ½Í•èl‰Í•…É¡}•½}Í•É¥•Ì‰tôô°(€€€€€€€ì•Ù•¹Ñ}ÑåÁ”è€‰ÁÉ½Ù¥‘•È¹ÑÕÉ¸¹ÍÑ…ÉÑ•ˆ°‘•Ñ…¥°èìÑÕÉ¸è€È°‘¥Í½Ù•Éå}ÍÕ‰ÍÑ…”è€‰…¹‘¥‘…Ñ•}Ù…±¥‘…Ñ¥½¸ˆ°Ñ½½±Í}•áÁ½Í•èl‰Ù…±¥‘…Ñ•}•½}…•ÍÍ¥½¹Ì‰tôô°(€€€€€€€ì•Ù•¹Ñ}ÑåÁ”è€‰ÁÉ½Ù¥‘•È¹ÑÕÉ¸¹ÍÑ…ÉÑ•ˆ°‘•Ñ…¥°èìÑÕÉ¸è€Ì°‘¥Í½Ù•Éå}ÍÕ‰ÍÑ…”è€‰…¹‘¥‘…Ñ•}¥¹ÍÁ•Ñ¥½¸ˆ°Ñ½½±Í}•áÁ½Í•èl‰¥¹ÍÁ•Ñ}•½}…¹‘¥‘…Ñ•Ì‰tôô°(€€€€€€€ì•Ù•¹Ñ}ÑåÁ”è€‰ÁÉ½Ù¥‘•È¹ÑÕÉ¸¹ÍÑ…ÉÑ•ˆ°‘•Ñ…¥°èìÑÕÉ¸è€Ğ°‘¥Í½Ù•Éå}ÍÕ‰ÍÑ…”è€‰™¥¹…±}½ÕÑÁÕĞˆ°Ñ½½±Í}•áÁ½Í•èmtôô°(€€€€€tô°(€€€ôì(€€€¥¹ÍÑ…±±•Ñ¡5½¬¡ì(€€€€€€¸¸¹‘•Ñ…¥±I½ÕÑ•Ì  ¤€ôø‰Õ¥± ‰]%Q%9}MI!}IY%\ˆ°€Ğ°ìÁ•¹‘¥¹}…ÁÁÉ½Ù…±}¥è…ÁÁÉ½Ù…±%ô¤¤°(€€€€€mP€½…Á¤½…‘µ¥¸½…ÉÑ¥™…ÑÌ¼‘í…ÉÑ¥™…Ñ%‘ô½ÁÉ•Ù¥•İtèì(€€€€€€€‰½‘äèì(€€€€€€€€€…ÉÑ¥™…Ğ°(€€€€€€€€€½¹Ñ•¹Ğèì(€€€€€€€€€€€ÉÕ¹}µ½‘”è€‰±¥Ù”ˆ°(€€€€€€€€€€€±¥Ù•}‘¥Í½Ù•ÉäèÑÉÕ”°(€€€€€€€€€€€…¹‘¥‘…Ñ•Ìèmt°(€€€€€€€€€€€É•½µµ•¹‘•‘}…¹‘¥‘…Ñ•}¥è¹Õ±°°(€€€€€€€€€ô°(€€€€€€€ô°(€€€€€ô°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…ÁÁÉ½Ù…±Ítèì‰½‘äèmÍ•…É¡I•Ù¥•İtô°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…•¹ĞµÉÕ¹Ítèì‰½‘äèm¹½…¹‘¥‘…Ñ•IÕ¹tô°(€€€€€mP€½…Á¤½…‘µ¥¸½…•¹ĞµÉÕ¹Ì¼‘íÉÕ¹%‘õtèì‰½‘äè¹½…¹‘¥‘…Ñ•IÕ¸ô°(€€€ô¤ì(€€€É•¹‘•ÉÁÀ¡€½…‘µ¥¸½•¹‘Á½¥¹ÑÌ¼‘í‰Õ¥±‘%‘õ€¤ì(€€€•áÁ•Ğ¡…İ…¥ĞÍÉ••¸¹™¥¹‘	åQ•áĞ ‰M•…É É•Ù¥•ÜÉ•ÅÕ¥É•ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ‰	½Õ¹‘•<Í•…É¡•Ì™½Õ¹¹¼ÍÕ¥Ñ…‰±”…¹‘¥‘…Ñ”ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åI½±” ‰‰ÕÑÑ½¸ˆ°ì¹…µ”è€‰I•ÅÕ•ÍĞÉ•Ù¥Í•Í•…É ˆô¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ‰Q…É•Ğ‘¥É•Ğ½á¥‘…¹ĞÁ•ÉÑÕÉ‰…Ñ¥½¹Ìİ¥Ñ µ…Ñ¡•½¹ÑÉ½±Ì¸ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ‰Q½½±Ì•áÁ½Í•Á•ÈÑÕÉ¸ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ˆÔ¥¹ÍÁ•Ñ•€¼€ÀÕ¹É•Í½±Ù•ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åI½±” ‰‰ÕÑÑ½¸ˆ°ì¹…µ”è€‰ÁÁÉ½Ù”‘…Ñ…Í•Ğˆô¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åQ•áĞ ‰…¥±•ˆ¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åQ•áĞ ‰½µÁ±•Ñ•™½ÈÉ•Ù¥•Üˆ¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€ô¤ì((€¥Ğ ‰Í¡½İÌ„™…¥±•±¥Ù”ÉÕ¸™É½´Á•ÉÍ¥ÍÑ•ÉÕ¸ÑÉÕÑ İ¥Ñ¡½ÕĞÉ•Á±…ä½ÈÉ•Ù¥•Ü±…¥µÌˆ°…Íå¹Œ€ ¤€ôøì(€€€½¹ÍĞ™…¥±•‘IÕ¸è‘µ¥¹•¹ÑIÕ¸€ôì(€€€€€€¸¸¹ÉÕ¸°(€€€€€ÁÉ½Ù¥‘•Èè€‰½Á•¹…¤ˆ°(€€€€€µ½‘•±}¥‘•¹Ñ¥™¥•Èè€‰ÁĞ´Ô¸Ğµµ¥¹¤ˆ°(€€€€€ÉÕ¹}µ½‘”è€‰±¥Ù”ˆ°(€€€€€ÍÑ…ÑÕÌè€‰™…¥±•ˆ°(€€€€€ÑÕÉ¹Ìè€Ä°(€€€€€‘ÕÉ…Ñ¥½¹}µÌè€ÄØ°(€€€€€ÕÍ…”èì¥¹ÁÕÑ}Ñ½­•¹Ìè€À°½ÕÑÁÕÑ}Ñ½­•¹Ìè€À°…¡•‘}Ñ½­•¹Ìè€À°½ÍÑ}•¹ÑÌè€Àô°(€€€€€Ñ½½±Ìèmt°(€€€€€ÑÉ…”èì(€€€€€€€•Ù•¹ÑÌèl(€€€€€€€€€ì(€€€€€€€€€€€•Ù•¹Ñ}ÑåÁ”è€‰ÁÉ½Ù¥‘•È¹ÑÕÉ¸¹™…¥±•ˆ°(€€€€€€€€€€€‘•Ñ…¥°èì(€€€€€€€€€€€€€É•ÑÉå…‰±”è™…±Í”°(€€€€€€€€€€€€€•á•ÁÑ¥½¹}±…ÍÌè€‰UÍ•ÉÉÉ½Èˆ°(€€€€€€€€€€€€€‘•Ù•±½Á•É}µ•ÍÍ…”è€‰…‘‘¥Ñ¥½¹…±AÉ½Á•ÉÑ¥•ÌÍ¡½Õ±¹½Ğ‰”Í•Ğ™½È½‰©•ĞÑåÁ•Ì¸ˆ°(€€€€€€€€€€€ô°(€€€€€€€€€ô°(€€€€€€€t°(€€€€€ô°(€€€ôì(€€€½¹ÍĞÑ•Éµ¥¹…±ÉÉ½Èè‘µ¥¹]½É­™±½İÉÉ½È€ôì(€€€€€€¸¸¹İ½É­™±½İÉÉ½ÉÍlÁt°(€€€€€½‘”è€‰ÁÉ½Ù¥‘•É}™…¥±ÕÉ”ˆ°(€€€€€É•ÑÉå…‰±”è™…±Í”°(€€€€€Í…™•}µ•ÍÍ…”è€‰AÉ½Ù¥‘•È™…¥±•…™Ñ•È‰½Õ¹‘•É•ÑÉ¥•Ì¸ˆ°(€€€ôì(€€€¥¹ÍÑ…±±•Ñ¡5½¬¡ì(€€€€€€¸¸¹‘•Ñ…¥±I½ÕÑ•Ì  ¤€ôø‰Õ¥± ‰%1ˆ°€Ğ¤°mÑ•Éµ¥¹…±ÉÉ½Ét¤°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…ÉÑ¥™…ÑÍtèì‰½‘äèmtô°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…ÁÁÉ½Ù…±Ítèì‰½‘äèmtô°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…•¹ĞµÉÕ¹Ítèì‰½‘äèm™…¥±•‘IÕ¹tô°(€€€€€mP€½…Á¤½…‘µ¥¸½…•¹ĞµÉÕ¹Ì¼‘íÉÕ¹%‘õtèì‰½‘äè™…¥±•‘IÕ¸ô°(€€€ô¤ì(€€€É•¹‘•ÉÁÀ¡€½…‘µ¥¸½•¹‘Á½¥¹ÑÌ¼‘í‰Õ¥±‘%‘õ€¤ì(€€€•áÁ•Ğ¡…İ…¥ĞÍÉ••¸¹™¥¹‘	åQ•áĞ ‰1¥Ù”…•¹ĞÉÕ¸™…¥±•ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ‰1¥Ù”…•¹Ğµ½‘”ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ‰9¼É•½µµ•¹‘…Ñ¥½¸…Ù…¥±…‰±”ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ‰…‘‘¥Ñ¥½¹…±AÉ½Á•ÉÑ¥•ÌÍ¡½Õ±¹½Ğ‰”Í•Ğ™½È½‰©•ĞÑåÁ•Ì¸ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ	åQ•áĞ ‰9¼É•Ù¥•ÜÉ•ÅÕ¥É•ˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åQ•áĞ ‰I•Á±…äµ½‘”ˆ¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åQ•áĞ ‰½µÁ±•Ñ•™½ÈÉ•Ù¥•Üˆ¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åI½±” ‰‰ÕÑÑ½¸ˆ°ì¹…µ”è€‰I•ÑÉä™…¥±•ÍÑ•Àˆô¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹ÅÕ•Éå	åI½±” ‰‰ÕÑÑ½¸ˆ°ì¹…µ”è€‰ÁÁÉ½Ù”‘…Ñ…Í•Ğˆô¤¤¹¹½Ğ¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€½¹ÍĞ…Ñ¥Ù¥Ñä€ôÍÉ••¸¹•Ñ	åI½±” ‰¡•…‘¥¹œˆ°ì¹…µ”è€‰•¹Ğ…Ñ¥Ù¥Ñäˆô¤¹±½Í•ÍĞ ‰Í•Ñ¥½¸ˆ¤„ì(€€€•áÁ•Ğ¡İ¥Ñ¡¥¸¡…Ñ¥Ù¥Ñä¤¹•Ñ	åQ•áĞ ‰AÉ½Ù¥‘•ÈÉ•ÑÉ¥•Ìˆ¤¹Á…É•¹Ñ±•µ•¹Ğ¤¹Ñ½!…Ù•Q•áÑ½¹Ñ•¹Ğ ˆÀˆ¤ì(€€€•áÁ•Ğ¡İ¥Ñ¡¥¸¡…Ñ¥Ù¥Ñä¤¹•Ñ	åQ•áĞ ‰Q½½°…±±Ìˆ¤¹Á…É•¹Ñ±•µ•¹Ğ¤¹Ñ½!…Ù•Q•áÑ½¹Ñ•¹Ğ ˆÀˆ¤ì(€€€•áÁ•Ğ¡İ¥Ñ¡¥¸¡…Ñ¥Ù¥Ñä¤¹•Ñ	åQ•áĞ ‰5½‘•°ÑÕÉ¹Ìˆ¤¹Á…É•¹Ñ±•µ•¹Ğ¤¹Ñ½!…Ù•Q•áÑ½¹Ñ•¹Ğ ˆÄˆ¤ì(€ô¤ì((€¥Ğ ‰É•¹‘•ÉÌ½¹±ä…±±½İ±¥ÍÑ•Í¥•¹Ñ¥™¥ŒµÍ½ÕÉ”‘¥…¹½ÍÑ¥Ìˆ°…Íå¹Œ€ ¤€ôøì(€€€½¹ÍĞÍ½ÕÉ•¥…¹½ÍÑ¥Œ€ôì(€€€€€Ñ½½±}¹…µ”è€‰Ù…±¥‘…Ñ•}•½}…•ÍÍ¥½¹Ìˆ°(€€€€€Í½ÕÉ•}¡½ÍĞè€‰İİÜ¹¹‰¤¹¹±´¹¹¥ ¹½Øˆ°(€€€€€Í…™•}ÕÉ±}Á…Ñ è€ˆ½•¼½ÅÕ•Éä½…Œ¹¤ˆ°(€€€€€¡ÑÑÁ}µ•Ñ¡½è€‰Pˆ…Ì½¹ÍĞ°(€€€€€¡ÑÑÁ}ÍÑ…ÑÕÌè€ÈÀÀ°(€€€€€™¥¹…±}…ÁÁÉ½Ù•‘}¡½ÍĞè€‰İİÜ¹¹‰¤¹¹±´¹¹¥ ¹½Øˆ°(€€€€€½¹Ñ•¹Ñ}ÑåÁ”è€‰•¼½Ñ•áĞˆ°(€€€€€…ÉÑ¥™…Ñ}½¹Ñ•¹Ñ}ÑåÁ”è€‰Ñ•áĞ½Á±…¥¸ˆ°(€€€€€É•ÍÁ½¹Í•}‰åÑ•}½Õ¹Ğè€ÔÄÈ°(€€€€€Á…ÉÍ•É}½ÕÑ½µ”è€‰ÁÕ‰±¥}Ù…±¥ˆ°(€€€€€Í½ÕÉ•}…ÉÑ¥™…Ñ}¥è€‰…ÉĞµ•¼µÍ½ÕÉ”ˆ°(€€€€€…¡•}ÍÑ…ÑÕÌè€‰±¥Ù”ˆ…Ì½¹ÍĞ°(€€€€€•á•ÁÑ¥½¹}±…ÍÌè€‰M½ÕÉ•½Éµ…ÑÉÉ½Èˆ°(€€€€€Í½ÕÉ•}•ÉÉ½É}…Ñ•½Éäè€‰Õ¹•áÁ•Ñ•‘}½¹Ñ•¹Ñ}ÑåÁ”ˆ°(€€€€€É•ÑÉå…‰±”è™…±Í”°(€€€€€…ÑÑ•µÁÑ}¹Õµ‰•Èè€Ä°(€€€€€É•ÅÕ•ÍÑ}‘ÕÉ…Ñ¥½¹}µÌè€ÔØÈ°(€€€€€‘•Ù•±½Á•É}µ•ÍÍ…”è€‰áÁ•Ñ•„µ…¡¥¹”µÉ•…‘…‰±”<É•ÍÁ½¹Í”¸ˆ°(€€€ôì(€€€½¹ÍĞ™…¥±•‘IÕ¸è‘µ¥¹•¹ÑIÕ¸€ôì(€€€€€€¸¸¹ÉÕ¸°(€€€€€ÁÉ½Ù¥‘•Èè€‰½Á•¹…¤ˆ°(€€€€€µ½‘•±}¥‘•¹Ñ¥™¥•Èè€‰ÁĞ´Ô¸Ğµµ¥¹¤ˆ°(€€€€€ÉÕ¹}µ½‘”è€‰±¥Ù”ˆ°(€€€€€ÍÑ…ÑÕÌè€‰™…¥±•ˆ°(€€€€€ÑÕÉ¹Ìè€Ä°(€€€€€Ñ½½±Ìèmì(€€€€€€€¥è€‰Ñ½½°µÍ½ÕÉ”µ™…¥±ÕÉ”ˆ°(€€€€€€€Ñ½½±}¹…µ”è€‰Ù…±¥‘…Ñ•}•½}…•ÍÍ¥½¹Ìˆ°(€€€€€€€ÍÑ…ÑÕÌè€‰™…¥±•ˆ°(€€€€€€€‘ÕÉ…Ñ¥½¹}µÌè€ÔØÈ°(€€€€€õt°(€€€€€Ñ½½±}…±±Ìèmì(€€€€€€€Ñ½½±}¹…µ”è€‰Ù…±¥‘…Ñ•}•½}…•ÍÍ¥½¹Ìˆ°(€€€€€€€É•ÍÕ±ĞèìÍ½ÕÉ•}‘¥…¹½ÍÑ¥ŒèÍ½ÕÉ•¥…¹½ÍÑ¥Œô°(€€€€€õt°(€€€ôì(€€€½¹ÍĞÍ½ÕÉ•ÉÉ½Èè‘µ¥¹]½É­™±½İÉÉ½È€ôì(€€€€€€¸¸¹İ½É­™±½İÉÉ½ÉÍlÁt°(€€€€€½‘”è€‰Í½ÕÉ•}Õ¹•áÁ•Ñ•‘}½¹Ñ•¹Ñ}ÑåÁ”ˆ°(€€€€€…Ñ•½Éäè€‰Í½ÕÉ•}Ñ½½°ˆ°(€€€€€É•ÑÉå…‰±”è™…±Í”°(€€€€€Í…™•}µ•ÍÍ…”è€‰M¥•¹Ñ¥™¥ŒÍ½ÕÉ”É•ÑÕÉ¹•…¸Õ¹•áÁ•Ñ•½¹Ñ•¹ĞÑåÁ”¸ˆ°(€€€€€‘•Ñ…¥°èìÍ½ÕÉ•}‘¥…¹½ÍÑ¥ŒèÍ½ÕÉ•¥…¹½ÍÑ¥Œô°(€€€ôì(€€€¥¹ÍÑ…±±•Ñ¡5½¬¡ì(€€€€€€¸¸¹‘•Ñ…¥±I½ÕÑ•Ì  ¤€ôø‰Õ¥± ‰%1ˆ°€Ğ¤°mÍ½ÕÉ•ÉÉ½Ét¤°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…ÉÑ¥™…ÑÍtèì‰½‘äèmtô°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…ÁÁÉ½Ù…±Ítèì‰½‘äèmtô°(€€€€€mP€½…Á¤½…‘µ¥¸½•¹‘Á½¥¹Ğµ‰Õ¥±‘Ì¼‘í‰Õ¥±‘%‘ô½…•¹ĞµÉÕ¹Ítèì‰½‘äèm™…¥±•‘IÕ¹tô°(€€€€€mP€½…Á¤½…‘µ¥¸½…•¹ĞµÉÕ¹Ì¼‘íÉÕ¹%‘õtèì‰½‘äè™…¥±•‘IÕ¸ô°(€€€ô¤ì(€€€É•¹‘•ÉÁÀ¡€½…‘µ¥¸½•¹‘Á½¥¹ÑÌ¼‘í‰Õ¥±‘%‘õ€¤ì(€€€•áÁ•Ğ¡…İ…¥ĞÍÉ••¸¹™¥¹‘	åQ•áĞ ‰M¥•¹Ñ¥™¥ŒµÍ½ÕÉ”‘¥…¹½ÍÑ¥Ìˆ¤¤¹Ñ½	•%¹Q¡•½Õµ•¹Ğ ¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ‰İİÜ¹¹‰¤¹¹±´¹¹¥ ¹½Ø½•¼½ÅÕ•Éä½…Œ¹¤ˆ¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ½P¸¨ÈÀÀ¼¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ½•½p½Ñ•áĞ¸¨ÔÄÈ‰åÑ•Ì¼¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ‰Ñ•áĞ½Á±…¥¸ˆ¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ‰AÕ‰±¥ŒÙ…±¥ˆ¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ‰…ÉĞµ•¼µÍ½ÕÉ”ˆ¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ‰M½ÕÉ•½Éµ…ÑÉÉ½Èˆ¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡ÍÉ••¸¹•Ñ±±	åQ•áĞ ‰áÁ•Ñ•„µ…¡¥¹”µÉ•…‘…‰±”<É•ÍÁ½¹Í”¸ˆ¤¤¹Ñ½!…Ù•1•¹Ñ  È¤ì(€€€•áÁ•Ğ¡‘½Õµ•¹Ğ¹‰½‘ä¤¹¹½Ğ¹Ñ½!…Ù•Q•áÑ½¹Ñ•¹Ğ ‰‘¼µ¹½ĞµÍÑ½É”ˆ¤ì(€€€•áÁ•Ğ¡‘½Õµ•¹Ğ¹‰½‘ä¤¹¹½Ğ¹Ñ½!…Ù•Q•áÑ½¹Ñ•¹Ğ ‰ÕÑ¡½É¥é…Ñ¥½¸ˆ¤ì(€ô¤ì)ô¤ì
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [olderRun, run] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: run },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByRole("button", { name: `Copy full run ID ${runId}` })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: `Copy full run ID ${olderRun.id}` })).not.toBeInTheDocument();
+  });
+
+  it("leads with the stepper and decision, compares fixtures, and keeps machine detail secondary", async () => {
+    installFetchMock(detailRoutes(() => build(), workflowErrors));
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByRole("heading", { name: "Dataset review required" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Workflow progress" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Endpoint build stages").children).toHaveLength(10);
+    expect(screen.getAllByText("SIM-OS-001")).toHaveLength(2);
+    expect(screen.getByText("SIM-OS-002")).toBeInTheDocument();
+    expect(screen.getAllByText("Prepared replay fixture")).toHaveLength(2);
+    expect(screen.getByText("168")).toBeInTheDocument();
+    expect(screen.getByText("Why it is recommended")).toBeInTheDocument();
+    expect(screen.getAllByText("Limitations").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Agent activity" })).toBeInTheDocument();
+    expect(screen.getByText("Inspected endpoint registry")).toBeInTheDocument();
+    expect(screen.getByText("120")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Dataset review requested")).toBeInTheDocument();
+    expect(document.querySelector(".admin-timeline")).not.toBeInTheDocument();
+
+    const technical = screen.getByText("Technical details").closest("details");
+    expect(technical).not.toHaveAttribute("open");
+    expect(within(technical!).getByText("AWAITING_DATASET_APPROVAL")).toBeInTheDocument();
+    const developer = screen.getByText(/Developer tools/).closest("details");
+    expect(developer).not.toHaveAttribute("open");
+    expect(within(developer!).getByRole("button", { name: "Trigger controlled failure" })).toBeInTheDocument();
+  });
+
+  it("separates readable activity from the complete immutable technical log", async () => {
+    installFetchMock(detailRoutes(() => build()));
+    renderApp(`/admin/endpoints/${buildId}`);
+    await screen.findByText("Dataset review requested");
+    expect(screen.queryByText("approval.created")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Technical audit log" }));
+    expect(screen.getByText("approval.created")).toBeInTheDocument();
+    expect(screen.getByText("workflow.created")).toBeInTheDocument();
+    expect(screen.getByText("d".repeat(64))).toBeInTheDocument();
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "audit-tab");
+  });
+
+  it("supports keyboard navigation between Activity and Technical audit log", async () => {
+    installFetchMock(detailRoutes(() => build()));
+    renderApp(`/admin/endpoints/${buildId}`);
+    const activity = await screen.findByRole("tab", { name: "Activity" });
+    activity.focus();
+    fireEvent.keyDown(activity, { key: "ArrowRight" });
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Technical audit log" })).toHaveFocus());
+    expect(screen.getByRole("tab", { name: "Technical audit log" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("confirms approval scope before preserving the existing immutable decision request", async () => {
+    let payload: Record<string, unknown> | null = null;
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`POST /api/admin/approvals/${approvalId}/decisions`]: (body) => { payload = body as Record<string, unknown>; return { body: build("CURATING_DATA", 4) }; },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    await userEvent.click(await screen.findByRole("button", { name: "Approve dataset" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm dataset approval" });
+    expect(dialog).toHaveTextContent("SIM-OS-001");
+    expect(dialog).toHaveTextContent("Current immutable candidate artifact");
+    expect(dialog).toHaveTextContent("Dataset selection for this build only");
+    expect(dialog).toHaveTextContent("Prepare the selected dataset");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm decision" }));
+    await waitFor(() => expect(payload).toMatchObject({ decision: "approve", expected_version: 3 }));
+  });
+
+  it("requires a comment and confirms revision and alternative decisions", async () => {
+    const decisions: Array<Record<string, unknown>> = [];
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`POST /api/admin/approvals/${approvalId}/decisions`]: (body) => { decisions.push(body as Record<string, unknown>); return { body: build("DISCOVERING_DATA", 4) }; },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    const revision = await screen.findByRole("button", { name: "Request revision" });
+    expect(revision).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Reviewer comment"), { target: { value: "Clarify the fixture limits." } });
+    await userEvent.click(revision);
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm decision" }));
+    await waitFor(() => expect(decisions[0]).toMatchObject({ decision: "request_revision", reviewer_comment: "Clarify the fixture limits." }));
+  });
+
+  it.each([
+    { action: "Reject", decision: "reject", selectAlternative: false },
+    { action: "Select another candidate", decision: "choose_alternative", selectAlternative: true },
+  ])("records $decision only after comment and confirmation", async ({ action, decision, selectAlternative }) => {
+    let payload: Record<string, unknown> | null = null;
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`POST /api/admin/approvals/${approvalId}/decisions`]: (body) => { payload = body as Record<string, unknown>; return { body: build("DISCOVERING_DATA", 4) }; },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    await screen.findByRole("heading", { name: "Dataset review required" });
+    if (selectAlternative) await userEvent.click(screen.getByLabelText("Select SIM-OS-002"));
+    await userEvent.type(screen.getByLabelText("Reviewer comment"), "Reviewer evidence comment.");
+    await userEvent.click(screen.getByRole("button", { name: action }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm decision" }));
+    await waitFor(() => expect(payload).toMatchObject({
+      decision,
+      reviewer_comment: "Reviewer evidence comment.",
+      ...(selectAlternative ? { selected_alternative_id: "candidate-b" } : {}),
+    }));
+  });
+
+  it("maps workflow controls to human language without changing versioned commands", async () => {
+    let current = build("DRAFT", 0);
+    installFetchMock({
+      ...detailRoutes(() => current),
+      [`POST /api/admin/endpoint-builds/${buildId}/start`]: () => { current = build("AWAITING_DATASET_APPROVAL", 3); return { body: current }; },
+      [`POST /api/admin/endpoint-builds/${buildId}/pause`]: () => { current = build("PAUSED", 4); return { body: current }; },
+      [`POST /api/admin/endpoint-builds/${buildId}/resume`]: () => { current = build("CURATING_DATA", 5); return { body: current }; },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    await userEvent.click(await screen.findByRole("button", { name: "Start workflow" }));
+    await screen.findAllByText("Waiting for dataset review");
+    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await screen.findAllByText("Paused");
+    await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await screen.findAllByText("Preparing the selected dataset");
+    const versions = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)).expected_version);
+    expect(versions).toEqual([0, 3, 4]);
+  });
+
+  it.each([
+    { retryable: true, visible: true },
+    { retryable: false, visible: false },
+  ])("shows Retry only when the latest workflow error is retryable", async ({ retryable, visible }) => {
+    installFetchMock(detailRoutes(
+      () => build("FAILED", 4),
+      [{ ...workflowErrors[0], retryable }],
+    ));
+    renderApp(`/admin/endpoints/${buildId}`);
+    await screen.findByRole("heading", { name: "Dataset review required" });
+    if (visible) {
+      expect(await screen.findByRole("button", { name: "Retry failed step" })).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole("button", { name: "Retry failed step" })).not.toBeInTheDocument();
+    }
+  });
+});
+
+describe("Phase-1 live discovery presentation", () => {
+  it("runs provider preflight only after an explicit administrator action", async () => {
+    let preflightCalls = 0;
+    const result: AdminProviderPreflight = {
+      schema_version: "1.0.0",
+      provider: "openai",
+      configured_model: "gpt-5.4-mini",
+      api_key_present: true,
+      authentication_accepted: true,
+      model_accessible: true,
+      http_status: 200,
+      provider_error_code: null,
+      provider_error_type: null,
+      request_id: "req_preflight-safe",
+      billing_status: "not_checked",
+      generation_capability: "not_checked",
+      checked_at: "2026-07-18T12:00:00Z",
+    };
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "GET /api/admin/capabilities": {
+        body: {
+          schema_version: "1.0.0",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          run_mode: "live",
+          api_key_present: true,
+          live_mode_enabled: true,
+          source_tools_available: true,
+          tracing_enabled: false,
+          configured_budget: {
+            maximum_turns: 6,
+            maximum_tool_calls: 6,
+            timeout_seconds: 120,
+            maximum_input_tokens: 8000,
+            maximum_output_tokens: 1500,
+            maximum_cost_usd: 0.2,
+            retry_count: 0,
+            input_cost_per_million_usd: 0.75,
+            output_cost_per_million_usd: 4.5,
+          },
+        },
+      },
+      "POST /api/admin/agent-provider/preflight": () => {
+        preflightCalls += 1;
+        return { body: result };
+      },
+    });
+    renderApp("/admin/endpoints");
+    const button = await screen.findByRole("button", { name: "Check provider access" });
+    expect(preflightCalls).toBe(0);
+    expect(screen.queryByText("Provider access confirmed")).not.toBeInTheDocument();
+    await userEvent.click(button);
+    expect(await screen.findByText("Provider access confirmed")).toBeInTheDocument();
+    expect(screen.getByText("API credentials accepted: yes")).toBeInTheDocument();
+    expect(screen.getByText("Configured model accessible: yes")).toBeInTheDocument();
+    expect(screen.getByText("Billing and generation: not checked")).toBeInTheDocument();
+    expect(screen.getByText(/provider retries: 0/)).toBeInTheDocument();
+    expect(preflightCalls).toBe(1);
+  });
+
+  it("renders safe preflight failure categories without raw provider text", async () => {
+    const failed: AdminProviderPreflight = {
+      schema_version: "1.0.0",
+      provider: "openai",
+      configured_model: "gpt-5.4-mini",
+      api_key_present: true,
+      authentication_accepted: false,
+      model_accessible: false,
+      http_status: 401,
+      provider_error_code: "invalid_api_key",
+      provider_error_type: "authentication_error",
+      request_id: "req_preflight-failed",
+      billing_status: "not_checked",
+      generation_capability: "not_checked",
+      checked_at: "2026-07-18T12:00:00Z",
+    };
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "POST /api/admin/agent-provider/preflight": { body: failed },
+    });
+    renderApp("/admin/endpoints");
+    await userEvent.click(await screen.findByRole("button", { name: "Check provider access" }));
+    expect(await screen.findByText("Authentication rejected")).toBeInTheDocument();
+    expect(screen.queryByText(/raw provider/i)).not.toBeInTheDocument();
+  });
+
+  it("shows provider-unavailable status while keeping replay usable", async () => {
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "GET /api/admin/capabilities": {
+        body: {
+          schema_version: "1.0.0",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          run_mode: "replay",
+          api_key_present: false,
+          live_mode_enabled: false,
+          source_tools_available: true,
+          tracing_enabled: false,
+          configured_budget: {
+            maximum_turns: 8,
+            maximum_tool_calls: 12,
+            timeout_seconds: 90,
+            maximum_input_tokens: 12000,
+            maximum_output_tokens: 3000,
+            maximum_cost_usd: 0.5,
+            retry_count: 0,
+            input_cost_per_million_usd: 0.75,
+            output_cost_per_million_usd: 4.5,
+          },
+        },
+      },
+    });
+    renderApp("/admin/endpoints");
+    expect(await screen.findByText("Replay mode")).toBeInTheDocument();
+    expect(screen.getByText(/API key present: no/)).toBeInTheDocument();
+    expect(screen.getByText(/Live runs are disabled/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["live", "Live agent mode"],
+    ["cached", "Cached mode"],
+    ["replay", "Replay mode"],
+  ])("renders the %s badge", async (mode, label) => {
+    const modeRun = { ...run, run_mode: mode as AdminAgentRun["run_mode"] };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: { artifact, content: { run_mode: mode, candidates } },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [modeRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: modeRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText(label)).toBeInTheDocument();
+  });
+
+  it("presents real candidate evidence, source links, usage, and unresolved questions", async () => {
+    const liveRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live" as const,
+      turns: 2,
+      duration_ms: 1540,
+      usage: { input_tokens: 3880, output_tokens: 500, cached_tokens: 120, cost_cents: 0.3 },
+      tools: [{ id: "tool-live", tool_name: "search_geo_series", status: "completed", duration_ms: 40 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: { output: {
+          rendered_query: '"oxidative stress"[All Fields] AND "Homo sapiens"[Organism]',
+          result_count: 2,
+          cache_status: "live",
+          strategy_reason: "Focused human oxidative-stress search.",
+        } },
+      }],
+      trace: { events: [
+        { event_type: "provider.turn.completed" },
+        { event_type: "tool_call.completed" },
+        { event_type: "provider.turn.completed" },
+      ] },
+    };
+    const liveCandidates = [
+      {
+        candidate_id: "candidate-gse-12345",
+        accession: "GSE12345",
+        title: "Oxidative stress response in human cells",
+        source: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
+        organism: ["Homo sapiens"],
+        data_type: "RNA sequencing",
+        sample_count: 12,
+        biological_context: "HepG2 cells",
+        treatment_control_evidence: "Vehicle and treatment groups were detected.",
+        dose_time_evidence: "10 uM for 24 h",
+        strengths: ["Official accession validated"],
+        limitations: ["Human label review required"],
+        recommendation_status: "recommended_for_human_review",
+        accession_verified: true,
+      },
+      {
+        candidate_id: "candidate-gse-12346",
+        accession: "GSE12346",
+        title: "Alternative series",
+        source: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12346",
+        organism: ["Homo sapiens"],
+        data_type: "Microarray",
+        sample_count: 8,
+        biological_context: "Primary cells",
+        treatment_control_evidence: "Control evidence is ambiguous.",
+        dose_time_evidence: "Not reported",
+        limitations: ["Control metadata is unclear"],
+        recommendation_status: "alternative",
+        accession_verified: true,
+      },
+    ];
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: {
+          artifact,
+          content: {
+            run_mode: "live",
+            live_discovery: true,
+            candidates: liveCandidates,
+            decision_summary: "GSE12345 has the stronger verifiable design.",
+            unresolved_questions: ["Are the treatment labels scientifically acceptable?"],
+          },
+        },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [liveRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: liveRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Live agent mode")).toBeInTheDocument();
+    expect(screen.getAllByText("GSE12345").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "NCBI GEO" })[0]).toHaveAttribute(
+      "href",
+      "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
+    );
+    expect(screen.getAllByText("Homo sapiens").length).toBeGreaterThan(0);
+    expect(screen.getByText("GSE12345 has the stronger verifiable design.")).toBeInTheDocument();
+    expect(screen.getByText("Are the treatment labels scientifically acceptable?")).toBeInTheDocument();
+    expect(screen.getByText("gpt-5.4-mini")).toBeInTheDocument();
+    expect(screen.getByText("$0.0030")).toBeInTheDocument();
+    const activity = screen.getByRole("heading", { name: "Agent activity" }).closest("section")!;
+    expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("2");
+    expect(within(activity).getByText("Provider retries").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Tool calls").parentElement).toHaveTextContent("1");
+    expect(screen.getByText("Rendered GEO queries")).toBeInTheDocument();
+    expect(screen.getByText(/oxidative stress.*Homo sapiens/)).toBeInTheDocument();
+    expect(screen.getByText(/2 results/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh source metadata" })).toBeInTheDocument();
+    expect(screen.queryByText(/chain of thought/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve dataset" })).toBeInTheDocument();
+  });
+
+  it("presents safe optional-filter normalization only as secondary trace detail", async () => {
+    const originalArguments = {
+      scientific_terms: ["oxidative stress"],
+      organism_alternatives: ["Homo sapiens"],
+      study_type_alternatives: ["expression profiling by array"],
+      cell_tissue_terms: [""],
+      treatment_terms: ["ROS"],
+      maximum_results: 5,
+      publication_date_start: null,
+      publication_date_end: null,
+      strategy_reason: "Focused oxidative-stress search.",
+    };
+    const normalizedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      turns: 2,
+      tools: [{ id: "tool-normalized", tool_name: "search_geo_series", status: "completed", duration_ms: 20 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: {
+          output: {
+            rendered_query: '"oxidative stress"[All Fields]',
+            result_count: 1,
+            cache_status: "cached",
+            strategy_reason: "Focused oxidative-stress search.",
+          },
+          original_arguments: originalArguments,
+          normalized_arguments: { ...originalArguments, cell_tissue_terms: [] },
+          normalization_warnings: [{
+            schema_version: "1.0.0",
+            code: "empty_optional_search_term_removed",
+            field: "cell_tissue_terms",
+            original_index: 0,
+          }],
+        },
+      }],
+    };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [normalizedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: normalizedRun },
+    });
+    const user = userEvent.setup();
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText(/1 empty optional filter was removed before execution/i)).toBeInTheDocument();
+    expect(screen.queryByText(/tool input invalid/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View trace" }));
+    expect(await screen.findAllByText(/empty_optional_search_term_removed/)).toHaveLength(2);
+    expect(screen.getByText(/"cell_tissue_terms":\[""\]/)).toBeInTheDocument();
+    expect(screen.getByText(/"cell_tissue_terms":\[\]/)).toBeInTheDocument();
+  });
+
+  it("presents controlled-vocabulary canonicalization as a compact note and detailed trace", async () => {
+    const originalArguments = {
+      scientific_terms: ["oxidative stress", "transcriptomic"],
+      organism_alternatives: ["Homo sapiens", "Mus musculus"],
+      study_type_alternatives: ["expression profiling by array", "high throughput sequencing"],
+      cell_tissue_terms: [],
+      treatment_terms: [],
+      maximum_results: 5,
+      publication_date_start: null,
+      publication_date_end: null,
+      strategy_reason: "Find bounded oxidative-stress transcriptomic GEO Series.",
+    };
+    const normalizedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      tools: [{ id: "tool-vocabulary", tool_name: "search_geo_series", status: "completed", duration_ms: 20 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: {
+          output: {
+            rendered_query: '"Expression profiling by array" OR "Expression profiling by high throughput sequencing"',
+            result_count: 0,
+            cache_status: "cached",
+            strategy_reason: "Bounded controlled-vocabulary search.",
+          },
+          original_arguments: originalArguments,
+          normalized_arguments: {
+            ...originalArguments,
+            study_type_alternatives: [
+              "Expression profiling by array",
+              "Expression profiling by high throughput sequencing",
+            ],
+          },
+          normalization_warnings: [
+            {
+              code: "controlled_vocabulary_alias_canonicalized",
+              field: "study_type_alternatives",
+              original_index: 0,
+              original: "expression profiling by array",
+              normalized: "Expression profiling by array",
+              policy_version: "phase1-controlled-vocabulary-v1",
+            },
+            {
+              code: "controlled_vocabulary_alias_canonicalized",
+              field: "study_type_alternatives",
+              original_index: 1,
+              original: "high throughput sequencing",
+              normalized: "Expression profiling by high throughput sequencing",
+              policy_version: "phase1-controlled-vocabulary-v1",
+            },
+          ],
+        },
+      }],
+    };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [normalizedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: normalizedRun },
+    });
+    const user = userEvent.setup();
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText("2 controlled-vocabulary values were normalized before execution.")).toBeInTheDocument();
+    expect(screen.queryByText(/tool input invalid/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View trace" }));
+    expect(screen.getAllByText(/phase1-controlled-vocabulary-v1/)).toHaveLength(2);
+    expect(screen.getByText(/high throughput sequencing â†’ Expression profiling by high throughput sequencing/)).toBeInTheDocument();
+  });
+
+  it("shows a structured no-candidate outcome without a dataset approval action", async () => {
+    const searchReview: AdminApproval = {
+      ...approval,
+      stage: "AWAITING_SEARCH_REVIEW",
+      approval_type: "search_revision",
+      request: {
+        ...approval.request,
+        evidence_summary: "Five public-valid candidates were inspected without a suitable result.",
+        agent_recommendation: "Target direct oxidant perturbations with matched controls.",
+        requested_action: "Request a revised search or cancel the workflow.",
+      },
+    };
+    const noCandidateRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "completed",
+      turns: 3,
+      tools: [
+        { id: "tool-search-1", tool_name: "search_geo_series", status: "completed", duration_ms: 20 },
+        { id: "tool-validation", tool_name: "validate_geo_accessions", status: "completed", duration_ms: 20 },
+        { id: "tool-inspection", tool_name: "inspect_geo_candidates", status: "completed", duration_ms: 20 },
+      ],
+      tool_calls: [{
+        tool_name: "inspect_geo_candidates",
+        result: { output: { inspected_count: 5, failed_count: 0 } },
+      }],
+      trace: { events: [
+        { event_type: "provider.turn.started", detail: { turn: 1, discovery_substage: "search_planning", tools_exposed: ["search_geo_series"] } },
+        { event_type: "provider.turn.started", detail: { turn: 2, discovery_substage: "candidate_validation", tools_exposed: ["validate_geo_accessions"] } },
+        { event_type: "provider.turn.started", detail: { turn: 3, discovery_substage: "candidate_inspection", tools_exposed: ["inspect_geo_candidates"] } },
+        { event_type: "provider.turn.started", detail: { turn: 4, discovery_substage: "final_output", tools_exposed: [] } },
+      ] },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_SEARCH_REVIEW", 4, { pending_approval_id: approvalId })),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: {
+          artifact,
+          content: {
+            run_mode: "live",
+            live_discovery: true,
+            candidates: [],
+            recommended_candidate_id: null,
+          },
+        },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [searchReview] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [noCandidateRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: noCandidateRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Search review required")).toBeInTheDocument();
+    expect(screen.getByText("Bounded GEO searches found no suitable candidate")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request revised search" })).toBeInTheDocument();
+    expect(screen.getByText("Target direct oxidant perturbations with matched controls.")).toBeInTheDocument();
+    expect(screen.getByText("Tools exposed per turn")).toBeInTheDocument();
+    expect(screen.getByText("5 inspected / 0 unresolved")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed for review")).not.toBeInTheDocument();
+  });
+
+  it("shows a failed live run from persisted run truth without replay or review claims", async () => {
+    const failedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "failed",
+      turns: 1,
+      duration_ms: 16,
+      usage: { input_tokens: 0, output_tokens: 0, cached_tokens: 0, cost_cents: 0 },
+      tools: [],
+      trace: {
+        events: [
+          {
+            event_type: "provider.turn.failed",
+            detail: {
+              retryable: false,
+              exception_class: "UserError",
+              developer_message: "additionalProperties should not be set for object types.",
+            },
+          },
+        ],
+      },
+    };
+    const terminalError: AdminWorkflowError = {
+      ...workflowErrors[0],
+      code: "provider_failure",
+      retryable: false,
+      safe_message: "Provider failed after bounded retries.",
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("FAILED", 4), [terminalError]),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [failedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: failedRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Live agent run failed")).toBeInTheDocument();
+    expect(screen.getByText("Live agent mode")).toBeInTheDocument();
+    expect(screen.getByText("No recommendation available")).toBeInTheDocument();
+    expect(screen.getByText("additionalProperties should not be set for object types.")).toBeInTheDocument();
+    expect(screen.getByText("No review required")).toBeInTheDocument();
+    expect(screen.queryByText("Replay mode")).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed for review")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry failed step" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    const activity = screen.getByRole("heading", { name: "Agent activity" }).closest("section")!;
+    expect(within(activity).getByText("Provider retries").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Tool calls").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("1");
+  });
+
+  it("renders only allowlisted scientific-source diagnostics", async () => {
+    const sourceDiagnostic = {
+      tool_name: "validate_geo_accessions",
+      source_host: "www.ncbi.nlm.nih.gov",
+      safe_url_path: "/geo/query/acc.cgi",
+      http_method: "GET" as const,
+      http_status: 200,
+      final_approved_host: "www.ncbi.nlm.nih.gov",
+      content_type: "geo/text",
+      artifact_content_type: "text/plain",
+      response_byte_count: 512,
+      parser_outcome: "public_valid",
+      source_artifact_id: "art-geo-source",
+      cache_status: "live" as const,
+      exception_class: "SourceFormatError",
+      source_error_category: "unexpected_content_type",
+      retryable: false,
+      attempt_number: 1,
+      request_duration_ms: 562,
+      developer_message: "Expected a machine-readable GEO response.",
+    };
+    const failedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "failed",
+      turns: 1,
+      tools: [{
+        id: "tool-source-failure",
+        tool_name: "validate_geo_accessions",
+        status: "failed",
+        duration_ms: 562,
+      }],
+      tool_calls: [{
+        tool_name: "validate_geo_accessions",
+        result: { source_diagnostic: sourceDiagnostic },
+      }],
+    };
+    const sourceError: AdminWorkflowError = {
+      ...workflowErrors[0],
+      code: "source_unexpected_content_type",
+      category: "source_tool",
+      retryable: false,
+      safe_message: "Scientific source returned an unexpected content type.",
+      detail: { source_diagnostic: sourceDiagnostic },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("FAILED", 4), [sourceError]),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [failedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: failedRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Scientific-source diagnostics")).toBeInTheDocument();
+    expect(screen.getAllByText("www.ncbi.nlm.nih.gov/geo/query/acc.cgi")).toHaveLength(2);
+    expect(screen.getAllByText(/GET.*200/)).toHaveLength(2);
+    expect(screen.getAllByText(/geo\/text.*512 bytes/)).toHaveLength(2);
+    expect(screen.getAllByText("text/plain")).toHaveLength(2);
+    expect(screen.getAllByText("Public valid")).toHaveLength(2);
+    expect(screen.getAllByText("art-geo-source")).toHaveLength(2);
+    expect(screen.getAllByText("SourceFormatError")).toHaveLength(2);
+    expect(screen.getAllByText("Expected a machine-readable GEO response.")).toHaveLength(2);
+    expect(document.body).not.toHaveTextContent("do-not-store");
+    expect(document.body).not.toHaveTextContent("Authorization");
+  });
+});
