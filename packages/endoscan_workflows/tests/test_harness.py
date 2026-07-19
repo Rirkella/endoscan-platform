@@ -950,21 +950,21 @@ def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
     database, _store, _providers, _harness, service = workflow_runtime
     build, _discovering, _step, request, _default, _service = harness_context(workflow_runtime)
     supplied_arguments = {
-        "cell_tissue_terms": [""],
+        "cell_tissue_terms": [],
         "maximum_results": 5,
         "organism_alternatives": ["Homo sapiens", "Mus musculus"],
         "publication_date_end": None,
         "publication_date_start": None,
         "scientific_terms": ["oxidative stress", "transcriptomic"],
         "strategy_reason": (
-            "Initial focused GEO search for transcriptomic series related to "
-            "oxidative-stress response in human or mouse."
+            "Find public GEO Series with transcriptomic measurements relevant to oxidative "
+            "stress in human or mouse."
         ),
         "study_type_alternatives": [
             "expression profiling by array",
-            "expression profiling by high throughput sequencing",
+            "high throughput sequencing",
         ],
-        "treatment_terms": ["ROS", "H2O2", "oxidative stress"],
+        "treatment_terms": [],
     }
     executed_arguments: list[dict] = []
 
@@ -1058,30 +1058,50 @@ def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
     assert result.tool_calls == 1
     assert provider.calls == 2
     assert len(service.agent_runs(build.id)) == 1
-    assert executed_arguments == [{**supplied_arguments, "cell_tissue_terms": []}]
+    canonical_arguments = {
+        **supplied_arguments,
+        "study_type_alternatives": [
+            "Expression profiling by array",
+            "Expression profiling by high throughput sequencing",
+        ],
+    }
+    assert executed_arguments == [canonical_arguments]
     assert not any(event.event_type == "provider.retry" for event in result.trace)
     completed = next(event for event in result.trace if event.event_type == "tool_call.completed")
     assert completed.detail["model_supplied_arguments"] == supplied_arguments
     assert completed.detail["normalized_execution_arguments"] == {
-        **supplied_arguments,
-        "cell_tissue_terms": [],
+        **canonical_arguments,
     }
-    assert completed.detail["normalization_warning_count"] == 1
-    assert completed.detail["normalization_warning_codes"] == ["empty_optional_search_term_removed"]
+    assert completed.detail["normalization_warning_count"] == 2
+    assert completed.detail["normalization_warning_codes"] == [
+        "controlled_vocabulary_alias_canonicalized",
+        "controlled_vocabulary_alias_canonicalized",
+    ]
     stored = service.agent_run(run_id)
     call = stored["tool_calls"][0]
     assert call["arguments"]["original_arguments"] == supplied_arguments
     assert call["arguments"]["normalized_arguments"] == {
-        **supplied_arguments,
-        "cell_tissue_terms": [],
+        **canonical_arguments,
     }
     assert call["arguments"]["normalization_warnings"] == [
         {
             "schema_version": "1.0.0",
-            "code": "empty_optional_search_term_removed",
-            "field": "cell_tissue_terms",
+            "code": "controlled_vocabulary_alias_canonicalized",
+            "field": "study_type_alternatives",
             "original_index": 0,
-        }
+            "original": "expression profiling by array",
+            "normalized": "Expression profiling by array",
+            "policy_version": "phase1-controlled-vocabulary-v1",
+        },
+        {
+            "schema_version": "1.0.0",
+            "code": "controlled_vocabulary_alias_canonicalized",
+            "field": "study_type_alternatives",
+            "original_index": 1,
+            "original": "high throughput sequencing",
+            "normalized": "Expression profiling by high throughput sequencing",
+            "policy_version": "phase1-controlled-vocabulary-v1",
+        },
     ]
 
 

@@ -19,6 +19,7 @@ const artifactId = "art-00000000-0000-4000-8000-000000000002";
 const approvalId = "approval-00000000-0000-4000-8000-000000000003";
 const runId = "run-00000000-0000-4000-8000-000000000004";
 const now = "2026-07-17T10:00:00Z";
+const writeClipboard = vi.fn().mockResolvedValue(undefined);
 
 function build(stage = "AWAITING_DATASET_APPROVAL", version = 3, overrides: Partial<AdminBuild> = {}): AdminBuild {
   return {
@@ -145,6 +146,11 @@ function detailRoutes(
 
 beforeEach(() => {
   window.localStorage.clear();
+  writeClipboard.mockClear();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: writeClipboard },
+  });
 });
 
 describe("Phase-0 endpoint-build list and creation", () => {
@@ -212,6 +218,43 @@ describe("Phase-0 endpoint-build list and creation", () => {
 });
 
 describe("Phase-0 build detail information architecture", () => {
+  it("shows compact build and current-run IDs and copies their complete values", async () => {
+    installFetchMock(detailRoutes(() => build()));
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText(`Build 00000000`)).toBeInTheDocument();
+    expect(screen.getByText(`Run 00000000`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `Copy full build ID ${buildId}` }));
+    fireEvent.click(screen.getByRole("button", { name: `Copy full run ID ${runId}` }));
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(2));
+    expect(writeClipboard).toHaveBeenNthCalledWith(1, buildId);
+    expect(writeClipboard).toHaveBeenNthCalledWith(2, runId);
+  });
+
+  it("does not render a run identifier before an agent run exists", async () => {
+    installFetchMock({
+      ...detailRoutes(() => build("DRAFT", 0)),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText("No agent run yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Copy full run ID/ })).not.toBeInTheDocument();
+  });
+
+  it("uses the latest persisted run identifier when multiple attempts exist", async () => {
+    const olderRun = { ...run, id: "run-11111111-1111-4111-8111-111111111111" };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [olderRun, run] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: run },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByRole("button", { name: `Copy full run ID ${runId}` })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: `Copy full run ID ${olderRun.id}` })).not.toBeInTheDocument();
+  });
+
   it("leads with the stepper and decision, compares fixtures, and keeps machine detail secondary", async () => {
     installFetchMock(detailRoutes(() => build(), workflowErrors));
     renderApp(`/admin/endpoints/${buildId}`);
@@ -640,9 +683,80 @@ describe("Phase-1 live discovery presentation", () => {
     expect(await screen.findByText(/1 empty optional filter was removed before execution/i)).toBeInTheDocument();
     expect(screen.queryByText(/tool input invalid/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View trace" }));
-    expect(await screen.findByText(/empty_optional_search_term_removed/)).toBeInTheDocument();
+    expect(await screen.findAllByText(/empty_optional_search_term_removed/)).toHaveLength(2);
     expect(screen.getByText(/"cell_tissue_terms":\[""\]/)).toBeInTheDocument();
     expect(screen.getByText(/"cell_tissue_terms":\[\]/)).toBeInTheDocument();
+  });
+
+  it("presents controlled-vocabulary canonicalization as a compact note and detailed trace", async () => {
+    const originalArguments = {
+      scientific_terms: ["oxidative stress", "transcriptomic"],
+      organism_alternatives: ["Homo sapiens", "Mus musculus"],
+      study_type_alternatives: ["expression profiling by array", "high throughput sequencing"],
+      cell_tissue_terms: [],
+      treatment_terms: [],
+      maximum_results: 5,
+      publication_date_start: null,
+      publication_date_end: null,
+      strategy_reason: "Find bounded oxidative-stress transcriptomic GEO Series.",
+    };
+    const normalizedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      tools: [{ id: "tool-vocabulary", tool_name: "search_geo_series", status: "completed", duration_ms: 20 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: {
+          output: {
+            rendered_query: '"Expression profiling by array" OR "Expression profiling by high throughput sequencing"',
+            result_count: 0,
+            cache_status: "cached",
+            strategy_reason: "Bounded controlled-vocabulary search.",
+          },
+          original_arguments: originalArguments,
+          normalized_arguments: {
+            ...originalArguments,
+            study_type_alternatives: [
+              "Expression profiling by array",
+              "Expression profiling by high throughput sequencing",
+            ],
+          },
+          normalization_warnings: [
+            {
+              code: "controlled_vocabulary_alias_canonicalized",
+              field: "study_type_alternatives",
+              original_index: 0,
+              original: "expression profiling by array",
+              normalized: "Expression profiling by array",
+              policy_version: "phase1-controlled-vocabulary-v1",
+            },
+            {
+              code: "controlled_vocabulary_alias_canonicalized",
+              field: "study_type_alternatives",
+              original_index: 1,
+              original: "high throughput sequencing",
+              normalized: "Expression profiling by high throughput sequencing",
+              policy_version: "phase1-controlled-vocabulary-v1",
+            },
+          ],
+        },
+      }],
+    };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [normalizedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: normalizedRun },
+    });
+    const user = userEvent.setup();
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText("2 controlled-vocabulary values were normalized before execution.")).toBeInTheDocument();
+    expect(screen.queryByText(/tool input invalid/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View trace" }));
+    expect(screen.getAllByText(/phase1-controlled-vocabulary-v1/)).toHaveLength(2);
+    expect(screen.getByText(/high throughput sequencing → Expression profiling by high throughput sequencing/)).toBeInTheDocument();
   });
 
   it("shows a structured no-candidate outcome without a dataset approval action", async () => {

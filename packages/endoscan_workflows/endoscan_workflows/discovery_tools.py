@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .artifacts import LocalArtifactStore
 from .config import AgentRunMode
 from .contracts import SourceToolDiagnostic, ToolInvocation
+from .controlled_vocabulary import GeoStudyType
 from .source_cache import CACHE_POLICY_VERSION, SourceResponseCache
 from .source_security import (
     ScientificResponse,
@@ -31,14 +32,6 @@ EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 GEO_SOFT = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
 GSE_PATTERN = re.compile(r"^GSE[1-9][0-9]{1,8}$", re.I)
 ALLOWED_GEO_ORGANISMS = frozenset({"Homo sapiens", "Mus musculus"})
-ALLOWED_GEO_STUDY_TYPES = frozenset(
-    {
-        "Expression profiling by array",
-        "Expression profiling by high throughput sequencing",
-        "array",
-        "sequencing",
-    }
-)
 
 
 class ToolContract(BaseModel):
@@ -62,12 +55,13 @@ class SearchGeoSeriesInput(ToolContract):
             "constraint is intended. Empty strings are not allowed."
         ),
     )
-    study_type_alternatives: list[str] = Field(
+    study_type_alternatives: list[GeoStudyType] = Field(
         default_factory=list,
         max_length=4,
         description=(
-            "Optional allowlisted GEO study-type terms. Return [] when no study-type "
-            "constraint is intended. Empty strings are not allowed."
+            "Select one or more supported GEO study types. Use the exact canonical values "
+            "provided by the schema. These are alternatives and will be combined with OR. "
+            "Return [] when no study-type constraint is intended."
         ),
     )
     cell_tissue_terms: list[str] = Field(
@@ -118,20 +112,23 @@ class SearchGeoSeriesInput(ToolContract):
                 raise ValueError("search terms contain unsupported characters")
         return value
 
+    @field_validator("study_type_alternatives", mode="before")
+    @classmethod
+    def validate_canonical_study_types(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            supported = {item.value for item in GeoStudyType}
+            if any(not isinstance(item, str) or item not in supported for item in value):
+                raise ValueError(
+                    "study type alternatives must use exact canonical allowlisted values"
+                )
+        return value
+
     @field_validator("organism_alternatives")
     @classmethod
     def validate_organisms(cls, value: list[str]) -> list[str]:
         allowed = {item.casefold() for item in ALLOWED_GEO_ORGANISMS}
         if any(item.casefold() not in allowed for item in value):
             raise ValueError("organism alternatives must use allowlisted values")
-        return value
-
-    @field_validator("study_type_alternatives")
-    @classmethod
-    def validate_study_types(cls, value: list[str]) -> list[str]:
-        allowed = {item.casefold() for item in ALLOWED_GEO_STUDY_TYPES}
-        if any(item.casefold() not in allowed for item in value):
-            raise ValueError("study type alternatives must use allowlisted values")
         return value
 
     @field_validator("publication_date_start", "publication_date_end")
@@ -177,7 +174,7 @@ def render_geo_query(request: SearchGeoSeriesInput) -> str:
     def term(value: str, field: str) -> str:
         return f'"{value}"[{field}]'
 
-    def alternatives(values: list[str], field: str) -> str | None:
+    def alternatives(values: list[str] | list[GeoStudyType], field: str) -> str | None:
         if not values:
             return None
         rendered = [term(value, field) for value in values]

@@ -19,6 +19,7 @@ import {
   humanizeMachineValue,
   relativeTime,
   shortBuildId,
+  shortRunId,
   stageLabel,
   stageProgress,
   toolLabel,
@@ -168,6 +169,13 @@ type ToolNormalizationSummary = {
   originalArguments: Record<string, unknown>;
   normalizedArguments: Record<string, unknown>;
   warningCodes: string[];
+  warnings: Array<{
+    code: string;
+    field: string;
+    original?: string | null;
+    normalized?: string | null;
+    policyVersion?: string | null;
+  }>;
 };
 
 function toolNormalizationSummaries(run: AdminAgentRun): ToolNormalizationSummary[] {
@@ -181,15 +189,24 @@ function toolNormalizationSummaries(run: AdminAgentRun): ToolNormalizationSummar
       || !normalizedArguments || typeof normalizedArguments !== "object" || Array.isArray(normalizedArguments)
       || !Array.isArray(warnings) || warnings.length === 0
     ) return [];
+    const parsedWarnings = warnings.flatMap((warning) => {
+      if (!warning || typeof warning !== "object" || Array.isArray(warning)) return [];
+      const record = warning as Record<string, unknown>;
+      if (typeof record.code !== "string" || typeof record.field !== "string") return [];
+      return [{
+        code: record.code,
+        field: record.field,
+        original: typeof record.original === "string" ? record.original : null,
+        normalized: typeof record.normalized === "string" ? record.normalized : null,
+        policyVersion: typeof record.policy_version === "string" ? record.policy_version : null,
+      }];
+    });
     return [{
       toolName: typeof call.tool_name === "string" ? call.tool_name : "tool",
       originalArguments: originalArguments as Record<string, unknown>,
       normalizedArguments: normalizedArguments as Record<string, unknown>,
-      warningCodes: warnings.flatMap((warning) => {
-        if (!warning || typeof warning !== "object" || Array.isArray(warning)) return [];
-        const code = (warning as Record<string, unknown>).code;
-        return typeof code === "string" ? [code] : [];
-      }),
+      warningCodes: parsedWarnings.map((warning) => warning.code),
+      warnings: parsedWarnings,
     }];
   });
 }
@@ -278,6 +295,7 @@ export function AdminEndpointDetail() {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedIdentifier, setCopiedIdentifier] = useState<"build" | "run" | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -378,6 +396,15 @@ export function AdminEndpointDetail() {
     }
   }
 
+  async function copyIdentifier(kind: "build" | "run", value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedIdentifier(kind);
+    } catch {
+      setError(`Unable to copy the full ${kind} ID.`);
+    }
+  }
+
   const pending = approvals.find((item) => item.status === "pending") ?? null;
   const recommended = useMemo(
     () => recommendedCandidateId === null
@@ -421,6 +448,12 @@ export function AdminEndpointDetail() {
     ).length,
     0,
   );
+  const controlledVocabularyWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.filter(
+      (code) => code === "controlled_vocabulary_alias_canonicalized",
+    ).length,
+    0,
+  );
   const hasCompletedOutput = trace?.status === "completed" || trace?.status === "approval_required";
   const hasCandidateRecommendation = Boolean(pending && recommended && candidates.length > 0);
 
@@ -447,7 +480,15 @@ export function AdminEndpointDetail() {
       <header className="admin-heading admin-detail-heading">
         <div>
           <div className="admin-title-meta">
-            <span>Build {shortBuildId(build.id)}</span>
+            <span className="admin-identifier">
+              <span>Build {shortBuildId(build.id)}</span>
+              <button
+                type="button"
+                className="admin-copy-button"
+                aria-label={`Copy full build ID ${build.id}`}
+                onClick={() => void copyIdentifier("build", build.id)}
+              >{copiedIdentifier === "build" ? "Copied" : "Copy"}</button>
+            </span>
             <span>Updated {relativeTime(build.updated_at)}</span>
           </div>
           <h1 id="admin-build-title">{build.endpoint_name}</h1>
@@ -621,6 +662,15 @@ export function AdminEndpointDetail() {
             <div className="admin-panel-heading"><h2 id="agent-summary-title">Agent activity</h2><span>{runs.length} run{runs.length === 1 ? "" : "s"}</span></div>
             {trace ? (
               <div className="admin-agent-summary">
+                <div className="admin-run-identifier">
+                  <span>Run {shortRunId(trace.id)}</span>
+                  <button
+                    type="button"
+                    className="admin-copy-button"
+                    aria-label={`Copy full run ID ${trace.id}`}
+                    onClick={() => void copyIdentifier("run", trace.id)}
+                  >{copiedIdentifier === "run" ? "Copied" : "Copy"}</button>
+                </div>
                 <h3>{trace.agent_name}</h3>
                 <span className="admin-status">{runStatusLabel(trace, runMode, hasCandidateRecommendation)}</span>
                 <dl>
@@ -642,7 +692,7 @@ export function AdminEndpointDetail() {
                 </dl>
                 {geoSearches.length > 0 && <div className="admin-trace-summary"><h4>Rendered GEO queries</h4><ol>{geoSearches.map((search, index) => <li key={`${search.renderedQuery}-${index}`}><strong>{search.strategyReason}</strong><code>{search.renderedQuery}</code><span>{search.resultCount} results / {search.cacheStatus}</span></li>)}</ol></div>}
                 {turnExposures.length > 0 && <div className="admin-trace-summary"><h4>Tools exposed per turn</h4><ol>{turnExposures.map((turn) => <li key={`${turn.turn}-${turn.substage}`}><strong>Turn {turn.turn}: {humanizeMachineValue(turn.substage)}</strong><span>{turn.tools.length > 0 ? turn.tools.map(toolLabel).join(", ") : "Final structured output only"}</span></li>)}</ol></div>}
-                {normalizationWarningCount > 0 && <p className="admin-secondary-note">{emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
+                {normalizationWarningCount > 0 && <p className="admin-secondary-note">{controlledVocabularyWarningCount > 0 ? `${controlledVocabularyWarningCount} controlled-vocabulary ${controlledVocabularyWarningCount === 1 ? "value was" : "values were"} normalized before execution.` : emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
                 {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
                 {scientificSourceDiagnostics.length > 0 && <div className="admin-trace-summary"><h4>Scientific-source diagnostics</h4>{scientificSourceDiagnostics.map((diagnostic, index) => <SourceDiagnosticDetails diagnostic={diagnostic} key={`${diagnostic.tool_name}-${index}`} />)}</div>}
                 <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
@@ -651,7 +701,7 @@ export function AdminEndpointDetail() {
                   <a href="#agent-tools">View tools used</a>
                   <a href="#artifacts">View generated artifact</a>
                 </div>
-                {showTrace && <div className="admin-trace-summary" id="agent-trace"><h4>Trace events</h4><ol>{(trace.trace?.events ?? []).map((event, index) => <li key={index}>{typeof event.event_type === "string" ? humanizeMachineValue(event.event_type.replace(/\./g, "_")) : `Trace event ${index + 1}`}</li>)}</ol>{normalizationSummaries.map((summary, index) => <section key={`${summary.toolName}-${index}`}><h5>{toolLabel(summary.toolName)} input normalization</h5><p>{summary.warningCodes.length} warning{summary.warningCodes.length === 1 ? "" : "s"}: {summary.warningCodes.join(", ")}</p><dl><div><dt>Model-supplied arguments</dt><dd><code>{JSON.stringify(summary.originalArguments)}</code></dd></div><div><dt>Executed arguments</dt><dd><code>{JSON.stringify(summary.normalizedArguments)}</code></dd></div></dl></section>)}</div>}
+                {showTrace && <div className="admin-trace-summary" id="agent-trace"><h4>Trace events</h4><ol>{(trace.trace?.events ?? []).map((event, index) => <li key={index}>{typeof event.event_type === "string" ? humanizeMachineValue(event.event_type.replace(/\./g, "_")) : `Trace event ${index + 1}`}</li>)}</ol>{normalizationSummaries.map((summary, index) => <section key={`${summary.toolName}-${index}`}><h5>{toolLabel(summary.toolName)} input normalization</h5><p>{summary.warningCodes.length} warning{summary.warningCodes.length === 1 ? "" : "s"}: {summary.warningCodes.join(", ")}</p><dl><div><dt>Model-supplied arguments</dt><dd><code>{JSON.stringify(summary.originalArguments)}</code></dd></div><div><dt>Executed arguments</dt><dd><code>{JSON.stringify(summary.normalizedArguments)}</code></dd></div></dl><ul className="admin-normalization-list">{summary.warnings.map((warning, warningIndex) => <li key={`${warning.code}-${warning.field}-${warningIndex}`}><strong>{warning.field}</strong><span>{warning.original ?? "not recorded"} → {warning.normalized ?? "not executed"}</span><small>{warning.code}{warning.policyVersion ? ` · ${warning.policyVersion}` : ""}</small></li>)}</ul></section>)}</div>}
               </div>
             ) : <div className="admin-empty">No agent run yet.</div>}
           </section>
@@ -676,6 +726,10 @@ export function AdminEndpointDetail() {
               </div>
             ) : (
               <div id="audit-panel" role="tabpanel" aria-labelledby="audit-tab">
+                <dl className="admin-audit-identifiers">
+                  <div><dt>Build ID</dt><dd>{build.id}</dd></div>
+                  {trace && <div><dt>Current run ID</dt><dd>{trace.id}</dd></div>}
+                </dl>
                 <ol className="admin-audit-list">
                   {[...events].reverse().map((event) => <li key={event.id}><div><strong>{event.event_type}</strong><time>{new Date(event.created_at).toLocaleString()}</time></div><dl><div><dt>Transition</dt><dd>{event.from_state ?? "none"} to {event.to_state ?? "none"}</dd></div><div><dt>Actor</dt><dd>{event.actor_type} / {event.actor_id}</dd></div><div><dt>Event ID</dt><dd>{event.id}</dd></div><div><dt>Event hash</dt><dd>{event.event_hash}</dd></div></dl></li>)}
                 </ol>
@@ -689,6 +743,7 @@ export function AdminEndpointDetail() {
               <div><dt>Machine state</dt><dd>{build.current_stage}</dd></div>
               <div><dt>Workflow version</dt><dd>{build.version}</dd></div>
               <div><dt>Build ID</dt><dd>{build.id}</dd></div>
+              {trace && <div><dt>Current run ID</dt><dd>{trace.id}</dd></div>}
               {pending && <div><dt>Proposal binding</dt><dd>{pending.proposal_hash}</dd></div>}
             </dl>
           </details>

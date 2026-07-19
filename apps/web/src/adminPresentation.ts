@@ -75,6 +75,11 @@ export function shortBuildId(id: string): string {
   return compact.slice(0, 8).toUpperCase();
 }
 
+export function shortRunId(id: string): string {
+  const compact = id.replace(/^run-/, "").replace(/-/g, "");
+  return compact.slice(0, 8).toUpperCase();
+}
+
 export function relativeTime(value: string, now = Date.now()): string {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "Unknown";

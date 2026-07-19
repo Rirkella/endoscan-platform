@@ -8,6 +8,7 @@ from pydantic import Field, field_validator, model_validator
 
 from .config import AgentConfiguration, AgentRunMode
 from .contracts import AgentBudget, AgentRunRequest, ModelConfiguration, StrictContract
+from .controlled_vocabulary import GeoStudyType
 
 RecommendationStatus = Literal[
     "recommended_for_human_review",
@@ -68,7 +69,7 @@ class SearchStrategyStep(StrictContract):
     strategy_reason: str = Field(min_length=5, max_length=500)
     scientific_terms: list[str] = Field(min_length=1, max_length=4)
     organism_alternatives: list[str] = Field(default_factory=list, max_length=4)
-    study_type_alternatives: list[str] = Field(default_factory=list, max_length=4)
+    study_type_alternatives: list[GeoStudyType] = Field(default_factory=list, max_length=4)
     rendered_query: str = Field(min_length=3, max_length=2000)
     result_count: int = Field(ge=0)
 
@@ -167,7 +168,10 @@ def discovery_request(
             "Find public transcriptomic GEO Series for the oxidative-stress endpoint using only "
             "the provided tools. Plan at most four focused typed GEO searches; alternatives inside "
             "organism or study-type fields are OR, while separate concepts are AND. Never repeat a "
-            "normalized search. If a search is empty, relax or split one bounded filter while "
+            "normalized search. Use exact controlled-vocabulary values exposed by each tool "
+            "schema; never shorten, translate, paraphrase, or invent enum values, and use an empty "
+            "array only where the schema permits it. If a search is empty, relax or split one "
+            "bounded filter while "
             "remaining transcriptomic. Stop searching after enough accessions are found, then "
             "validate the returned top candidate set with validate_geo_accessions, then inspect "
             "the public_valid candidates once with inspect_geo_candidates. After batch inspection, "

@@ -219,7 +219,9 @@ def test_all_zero_searches_have_a_valid_no_candidate_contract() -> None:
                 "strategy_reason": "Focused human sequencing search.",
                 "scientific_terms": ["oxidative stress"],
                 "organism_alternatives": ["Homo sapiens"],
-                "study_type_alternatives": ["sequencing"],
+                "study_type_alternatives": [
+                    "Expression profiling by high throughput sequencing"
+                ],
                 "rendered_query": "query-one",
                 "result_count": 0,
             },

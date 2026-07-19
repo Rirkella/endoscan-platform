@@ -95,6 +95,9 @@ def test_production_agent_tools_and_output_schema_are_strict_sdk_inputs() -> Non
     )
     agent = adapter._build_agent(request)
     assert agent.instructions == request.instructions
+    assert (
+        "Use exact controlled-vocabulary values exposed by each tool schema" in agent.instructions
+    )
     assert agent.model == "gpt-5.4-mini"
     assert agent.output_type is DiscoveryOutput
     assert agent.tool_use_behavior == "stop_on_first_tool"

@@ -25,10 +25,15 @@ from .contracts import (
     ToolResult,
     WorkflowState,
 )
+from .controlled_vocabulary import (
+    CONTROLLED_VOCABULARY_POLICY_VERSION,
+    canonicalize_geo_study_type,
+)
 from .errors import AgentPolicyError
 from .source_security import SourceTimeoutError, SourceToolError
 
 logger = logging.getLogger("uvicorn.error.endoscan.workflow.source_tool")
+SEARCH_TERM_NORMALIZATION_POLICY_VERSION = "phase1-search-term-normalization-v1"
 
 
 class ToolInput(BaseModel):
@@ -120,6 +125,9 @@ def normalize_configured_string_lists(
                         code="search_term_whitespace_trimmed",
                         field=field,
                         original_index=index,
+                        original=item,
+                        normalized=normalized,
+                        policy_version=SEARCH_TERM_NORMALIZATION_POLICY_VERSION,
                     )
                 )
             if not normalized:
@@ -132,6 +140,9 @@ def normalize_configured_string_lists(
                         ),
                         field=field,
                         original_index=index,
+                        original=item,
+                        normalized=None,
+                        policy_version=SEARCH_TERM_NORMALIZATION_POLICY_VERSION,
                     )
                 )
                 continue
@@ -141,6 +152,9 @@ def normalize_configured_string_lists(
                         code="duplicate_search_term_removed",
                         field=field,
                         original_index=index,
+                        original=item,
+                        normalized=normalized,
+                        policy_version=SEARCH_TERM_NORMALIZATION_POLICY_VERSION,
                     )
                 )
                 continue
@@ -154,15 +168,70 @@ def normalize_configured_string_lists(
 
 
 def normalize_geo_search_arguments(arguments: dict[str, Any]) -> NormalizedToolArguments:
-    return normalize_configured_string_lists(
+    normalized = normalize_configured_string_lists(
         arguments,
         optional_fields=(
             "organism_alternatives",
-            "study_type_alternatives",
             "cell_tissue_terms",
             "treatment_terms",
         ),
         required_fields=("scientific_terms",),
+    )
+    study_types = arguments.get("study_type_alternatives")
+    if not isinstance(study_types, list):
+        return normalized
+
+    normalized_study_types: list[Any] = []
+    normalized_arguments = dict(normalized.arguments)
+    warnings = list(normalized.warnings)
+    seen: set[str] = set()
+    for index, item in enumerate(study_types):
+        if not isinstance(item, str):
+            normalized_study_types.append(item)
+            continue
+        match = canonicalize_geo_study_type(item)
+        if match.canonical is None:
+            normalized_study_types.append(match.comparison_value)
+            warnings.append(
+                ToolNormalizationWarning(
+                    code="controlled_vocabulary_unknown_value",
+                    field="study_type_alternatives",
+                    original_index=index,
+                    original=item,
+                    normalized=match.comparison_value,
+                    policy_version=CONTROLLED_VOCABULARY_POLICY_VERSION,
+                )
+            )
+            continue
+        if match.canonical != item:
+            warnings.append(
+                ToolNormalizationWarning(
+                    code="controlled_vocabulary_alias_canonicalized",
+                    field="study_type_alternatives",
+                    original_index=index,
+                    original=item,
+                    normalized=match.canonical,
+                    policy_version=CONTROLLED_VOCABULARY_POLICY_VERSION,
+                )
+            )
+        if match.canonical in seen:
+            warnings.append(
+                ToolNormalizationWarning(
+                    code="duplicate_search_term_removed",
+                    field="study_type_alternatives",
+                    original_index=index,
+                    original=item,
+                    normalized=match.canonical,
+                    policy_version=CONTROLLED_VOCABULARY_POLICY_VERSION,
+                )
+            )
+            continue
+        seen.add(match.canonical)
+        normalized_study_types.append(match.canonical)
+    normalized_arguments["study_type_alternatives"] = normalized_study_types
+    return NormalizedToolArguments(
+        arguments=normalized_arguments,
+        warnings=tuple(warnings),
     )
 
 

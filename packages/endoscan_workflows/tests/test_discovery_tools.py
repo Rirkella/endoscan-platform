@@ -15,6 +15,12 @@ from endoscan_workflows.contracts import (
     ToolInvocation,
     WorkflowState,
 )
+from endoscan_workflows.controlled_vocabulary import (
+    CONTROLLED_VOCABULARY_POLICY_VERSION,
+    PHASE1_VOCABULARY_AUDIT,
+    GeoStudyType,
+    VocabularyFieldCategory,
+)
 from endoscan_workflows.discovery_tools import (
     DiscoveryToolService,
     GeoAccessionInput,
@@ -74,6 +80,24 @@ FAILED_LIVE_SEARCH_ARGUMENTS = {
         "expression profiling by high throughput sequencing",
     ],
     "treatment_terms": ["ROS", "H2O2", "oxidative stress"],
+}
+
+EXACT_LIVE_SEARCH_ARGUMENTS = {
+    "scientific_terms": ["oxidative stress", "transcriptomic"],
+    "organism_alternatives": ["Homo sapiens", "Mus musculus"],
+    "study_type_alternatives": [
+        "expression profiling by array",
+        "high throughput sequencing",
+    ],
+    "cell_tissue_terms": [],
+    "treatment_terms": [],
+    "publication_date_start": None,
+    "publication_date_end": None,
+    "maximum_results": 5,
+    "strategy_reason": (
+        "Find public GEO Series with transcriptomic measurements relevant to oxidative stress "
+        "in human or mouse."
+    ),
 }
 
 
@@ -189,6 +213,205 @@ def test_configured_search_lists_trim_remove_empty_and_preserve_first_occurrence
     ]
 
 
+@pytest.mark.parametrize(
+    ("supplied", "canonical"),
+    [
+        ("expression profiling by array", "Expression profiling by array"),
+        ("Expression profiling by array", "Expression profiling by array"),
+        (
+            "high throughput sequencing",
+            "Expression profiling by high throughput sequencing",
+        ),
+        (
+            "expression profiling by high throughput sequencing",
+            "Expression profiling by high throughput sequencing",
+        ),
+        (
+            "Expression profiling by high throughput sequencing",
+            "Expression profiling by high throughput sequencing",
+        ),
+        (" array ", "Expression profiling by array"),
+        ("sequencing", "Expression profiling by high throughput sequencing"),
+    ],
+)
+def test_reviewed_geo_study_type_aliases_are_canonicalized(
+    supplied: str, canonical: str
+) -> None:
+    normalized = normalize_geo_search_arguments(
+        {**EXACT_LIVE_SEARCH_ARGUMENTS, "study_type_alternatives": [supplied]}
+    )
+
+    assert normalized.arguments["study_type_alternatives"] == [canonical]
+    expected_warnings = [] if supplied == canonical else [
+        "controlled_vocabulary_alias_canonicalized"
+    ]
+    assert [warning.code for warning in normalized.warnings] == expected_warnings
+    SearchGeoSeriesInput.model_validate(normalized.arguments)
+
+
+def test_geo_study_type_canonicalization_collapses_duplicates_in_first_order() -> None:
+    normalized = normalize_geo_search_arguments(
+        {
+            **EXACT_LIVE_SEARCH_ARGUMENTS,
+            "study_type_alternatives": [
+                " high   throughput sequencing ",
+                "Expression profiling by array",
+                "expression profiling by high throughput sequencing",
+                "array",
+            ],
+        }
+    )
+
+    assert normalized.arguments["study_type_alternatives"] == [
+        "Expression profiling by high throughput sequencing",
+        "Expression profiling by array",
+    ]
+    assert [warning.code for warning in normalized.warnings] == [
+        "controlled_vocabulary_alias_canonicalized",
+        "controlled_vocabulary_alias_canonicalized",
+        "duplicate_search_term_removed",
+        "controlled_vocabulary_alias_canonicalized",
+        "duplicate_search_term_removed",
+    ]
+
+
+@pytest.mark.parametrize(
+    "unknown",
+    [
+        "proteomics",
+        "methylation profiling",
+        "single-cell assay",
+        "genome sequencing",
+        "ChIP-seq",
+        "ATAC-seq",
+        "expression profiling",
+        "high throughput",
+        'sequencing\" OR 1=1',
+    ],
+)
+def test_unknown_ambiguous_and_malicious_study_types_remain_rejected(unknown: str) -> None:
+    normalized = normalize_geo_search_arguments(
+        {**EXACT_LIVE_SEARCH_ARGUMENTS, "study_type_alternatives": [unknown]}
+    )
+
+    assert normalized.arguments["study_type_alternatives"] == [unknown]
+    assert [warning.code for warning in normalized.warnings] == [
+        "controlled_vocabulary_unknown_value"
+    ]
+    with pytest.raises(ValidationError, match="exact canonical allowlisted"):
+        SearchGeoSeriesInput.model_validate(normalized.arguments)
+
+
+def test_mixed_known_and_unknown_study_types_preserve_unknown_and_fail_closed() -> None:
+    normalized = normalize_geo_search_arguments(
+        {
+            **EXACT_LIVE_SEARCH_ARGUMENTS,
+            "study_type_alternatives": [
+                "high throughput sequencing",
+                "proteomics",
+            ],
+        }
+    )
+
+    assert normalized.arguments["study_type_alternatives"] == [
+        "Expression profiling by high throughput sequencing",
+        "proteomics",
+    ]
+    assert [warning.code for warning in normalized.warnings] == [
+        "controlled_vocabulary_alias_canonicalized",
+        "controlled_vocabulary_unknown_value",
+    ]
+    with pytest.raises(ValidationError, match="exact canonical allowlisted"):
+        SearchGeoSeriesInput.model_validate(normalized.arguments)
+
+
+def test_unknown_study_type_never_reaches_the_geo_execution_boundary() -> None:
+    calls = 0
+
+    class ForbiddenBoundaryService:
+        def search_geo_series(self, *_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            raise AssertionError("unknown vocabulary must fail before GEO execution")
+
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: {}
+
+    registry = phase1_tool_registry(Path.cwd(), ForbiddenBoundaryService())
+    supplied = {
+        **EXACT_LIVE_SEARCH_ARGUMENTS,
+        "study_type_alternatives": ["Expression profiling by array", "proteomics"],
+    }
+    result = registry.invoke(
+        ToolInvocation(
+            tool_name="search_geo_series",
+            arguments=supplied,
+            workflow_id="build-unknown-vocabulary",
+            step_id="step-unknown-vocabulary",
+            workflow_stage=WorkflowState.DISCOVERING_DATA,
+            permission_scope=["source:geo:read"],
+            run_context={"run_mode": "replay"},
+            idempotency_key="unknown-vocabulary",
+        )
+    )
+
+    assert calls == 0
+    assert result.status is ToolCallStatus.FAILED
+    assert result.error is not None
+    assert result.error.code == "tool_input_invalid"
+    assert result.error.retryable is False
+    assert result.original_arguments == supplied
+    assert result.normalized_arguments == supplied
+    assert [warning.code for warning in result.normalization_warnings] == [
+        "controlled_vocabulary_unknown_value"
+    ]
+
+
+def test_empty_study_type_array_is_the_only_empty_optional_form() -> None:
+    SearchGeoSeriesInput.model_validate(
+        {**EXACT_LIVE_SEARCH_ARGUMENTS, "study_type_alternatives": []}
+    )
+    normalized = normalize_geo_search_arguments(
+        {**EXACT_LIVE_SEARCH_ARGUMENTS, "study_type_alternatives": [""]}
+    )
+    with pytest.raises(ValidationError, match="exact canonical allowlisted"):
+        SearchGeoSeriesInput.model_validate(normalized.arguments)
+
+
+def test_phase1_bounded_vocabulary_audit_is_explicit() -> None:
+    assert PHASE1_VOCABULARY_AUDIT["study_type_alternatives"] is (
+        VocabularyFieldCategory.HUMAN_CONTROLLED_VOCABULARY
+    )
+    assert PHASE1_VOCABULARY_AUDIT["organism_alternatives"] is (
+        VocabularyFieldCategory.HUMAN_CONTROLLED_VOCABULARY
+    )
+    for field in (
+        "recommendation_status",
+        "validation_status",
+        "run_mode",
+        "candidate_status",
+        "confidence_category",
+    ):
+        assert PHASE1_VOCABULARY_AUDIT[field] is (
+            VocabularyFieldCategory.EXACT_MACHINE_IDENTIFIER
+        )
+    for field in ("scientific_terms", "cell_tissue_terms", "treatment_terms"):
+        assert PHASE1_VOCABULARY_AUDIT[field] is (
+            VocabularyFieldCategory.FREE_SCIENTIFIC_TEXT
+        )
+
+
+def test_search_tool_schema_exposes_exact_canonical_study_type_enum() -> None:
+    schema = SearchGeoSeriesInput.model_json_schema()
+    study_types = schema["properties"]["study_type_alternatives"]
+    reference = study_types["items"]["$ref"].split("/")[-1]
+
+    assert schema["$defs"][reference]["enum"] == [item.value for item in GeoStudyType]
+    assert "exact canonical values" in study_types["description"]
+    assert "combined with OR" in study_types["description"]
+    assert schema["additionalProperties"] is False
+
+
 def test_required_and_allowlisted_geo_search_fields_remain_strict() -> None:
     normalized_required = normalize_geo_search_arguments(
         {**FAILED_LIVE_SEARCH_ARGUMENTS, "scientific_terms": [""]}
@@ -222,8 +445,8 @@ def test_exact_failed_live_arguments_reach_mocked_geo_boundary_normalized() -> N
             captured.append(typed_request)
             return {
                 "typed_request": typed_request,
-                "rendered_query": "mocked bounded GEO query",
-                "normalized_query": "mocked bounded geo query",
+                "rendered_query": render_geo_query(request),
+                "normalized_query": render_geo_query(request).casefold(),
                 "strategy_reason": request.strategy_reason,
                 "results": [],
                 "result_count": 0,
@@ -240,7 +463,7 @@ def test_exact_failed_live_arguments_reach_mocked_geo_boundary_normalized() -> N
     result = registry.invoke(
         ToolInvocation(
             tool_name="search_geo_series",
-            arguments=FAILED_LIVE_SEARCH_ARGUMENTS,
+            arguments=EXACT_LIVE_SEARCH_ARGUMENTS,
             workflow_id="build-normalization-regression",
             step_id="step-normalization-regression",
             workflow_stage=WorkflowState.DISCOVERING_DATA,
@@ -251,15 +474,38 @@ def test_exact_failed_live_arguments_reach_mocked_geo_boundary_normalized() -> N
     )
 
     assert result.status is ToolCallStatus.COMPLETED
-    assert captured == [{**FAILED_LIVE_SEARCH_ARGUMENTS, "cell_tissue_terms": []}]
-    assert result.original_arguments == FAILED_LIVE_SEARCH_ARGUMENTS
+    canonical = {
+        **EXACT_LIVE_SEARCH_ARGUMENTS,
+        "study_type_alternatives": [
+            "Expression profiling by array",
+            "Expression profiling by high throughput sequencing",
+        ],
+    }
+    assert captured == [canonical]
+    assert result.original_arguments == EXACT_LIVE_SEARCH_ARGUMENTS
     assert result.normalized_arguments == {
-        **FAILED_LIVE_SEARCH_ARGUMENTS,
-        "cell_tissue_terms": [],
+        **canonical,
     }
     assert [warning.code for warning in result.normalization_warnings] == [
-        "empty_optional_search_term_removed"
+        "controlled_vocabulary_alias_canonicalized",
+        "controlled_vocabulary_alias_canonicalized",
     ]
+    assert [warning.original for warning in result.normalization_warnings] == [
+        "expression profiling by array",
+        "high throughput sequencing",
+    ]
+    assert [warning.normalized for warning in result.normalization_warnings] == canonical[
+        "study_type_alternatives"
+    ]
+    assert all(
+        warning.policy_version == CONTROLLED_VOCABULARY_POLICY_VERSION
+        for warning in result.normalization_warnings
+    )
+    rendered = result.output["rendered_query"]
+    assert (
+        '"Expression profiling by array"[All Fields] OR '
+        '"Expression profiling by high throughput sequencing"[All Fields]'
+    ) in rendered
 
 
 def test_disallowed_domain_and_private_network_are_rejected() -> None:
@@ -1186,11 +1432,15 @@ def test_accessions_are_deduplicated_across_complementary_searches(workflow_runt
     client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
     service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
     first = service.search_geo_series(
-        search_request(study_type_alternatives=["array"]),
+        search_request(study_type_alternatives=["Expression profiling by array"]),
         invocation(workflow_id, mode=AgentRunMode.LIVE, key="search-array"),
     )
     second = service.search_geo_series(
-        search_request(study_type_alternatives=["sequencing"]),
+        search_request(
+            study_type_alternatives=[
+                "Expression profiling by high throughput sequencing"
+            ]
+        ),
         invocation(workflow_id, mode=AgentRunMode.LIVE, key="search-sequencing"),
     )
     assert [item["accession"] for item in first.results] == ["GSE12345"]
@@ -1228,11 +1478,15 @@ def test_sufficient_candidates_stop_additional_geo_searches(workflow_runtime) ->
     client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
     service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
     service.search_geo_series(
-        search_request(study_type_alternatives=["array"]),
+        search_request(study_type_alternatives=["Expression profiling by array"]),
         invocation(workflow_id, mode=AgentRunMode.LIVE, key="enough"),
     )
     stopped = service.search_geo_series(
-        search_request(study_type_alternatives=["sequencing"]),
+        search_request(
+            study_type_alternatives=[
+                "Expression profiling by high throughput sequencing"
+            ]
+        ),
         invocation(workflow_id, mode=AgentRunMode.LIVE, key="stopped"),
     )
     assert stopped.search_executed is False

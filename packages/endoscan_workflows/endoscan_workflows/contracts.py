@@ -364,6 +364,9 @@ class ToolNormalizationWarning(StrictContract):
     code: str = Field(pattern=r"^[a-z][a-z0-9_]{2,79}$")
     field: str = Field(pattern=r"^[a-z][a-z0-9_]{1,79}$")
     original_index: int = Field(ge=0)
+    original: str | None = Field(default=None, max_length=500)
+    normalized: str | None = Field(default=None, max_length=500)
+    policy_version: str | None = Field(default=None, max_length=80)
 
 
 class ToolResult(StrictContract):
