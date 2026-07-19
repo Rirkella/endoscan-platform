@@ -150,7 +150,29 @@ class AgentConfiguration(BaseModel):
             and self.api_key_present
         )
 
+    def controlled_source_discovery(self) -> AgentConfiguration:
+        """Return the stricter first-workflow budget without weakening global configuration."""
+
+        return self.model_copy(
+            update={
+                "maximum_turns": min(self.maximum_turns, 6),
+                "maximum_tool_calls": min(self.maximum_tool_calls, 6),
+                "timeout_seconds": min(self.timeout_seconds, 120.0),
+                "maximum_input_tokens": min(self.maximum_input_tokens, 8_000),
+                "maximum_output_tokens": min(self.maximum_output_tokens, 1_500),
+                "maximum_cost_usd": min(self.maximum_cost_usd, 0.20),
+                "retry_count": 0,
+                "global_maximum_input_tokens": min(self.global_maximum_input_tokens, 32_000),
+                "global_maximum_output_tokens": min(self.global_maximum_output_tokens, 6_000),
+                "global_maximum_tool_calls": min(self.global_maximum_tool_calls, 24),
+                "global_maximum_cost_usd": min(self.global_maximum_cost_usd, 0.80),
+                "global_timeout_seconds": min(self.global_timeout_seconds, 600.0),
+                "maximum_gap_discovery_rounds": 0,
+            }
+        )
+
     def public_status(self) -> dict[str, object]:
+        controlled = self.controlled_source_discovery()
         return {
             "schema_version": "1.0.0",
             "provider": self.provider,
@@ -184,6 +206,21 @@ class AgentConfiguration(BaseModel):
                 "maximum_gap_discovery_rounds": self.maximum_gap_discovery_rounds,
                 "timeout_seconds": self.global_timeout_seconds,
                 "provider_retries": self.retry_count,
+            },
+            "controlled_source_discovery_budget": {
+                "maximum_agent_runs": 4,
+                "maximum_turns_per_agent": controlled.maximum_turns,
+                "maximum_tool_calls_per_agent": controlled.maximum_tool_calls,
+                "maximum_total_tool_calls": controlled.global_maximum_tool_calls,
+                "maximum_input_tokens_per_agent": controlled.maximum_input_tokens,
+                "maximum_output_tokens_per_agent": controlled.maximum_output_tokens,
+                "maximum_cost_per_agent_usd": controlled.maximum_cost_usd,
+                "maximum_total_cost_usd": controlled.global_maximum_cost_usd,
+                "per_agent_timeout_seconds": controlled.timeout_seconds,
+                "global_timeout_seconds": controlled.global_timeout_seconds,
+                "provider_retries": controlled.retry_count,
+                "source_retries": 0,
+                "maximum_gap_discovery_rounds": controlled.maximum_gap_discovery_rounds,
             },
         }
 

@@ -93,6 +93,63 @@ def test_training_dataset_draft_api_is_hint_free_and_strategy_locked(
         assert runs.json() == []
 
 
+def test_source_discovery_authorization_api_is_utf8_versioned_and_fail_closed(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+    monkeypatch.setenv("ENDOSCAN_AGENT_PROVIDER", "openai")
+    monkeypatch.setenv("ENDOSCAN_WORKER_PROVIDER", "openai")
+    monkeypatch.setenv("ENDOSCAN_AGENT_MODE", "live")
+    monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder-never-read")
+    app = create_app(repo_root)
+    with TestClient(app) as client:
+        created = post(
+            client,
+            "/admin/endpoint-builds",
+            {
+                "endpoint_name": "Récepteur exemple antagonist",
+                "endpoint_slug": "utf8-reviewed-source-authorization",
+                "biological_goal": (
+                    "Construire un jeu public reliant composés, structures, réponses "
+                    "transcriptomiques et activité de l’endpoint."
+                ),
+                "created_by": "administrateur-é",
+                "workflow_kind": "training_dataset_discovery",
+                "benchmark_mode": "blind_training_dataset_discovery",
+            },
+            "utf8-reviewed-source-create",
+        ).json()
+        rejected = post(
+            client,
+            f"/admin/endpoint-builds/{created['id']}/authorize-source-discovery",
+            {
+                "expected_version": created["version"],
+                "actor": "administrateur-é",
+                "confirmation": "authorize_reviewed_source_discovery",
+            },
+            "utf8-reviewed-source-rejected",
+        )
+        assert rejected.status_code == 422
+        assert rejected.json()["error"] == "source_discovery_not_ready"
+        assert rejected.json()["context"]["reviewed_adapters"]["ready"] is True
+
+        stale = post(
+            client,
+            f"/admin/endpoint-builds/{created['id']}/authorize-source-discovery",
+            {
+                "expected_version": created["version"] + 1,
+                "actor": "administrateur-é",
+                "confirmation": "authorize_reviewed_source_discovery",
+            },
+            "utf8-reviewed-source-stale",
+        )
+        assert stale.status_code == 409
+        assert stale.json()["error"] == "stale_workflow_version"
+        assert client.get(
+            f"/admin/endpoint-builds/{created['id']}/agent-runs", headers=ADMIN
+        ).json() == []
+
+
 def test_training_dataset_start_compiles_specification_and_persists_approval(
     repo_root, monkeypatch, tmp_path
 ) -> None:

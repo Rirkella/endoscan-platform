@@ -260,6 +260,16 @@ export const api = {
       { expected_version: version, actor: "local-admin" },
       "continue-training-dataset",
     ),
+  adminAuthorizeSourceDiscovery: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/authorize-source-discovery`,
+      {
+        expected_version: version,
+        actor: "local-admin",
+        confirmation: "authorize_reviewed_source_discovery",
+      },
+      "authorize-source-discovery",
+    ),
   adminTimeline: (id: string) =>
     adminGet<AdminTimelineEvent[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/timeline`),
   adminArtifacts: (id: string) =>

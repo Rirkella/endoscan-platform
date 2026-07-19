@@ -19,6 +19,7 @@ from .contracts import SourceToolDiagnostic
 APPROVED_SOURCE_HOSTS = frozenset(
     {
         "eutils.ncbi.nlm.nih.gov",
+        "pubchem.ncbi.nlm.nih.gov",
         "www.ncbi.nlm.nih.gov",
     }
 )
@@ -117,6 +118,9 @@ class ScientificSourceClient:
         timeout_seconds: float = 15.0,
         maximum_bytes: int = 1_500_000,
         requests_per_second: float = 2.5,
+        maximum_attempts: int = 3,
+        maximum_redirects: int = 2,
+        approved_hosts: frozenset[str] = APPROVED_SOURCE_HOSTS,
         user_agent: str = "EndoScan/phase1-live-discovery (scientific metadata only)",
         transport: httpx.BaseTransport | None = None,
         sleep: Any = time.sleep,
@@ -124,6 +128,13 @@ class ScientificSourceClient:
         self.timeout_seconds = timeout_seconds
         self.maximum_bytes = maximum_bytes
         self.minimum_interval = 1.0 / requests_per_second
+        if maximum_attempts < 1 or maximum_attempts > 3:
+            raise ValueError("maximum_attempts must be between 1 and 3")
+        if maximum_redirects < 0 or maximum_redirects > 3:
+            raise ValueError("maximum_redirects must be between 0 and 3")
+        self.maximum_attempts = maximum_attempts
+        self.maximum_redirects = maximum_redirects
+        self.approved_hosts = frozenset(item.lower().rstrip(".") for item in approved_hosts)
         self.sleep = sleep
         self._last_request = 0.0
         self._lock = threading.Lock()
@@ -137,6 +148,12 @@ class ScientificSourceClient:
     def close(self) -> None:
         self.client.close()
 
+    def __enter__(self) -> ScientificSourceClient:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
     def get(
         self,
         url: str,
@@ -145,7 +162,11 @@ class ScientificSourceClient:
         params: dict[str, str | int] | None = None,
         accepted_types: set[str] | frozenset[str] = ALLOWED_CONTENT_TYPES,
         allow_official_geo_text: bool = False,
+        maximum_bytes: int | None = None,
     ) -> ScientificResponse:
+        response_limit = self.maximum_bytes if maximum_bytes is None else maximum_bytes
+        if response_limit < 1 or response_limit > self.maximum_bytes:
+            raise SourcePolicyError("Scientific source response limit is outside policy.")
         try:
             self._validate_url(url)
         except SourcePolicyError as exc:
@@ -160,7 +181,7 @@ class ScientificSourceClient:
                 ),
             ) from exc
         last_error: SourceToolError | None = None
-        for attempt_index in range(3):
+        for attempt_index in range(self.maximum_attempts):
             attempt_number = attempt_index + 1
             self._rate_limit()
             started = time.monotonic()
@@ -266,7 +287,7 @@ class ScientificSourceClient:
                             ),
                         )
                     declared = int(response.headers.get("content-length", "0") or 0)
-                    if declared > self.maximum_bytes or response_bytes > self.maximum_bytes:
+                    if declared > response_limit or response_bytes > response_limit:
                         raise SourcePolicyError(
                             "Scientific source response exceeded the configured limit.",
                             diagnostic=self._diagnostic(
@@ -295,7 +316,7 @@ class ScientificSourceClient:
                         retrieved_at=time.time(),
                         diagnostic=diagnostic,
                     )
-            if attempt_index < 2:
+            if attempt_index + 1 < self.maximum_attempts:
                 self.sleep(min(0.25 * (2**attempt_index), 1.0))
         if last_error:
             raise last_error
@@ -352,7 +373,7 @@ class ScientificSourceClient:
     ) -> httpx.Response:
         current_url = url
         current_params = params
-        for _redirect_number in range(3):
+        for _redirect_number in range(self.maximum_redirects + 1):
             response = self.client.get(current_url, params=current_params)
             if not response.is_redirect:
                 return response
@@ -459,13 +480,12 @@ class ScientificSourceClient:
             developer_message=developer_message,
         )
 
-    @staticmethod
-    def _validate_url(url: str) -> None:
+    def _validate_url(self, url: str) -> None:
         parsed = urlparse(url)
         if parsed.scheme != "https" or not parsed.hostname:
             raise SourcePolicyError("Scientific source tools require HTTPS.")
         host = parsed.hostname.lower().rstrip(".")
-        if host not in APPROVED_SOURCE_HOSTS:
+        if host not in self.approved_hosts:
             raise SourcePolicyError("Scientific source domain is not allowlisted.")
         if parsed.username or parsed.password:
             raise SourcePolicyError("Scientific source URL contains forbidden credentials.")

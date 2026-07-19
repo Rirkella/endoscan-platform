@@ -72,6 +72,7 @@ class AgentHarness:
         output_model: type[BaseModel],
         *,
         trace_callback: Callable[[TraceEvent], None] | None = None,
+        tool_result_callback: Callable[[str, str, ToolResult], None] | None = None,
         interruption_request: Callable[[], bool] | None = None,
     ) -> tuple[str, AgentRunResult]:
         started = time.monotonic()
@@ -434,6 +435,31 @@ class AgentHarness:
                     call_id, tool_result = self._invoke_tool(
                         run_id, turn_request, requested, tool_calls
                     )
+                if (
+                    tool_result_callback is not None
+                    and tool_result.status is ToolCallStatus.COMPLETED
+                ):
+                    try:
+                        tool_result_callback(call_id, requested.tool_name, tool_result)
+                    except Exception as exc:
+                        emit(
+                            "tool_observation.persistence_failed",
+                            "failed",
+                            tool_call_id=call_id,
+                            tool_name=requested.tool_name,
+                            exception_class=type(exc).__name__,
+                        )
+                        result = self._failure(
+                            AgentRunStatus.FAILED,
+                            "tool_observation_persistence_failed",
+                            "A verified source observation could not be persisted safely.",
+                            trace,
+                            usage,
+                            turns,
+                            tool_calls,
+                            started,
+                        )
+                        break
                 source_diagnostics = []
                 if tool_result.source_diagnostic:
                     source_diagnostics.append(tool_result.source_diagnostic.model_dump(mode="json"))

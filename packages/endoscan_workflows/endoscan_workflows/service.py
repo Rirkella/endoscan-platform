@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 
 from sqlalchemy import func, select, update
@@ -33,6 +34,7 @@ from .discovery import DiscoveryOutput, discovery_request, validate_evidence_ref
 from .errors import (
     GuardNotSatisfied,
     InvalidTransition,
+    SourceDiscoveryNotReady,
     StaleWorkflowVersion,
     WorkflowConflict,
     WorkflowNotFound,
@@ -60,17 +62,20 @@ from .repository import (
     utc_text,
     versioned_payload,
 )
+from .reviewed_source_adapters import ReviewedSourceAdapterRegistry
 from .state_machine import TransitionSpec, WorkflowGraph
 from .training_dataset import (
     BLIND_TRAINING_DATASET_DISCOVERY,
     SPECIALIZED_AGENT_SEQUENCE,
     TRAINING_DATASET_CONTRACT_VERSION,
+    AssemblyGapReport,
     BlindBenchmarkInitialContext,
     DatasetSpecificationAgentOutcome,
     DatasetSpecificationCompiler,
     DatasetSpecificationReviewOutcome,
     DatasetSpecificationReviewRecord,
     DatasetSpecificationSemanticValidation,
+    DiscoveryAgentReviewOutcome,
     DiscoveryBeforeStrategyGuard,
     SourceCapabilityMatrix,
     SpecializedAgentDefinition,
@@ -81,6 +86,13 @@ from .training_dataset import (
     TrainingDatasetSpecificationApprovalPolicy,
     TrainingDatasetSpecificationDraft,
     VerifiedSourceInventory,
+    VerifiedSourceInventoryFragment,
+    VerifiedSourceObservation,
+    VerifiedSourceObservationBatch,
+    build_capability_matrix,
+    build_source_assembly_gap_report,
+    compile_verified_source_fragment,
+    compile_verified_source_inventory,
     derive_component_requirements,
     derive_endpoint_request_semantic_hints,
     materialize_training_dataset_specification,
@@ -104,6 +116,9 @@ STATE_PROGRESS = {
     WorkflowState.DISCOVERING_SUPPORTING_METADATA: 36,
     WorkflowState.VALIDATING_DISCOVERED_SOURCES: 42,
     WorkflowState.BUILDING_SOURCE_INVENTORY: 49,
+    WorkflowState.AWAITING_SOURCE_INVENTORY_REVIEW: 55,
+    WorkflowState.AWAITING_SOURCE_DISCOVERY_REVISION: 55,
+    WorkflowState.SOURCE_ACCESS_BLOCKED: 42,
     WorkflowState.PLANNING_ASSEMBLY_STRATEGIES: 58,
     WorkflowState.EVALUATING_JOINABILITY: 66,
     WorkflowState.IDENTIFYING_ASSEMBLY_GAPS: 73,
@@ -162,6 +177,7 @@ class WorkflowService:
         repo_root: Path,
         harness: AgentHarness | None = None,
         agent_configuration: AgentConfiguration | None = None,
+        reviewed_source_adapters: ReviewedSourceAdapterRegistry | None = None,
         maximum_workflows: int = 100,
     ):
         self.database = database
@@ -170,6 +186,7 @@ class WorkflowService:
         self.repo_root = Path(repo_root).resolve()
         self.harness = harness
         self.agent_configuration = agent_configuration or AgentConfiguration()
+        self.reviewed_source_adapters = reviewed_source_adapters or ReviewedSourceAdapterRegistry()
         self.maximum_workflows = maximum_workflows
 
     def create_build(self, request: EndpointBuildCreate) -> WorkflowSnapshot:
@@ -473,6 +490,26 @@ class WorkflowService:
                     if row.component_requirements_json
                     else None
                 ),
+                "source_discovery_authorization": (
+                    _load_training_document(row.source_discovery_authorization_json)
+                    if row.source_discovery_authorization_json
+                    else None
+                ),
+                "source_discovery_budget": (
+                    _load_training_document(row.source_discovery_budget_json)
+                    if row.source_discovery_budget_json
+                    else None
+                ),
+                "source_observations": (
+                    _load_training_document(row.source_observations_json).get("items", [])
+                    if row.source_observations_json
+                    else []
+                ),
+                "source_fragments": (
+                    _load_training_document(row.source_fragments_json).get("items", [])
+                    if row.source_fragments_json
+                    else []
+                ),
                 "verified_source_inventory": (
                     _load_training_document(row.source_inventory_json)
                     if row.source_inventory_json
@@ -507,12 +544,14 @@ class WorkflowService:
                     else None
                 ),
                 "planned_discovery_agents": self._planned_discovery_agents(),
+                "source_discovery_readiness": self.source_discovery_readiness(workflow_id),
                 "discovery_round": row.discovery_round,
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
             }
 
     def _planned_discovery_agents(self) -> list[dict]:
+        configuration = self.agent_configuration.controlled_source_discovery()
         adapter_labels = {
             "Activity Evidence Discovery Agent": [
                 "official activity-source metadata adapters"
@@ -533,17 +572,17 @@ class WorkflowService:
         return [
             {
                 "agent_name": item.agent_name,
-                "provider": self.agent_configuration.worker_provider,
-                "model": self.agent_configuration.worker_model,
+                "provider": configuration.worker_provider,
+                "model": configuration.worker_model,
                 "allowed_tools": item.allowed_tools,
                 "allowed_official_source_adapters": adapter_labels[item.agent_name],
-                "maximum_turns": self.agent_configuration.maximum_turns,
-                "maximum_tool_calls": self.agent_configuration.maximum_tool_calls,
-                "maximum_input_tokens": self.agent_configuration.maximum_input_tokens,
-                "maximum_output_tokens": self.agent_configuration.maximum_output_tokens,
-                "maximum_cost_usd": self.agent_configuration.maximum_cost_usd,
-                "timeout_seconds": self.agent_configuration.timeout_seconds,
-                "provider_retries": self.agent_configuration.retry_count,
+                "maximum_turns": configuration.maximum_turns,
+                "maximum_tool_calls": configuration.maximum_tool_calls,
+                "maximum_input_tokens": configuration.maximum_input_tokens,
+                "maximum_output_tokens": configuration.maximum_output_tokens,
+                "maximum_cost_usd": configuration.maximum_cost_usd,
+                "timeout_seconds": configuration.timeout_seconds,
+                "provider_retries": configuration.retry_count,
                 "output_schema_name": item.output_schema_name,
             }
             for item in SPECIALIZED_AGENT_SEQUENCE
@@ -581,6 +620,11 @@ class WorkflowService:
                 SourceCapabilityMatrix,
                 "capability_matrix_json",
                 "source_capability_matrix",
+            ),
+            "gap_report": (
+                AssemblyGapReport,
+                "gap_report_json",
+                "assembly_gap_report",
             ),
             "preparation_plan": (
                 TrainingDatasetPreparationPlan,
@@ -937,6 +981,711 @@ class WorkflowService:
         with self.database.session() as session:
             return self._snapshot(session, require_build(session, workflow_id))
 
+    def source_discovery_readiness(self, workflow_id: str) -> dict:
+        configuration = self.agent_configuration.controlled_source_discovery()
+        adapter_readiness = self.reviewed_source_adapters.readiness()
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            approval = session.scalar(
+                select(ApprovalRow).where(
+                    ApprovalRow.workflow_id == workflow_id,
+                    ApprovalRow.approval_type == ApprovalType.DATASET_SPECIFICATION.value,
+                    ApprovalRow.status.in_(
+                        [
+                            ApprovalStatus.APPROVED.value,
+                            ApprovalStatus.ALTERNATIVE_SELECTED.value,
+                        ]
+                    ),
+                )
+            )
+            specification_ready = bool(row and row.specification_json and approval)
+            requirements_ready = bool(row and row.component_requirements_json)
+            stage_ready = build.current_stage == WorkflowState.DERIVING_COMPONENT_REQUIREMENTS.value
+        provider_ready = (
+            configuration.run_mode.value == "live"
+            and configuration.worker_provider == "openai"
+            and configuration.api_key_present
+            and configuration.retry_count == 0
+        )
+        budget = configuration.public_status()["controlled_source_discovery_budget"]
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "ready": bool(
+                provider_ready
+                and adapter_readiness["ready"]
+                and specification_ready
+                and requirements_ready
+                and stage_ready
+            ),
+            "provider_ready": provider_ready,
+            "provider": configuration.worker_provider,
+            "mode": configuration.run_mode.value,
+            "api_key_present": configuration.api_key_present,
+            "provider_retries": configuration.retry_count,
+            "reviewed_adapters": adapter_readiness,
+            "reviewed_adapter_inventory": self.reviewed_source_adapters.public_inventory(),
+            "specification_approved": specification_ready,
+            "component_requirements_present": requirements_ready,
+            "stage_ready": stage_ready,
+            "budget": budget,
+        }
+
+    def authorize_source_discovery(
+        self,
+        workflow_id: str,
+        *,
+        expected_version: int,
+        actor: str,
+        idempotency_key: str,
+        confirmed: bool,
+    ) -> WorkflowSnapshot:
+        """Record an explicit, fail-closed source-discovery authorization."""
+
+        if not confirmed:
+            raise SourceDiscoveryNotReady(
+                "Explicit source-discovery confirmation is required."
+            )
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            existing = session.scalar(
+                select(WorkflowEventRow).where(
+                    WorkflowEventRow.workflow_id == workflow_id,
+                    WorkflowEventRow.idempotency_key == f"{idempotency_key}:authorized",
+                )
+            )
+            if existing is not None:
+                return self._snapshot(session, build)
+            prior_authorization = session.scalar(
+                select(WorkflowEventRow).where(
+                    WorkflowEventRow.workflow_id == workflow_id,
+                    WorkflowEventRow.event_type == "source_discovery.authorized",
+                )
+            )
+            if prior_authorization is not None:
+                raise WorkflowConflict(
+                    "Source discovery was already authorized; reuse the original idempotency key."
+                )
+            if build.version != expected_version:
+                raise StaleWorkflowVersion(
+                    "Workflow version is stale.", detail={"current_version": build.version}
+                )
+        readiness = self.source_discovery_readiness(workflow_id)
+        if not readiness["ready"]:
+            raise SourceDiscoveryNotReady(
+                "Source discovery is not ready.",
+                detail={
+                    key: value
+                    for key, value in readiness.items()
+                    if key not in {"schema_version", "budget"}
+                },
+            )
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            existing = session.scalar(
+                select(WorkflowEventRow).where(
+                    WorkflowEventRow.workflow_id == workflow_id,
+                    WorkflowEventRow.idempotency_key == f"{idempotency_key}:authorized",
+                )
+            )
+            if existing is not None:
+                return self._snapshot(session, build)
+            if build.version != expected_version:
+                raise StaleWorkflowVersion(
+                    "Workflow version is stale.", detail={"current_version": build.version}
+                )
+            if build.current_stage != WorkflowState.DERIVING_COMPONENT_REQUIREMENTS.value:
+                raise InvalidTransition(
+                    "Source discovery can be authorized only after component requirements."
+                )
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None or not row.component_requirements_json or not row.specification_json:
+                raise GuardNotSatisfied("Approved specification and requirements are required.")
+            requirement_artifact = session.scalar(
+                select(ArtifactRow)
+                .where(
+                    ArtifactRow.workflow_id == workflow_id,
+                    ArtifactRow.artifact_type == "component_requirements",
+                )
+                .order_by(ArtifactRow.created_at.desc())
+            )
+            if requirement_artifact is None:
+                raise GuardNotSatisfied("Persisted component requirements artifact is missing.")
+            now = utc_text()
+            authorization = {
+                "authorized": True,
+                "authorized_by": actor,
+                "authorized_at": now,
+                "idempotency_key": idempotency_key,
+                "adapter_registry": readiness["reviewed_adapters"],
+            }
+            row.source_discovery_authorization_json = canonical_json(
+                versioned_payload(document=authorization)
+            )
+            row.source_discovery_budget_json = canonical_json(
+                versioned_payload(document=readiness["budget"])
+            )
+            row.updated_at = now
+            append_event(
+                session,
+                build,
+                event_type="source_discovery.authorized",
+                actor_type=ActorType.HUMAN.value,
+                actor_id=actor,
+                idempotency_key=f"{idempotency_key}:authorized",
+                payload={
+                    "adapter_registry_fingerprint": hashlib.sha256(
+                        canonical_json(readiness["reviewed_adapters"]).encode()
+                    ).hexdigest(),
+                    "budget": readiness["budget"],
+                },
+                from_state=build.current_stage,
+                to_state=build.current_stage,
+            )
+            return self._apply_transition(
+                session,
+                build,
+                TransitionRequest(
+                    target_state=WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE,
+                    expected_version=expected_version,
+                    idempotency_key=f"{idempotency_key}:transition",
+                    initiator=ActorType.ORCHESTRATOR,
+                    initiator_id=actor,
+                    reason="Human explicitly authorized reviewed source discovery.",
+                    artifact_hashes=[requirement_artifact.sha256],
+                ),
+            )
+
+    def _persist_tool_observations(
+        self,
+        workflow_id: str,
+        *,
+        step_id: str,
+        agent_name: str,
+        tool_call_id: str,
+        tool_name: str,
+        batch: VerifiedSourceObservationBatch,
+    ) -> None:
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None:
+                raise WorkflowNotFound("Training-dataset workflow state was not found.")
+            current = (
+                _load_training_document(row.source_observations_json).get("items", [])
+                if row.source_observations_json
+                else []
+            )
+            known = {
+                item["observation"]["observation_id"]
+                for item in current
+                if isinstance(item, dict) and isinstance(item.get("observation"), dict)
+            }
+            for observation in batch.observations:
+                if observation.observation_id in known:
+                    continue
+                payload = observation.model_dump(mode="json")
+                artifact = self.artifact_store._put_bytes(
+                    session,
+                    workflow_id=workflow_id,
+                    step_id=step_id,
+                    content=canonical_json(payload).encode(),
+                    mime_type="application/json",
+                    artifact_type="verified_source_observation",
+                    logical_name=f"verified-source-observation-{observation.observation_id}.json",
+                    producer=f"{batch.adapter_id}@{batch.adapter_version}",
+                    idempotency_key=f"observation:{observation.observation_id}",
+                )
+                current.append(
+                    {
+                        "agent_name": agent_name,
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "observation_artifact_id": artifact.id,
+                        "observation_artifact_hash": artifact.sha256,
+                        "observation": payload,
+                    }
+                )
+                known.add(observation.observation_id)
+            row.source_observations_json = canonical_json(
+                versioned_payload(document={"items": current})
+            )
+            row.updated_at = utc_text()
+            append_event(
+                session,
+                build,
+                event_type="source_observations.persisted",
+                actor_type=ActorType.TOOL.value,
+                actor_id=tool_name,
+                idempotency_key=f"observations:{tool_call_id}",
+                payload={
+                    "agent_name": agent_name,
+                    "tool_call_id": tool_call_id,
+                    "observation_ids": [item.observation_id for item in batch.observations],
+                    "source_request_artifact_ids": batch.source_request_artifact_ids,
+                },
+                from_state=build.current_stage,
+                to_state=build.current_stage,
+            )
+
+    def _agent_observations(
+        self, workflow_id: str, agent_name: str
+    ) -> list[VerifiedSourceObservation]:
+        with self.database.session() as session:
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None or not row.source_observations_json:
+                return []
+            items = _load_training_document(row.source_observations_json).get("items", [])
+        return [
+            VerifiedSourceObservation.model_validate(item["observation"])
+            for item in items
+            if item.get("agent_name") == agent_name and isinstance(item.get("observation"), dict)
+        ]
+
+    def _persist_source_fragment(
+        self,
+        workflow_id: str,
+        *,
+        definition: SpecializedAgentDefinition,
+        step_id: str,
+        fragment: VerifiedSourceInventoryFragment,
+    ) -> str:
+        payload = fragment.model_dump(mode="json")
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None:
+                raise WorkflowNotFound("Training-dataset workflow state was not found.")
+            fragments = (
+                _load_training_document(row.source_fragments_json).get("items", [])
+                if row.source_fragments_json
+                else []
+            )
+            existing = next(
+                (item for item in fragments if item.get("agent_name") == definition.agent_name),
+                None,
+            )
+            if existing is not None:
+                return str(existing["artifact_hash"])
+            artifact = self.artifact_store._put_bytes(
+                session,
+                workflow_id=workflow_id,
+                step_id=step_id,
+                content=canonical_json(payload).encode(),
+                mime_type="application/json",
+                artifact_type=definition.produces_artifact,
+                logical_name=f"{definition.produces_artifact}-v1.json",
+                producer="deterministic-source-fragment-compiler",
+                idempotency_key=f"fragment:{fragment.fragment_id}",
+            )
+            fragments.append(
+                {
+                    "agent_name": definition.agent_name,
+                    "artifact_id": artifact.id,
+                    "artifact_hash": artifact.sha256,
+                    "fragment": payload,
+                }
+            )
+            row.source_fragments_json = canonical_json(
+                versioned_payload(document={"items": fragments})
+            )
+            row.updated_at = utc_text()
+            append_event(
+                session,
+                build,
+                event_type="source_fragment.compiled",
+                actor_type=ActorType.ORCHESTRATOR.value,
+                actor_id="deterministic-source-fragment-compiler",
+                idempotency_key=f"fragment:{fragment.fragment_id}:event",
+                payload={
+                    "agent_name": definition.agent_name,
+                    "fragment_id": fragment.fragment_id,
+                    "artifact_id": artifact.id,
+                    "artifact_hash": artifact.sha256,
+                    "agent_review_status": fragment.agent_review_status.value,
+                    "agent_terminal_outcome": fragment.agent_terminal_outcome,
+                },
+                from_state=build.current_stage,
+                to_state=build.current_stage,
+            )
+            return artifact.sha256
+
+    def _assert_source_discovery_budget(self, workflow_id: str, agent_name: str) -> None:
+        configuration = self.agent_configuration.controlled_source_discovery()
+        names = {
+            item.agent_name
+            for item in SPECIALIZED_AGENT_SEQUENCE
+            if item.agent_name
+            in {
+                "Activity Evidence Discovery Agent",
+                "Transcriptomic Evidence Discovery Agent",
+                "Chemical Identity and Structure Source Discovery Agent",
+                "Supporting Metadata Discovery Agent",
+            }
+        }
+        with self.database.session() as session:
+            runs = session.scalars(
+                select(AgentRunRow).where(
+                    AgentRunRow.workflow_id == workflow_id,
+                    AgentRunRow.agent_name.in_(names),
+                )
+            ).all()
+            duplicate_names = [
+                name for name in names if sum(item.agent_name == name for item in runs) > 1
+            ]
+            if duplicate_names:
+                raise WorkflowConflict("A discovery role has more than one persisted agent run.")
+            totals = {"input": 0, "output": 0, "cost_cents": 0.0, "tools": 0}
+            for run in runs:
+                usage = load_versioned_json(run.usage_json)
+                totals["input"] += int(usage.get("input_tokens", 0) or 0)
+                totals["output"] += int(usage.get("output_tokens", 0) or 0)
+                totals["cost_cents"] += float(usage.get("cost_cents", 0.0) or 0.0)
+            totals["tools"] = int(
+                session.scalar(
+                    select(func.count(ToolCallRow.id)).where(
+                        ToolCallRow.workflow_id == workflow_id,
+                        ToolCallRow.agent_run_id.in_([item.id for item in runs] or ["none"]),
+                    )
+                )
+                or 0
+            )
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            authorization = (
+                _load_training_document(row.source_discovery_authorization_json)
+                if row and row.source_discovery_authorization_json
+                else None
+            )
+        if authorization is None:
+            raise GuardNotSatisfied("Source discovery has not been explicitly authorized.")
+        if any(run.agent_name == agent_name for run in runs):
+            # The harness rehydrates the deterministic persisted terminal result. This path
+            # consumes no provider, source-request, token, tool-call, or cost budget.
+            return
+        if len(runs) >= 4:
+            raise GuardNotSatisfied("The four-run source-discovery budget is exhausted.")
+        if time.time() - parse_utc(authorization["authorized_at"]).timestamp() >= (
+            configuration.global_timeout_seconds
+        ):
+            raise GuardNotSatisfied("The global source-discovery timeout is exhausted.")
+        if totals["input"] + configuration.maximum_input_tokens > (
+            configuration.global_maximum_input_tokens
+        ):
+            raise GuardNotSatisfied("Remaining global input-token budget is insufficient.")
+        if totals["output"] + configuration.maximum_output_tokens > (
+            configuration.global_maximum_output_tokens
+        ):
+            raise GuardNotSatisfied("Remaining global output-token budget is insufficient.")
+        if totals["tools"] + configuration.maximum_tool_calls > (
+            configuration.global_maximum_tool_calls
+        ):
+            raise GuardNotSatisfied("Remaining global tool-call budget is insufficient.")
+        if totals["cost_cents"] + configuration.maximum_cost_usd * 100 > (
+            configuration.global_maximum_cost_usd * 100 + 1e-9
+        ):
+            raise GuardNotSatisfied("Remaining global cost budget is insufficient.")
+
+    def _run_source_discovery_agent(
+        self,
+        workflow_id: str,
+        *,
+        definition: SpecializedAgentDefinition,
+        stage: WorkflowState,
+        next_stage: WorkflowState,
+    ) -> WorkflowSnapshot:
+        if self.harness is None:
+            raise WorkflowConflict("No agent harness is configured for source discovery.")
+        self._assert_source_discovery_budget(workflow_id, definition.agent_name)
+        snapshot = self.get_build(workflow_id)
+        if snapshot.current_stage is not stage:
+            raise InvalidTransition(f"{definition.agent_name} is not the active discovery stage.")
+        with self.database.session() as session:
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None or not row.specification_json or not row.component_requirements_json:
+                raise GuardNotSatisfied("Approved specification and requirements are required.")
+            initial_context = BlindBenchmarkInitialContext.model_validate(
+                _load_training_document(row.initial_context_json)
+            )
+            specification = TrainingDatasetSpecification.model_validate(
+                _load_training_document(row.specification_json)
+            )
+            requirements = TrainingDatasetComponentRequirements.model_validate(
+                _load_training_document(row.component_requirements_json)
+            )
+            prior_fragments = (
+                _load_training_document(row.source_fragments_json).get("items", [])
+                if row.source_fragments_json
+                else []
+            )
+        validated_artifacts: dict[str, object] = {
+            "training_dataset_specification": specification.model_dump(mode="json"),
+            "component_requirements": requirements.model_dump(mode="json"),
+            "approved_scientific_policies": initial_context.approved_scientific_policies,
+            "reviewed_adapter_capabilities": self.reviewed_source_adapters.public_inventory(),
+        }
+        if definition.agent_name == "Chemical Identity and Structure Source Discovery Agent":
+            validated_artifacts = {
+                "component_requirements": requirements.model_dump(mode="json"),
+                "verified_identifier_field_summaries": [
+                    {
+                        "source_id": record.get("source_id"),
+                        "identifier_fields": record.get("identifier_fields", []),
+                    }
+                    for item in prior_fragments
+                    for record in item.get("fragment", {}).get("candidate_records", [])
+                ],
+                "reviewed_adapter_capabilities": self.reviewed_source_adapters.public_inventory(),
+            }
+        elif definition.agent_name == "Supporting Metadata Discovery Agent":
+            validated_artifacts = {
+                "component_requirements": requirements.model_dump(mode="json"),
+                "verified_source_identifiers": sorted(
+                    {
+                        str(record.get("stable_accession"))
+                        for item in prior_fragments
+                        for record in item.get("fragment", {}).get("candidate_records", [])
+                        if record.get("stable_accession")
+                    }
+                ),
+                "reviewed_adapter_capabilities": self.reviewed_source_adapters.public_inventory(),
+            }
+        step_key = f"source-discovery:{stage.value}:step"
+        step = self.create_step(
+            workflow_id,
+            stage,
+            idempotency_key=step_key,
+            input_payload={
+                "agent_name": definition.agent_name,
+                "provider": self.agent_configuration.worker_provider,
+                "model": self.agent_configuration.worker_model,
+                "reviewed_adapter_policy": self.reviewed_source_adapters.readiness(),
+            },
+        )
+        configuration = self.agent_configuration.controlled_source_discovery()
+        request = specialized_agent_request(
+            definition=definition,
+            workflow_id=workflow_id,
+            step_id=step.id,
+            workflow_stage=stage,
+            initial_context=initial_context,
+            validated_artifacts=validated_artifacts,
+            configuration=configuration,
+        )
+
+        def persist(call_id: str, tool_name: str, tool_result) -> None:
+            if not isinstance(tool_result.output, dict):
+                return
+            batch = VerifiedSourceObservationBatch.model_validate(tool_result.output)
+            self._persist_tool_observations(
+                workflow_id,
+                step_id=step.id,
+                agent_name=definition.agent_name,
+                tool_call_id=call_id,
+                tool_name=tool_name,
+                batch=batch,
+            )
+
+        run_id, result = self.harness.run(
+            request,
+            DiscoveryAgentReviewOutcome,
+            tool_result_callback=persist,
+        )
+        trace_artifact = self._persist_specialized_agent_trace(
+            workflow_id=workflow_id,
+            step=step,
+            run_id=run_id,
+            request=request,
+            result=result,
+            idempotency_key=f"source-discovery:{stage.value}:trace",
+        )
+        review = (
+            DiscoveryAgentReviewOutcome.model_validate(result.output)
+            if result.status is AgentRunStatus.COMPLETED and result.output is not None
+            else None
+        )
+        observations = self._agent_observations(workflow_id, definition.agent_name)
+        roles = list(
+            dict.fromkeys(
+                role
+                for observation in observations
+                for role in observation.source_roles
+            )
+        ) or [
+            role
+            for role in self.reviewed_source_adapters.MANDATORY_ROLES
+            if role
+            in {
+                requirement.role
+                for requirement in requirements.requirements
+            }
+        ]
+        fragment = compile_verified_source_fragment(
+            fragment_id=deterministic_id("fragment", workflow_id, definition.agent_name),
+            component_roles=roles or [requirements.requirements[0].role],
+            observations=observations,
+            review=review,
+        )
+        fragment_hash = self._persist_source_fragment(
+            workflow_id,
+            definition=definition,
+            step_id=step.id,
+            fragment=fragment,
+        )
+        self.complete_step(
+            step.id,
+            output_payload={
+                "agent_run_id": run_id,
+                "agent_run_status": result.status.value,
+                "fragment_id": fragment.fragment_id,
+                "fragment_hash": fragment_hash,
+                "trace_artifact_hash": trace_artifact.sha256,
+                "observation_count": len(observations),
+                "agent_review_status": fragment.agent_review_status.value,
+                "agent_terminal_outcome": fragment.agent_terminal_outcome,
+            },
+            idempotency_key=f"source-discovery:{stage.value}:step-complete",
+        )
+        return self.transition(
+            workflow_id,
+            TransitionRequest(
+                target_state=next_stage,
+                expected_version=snapshot.version,
+                idempotency_key=f"source-discovery:{stage.value}:transition",
+                initiator=ActorType.ORCHESTRATOR,
+                initiator_id="source-discovery-orchestrator",
+                reason=f"{definition.agent_name} completed or terminated without retry.",
+                artifact_hashes=[fragment_hash],
+            ),
+        )
+
+    def _finalize_source_inventory(self, workflow_id: str) -> WorkflowSnapshot:
+        snapshot = self.get_build(workflow_id)
+        if snapshot.current_stage is not WorkflowState.VALIDATING_DISCOVERED_SOURCES:
+            raise InvalidTransition("Source validation is not the active stage.")
+        with self.database.session() as session:
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None or not row.source_fragments_json:
+                raise GuardNotSatisfied("No source fragments are available for validation.")
+            specification = TrainingDatasetSpecification.model_validate(
+                _load_training_document(row.specification_json)
+            )
+            requirements = TrainingDatasetComponentRequirements.model_validate(
+                _load_training_document(row.component_requirements_json)
+            )
+            fragment_items = _load_training_document(row.source_fragments_json).get("items", [])
+            fragments = [
+                VerifiedSourceInventoryFragment.model_validate(item["fragment"])
+                for item in fragment_items
+            ]
+            observation_ids = sorted(
+                {
+                    observation_id
+                    for fragment in fragments
+                    for observation_id in fragment.observation_ids
+                }
+            )
+        validated = self.artifact_store.put_json(
+            workflow_id=workflow_id,
+            value={"observation_ids": observation_ids, "validation": "typed_adapter_contracts"},
+            artifact_type="validated_source_records",
+            logical_name="validated-source-records-v1.json",
+            producer="deterministic-source-validator",
+            idempotency_key="source-discovery:validated-records",
+        )
+        snapshot = self.transition(
+            workflow_id,
+            TransitionRequest(
+                target_state=WorkflowState.BUILDING_SOURCE_INVENTORY,
+                expected_version=snapshot.version,
+                idempotency_key="source-discovery:validation-transition",
+                initiator=ActorType.ORCHESTRATOR,
+                initiator_id="deterministic-source-validator",
+                reason="Typed adapter observations were validated deterministically.",
+                artifact_hashes=[validated.sha256],
+            ),
+        )
+        inventory = compile_verified_source_inventory(
+            inventory_id=deterministic_id("inventory", workflow_id, specification.specification_id),
+            specification_id=specification.specification_id,
+            requirements=requirements,
+            fragments=fragments,
+        )
+        matrix = build_capability_matrix(inventory, requirements)
+        gap_report = build_source_assembly_gap_report(
+            report_id=deterministic_id("gap", workflow_id, inventory.inventory_id),
+            inventory=inventory,
+            matrix=matrix,
+        )
+        documents = [
+            ("source_inventory", inventory.model_dump(mode="json")),
+            ("capability_matrix", matrix.model_dump(mode="json")),
+            ("gap_report", gap_report.model_dump(mode="json")),
+        ]
+        hashes = []
+        for name, value in documents:
+            stored = self.persist_training_dataset_document(
+                workflow_id,
+                document_name=name,
+                value=value,
+                actor="deterministic-source-inventory-compiler",
+                idempotency_key=f"source-discovery:{name}",
+            )
+            hashes.append(stored["sha256"])
+        return self.transition(
+            workflow_id,
+            TransitionRequest(
+                target_state=WorkflowState.AWAITING_SOURCE_INVENTORY_REVIEW,
+                expected_version=snapshot.version,
+                idempotency_key="source-discovery:review-transition",
+                initiator=ActorType.ORCHESTRATOR,
+                initiator_id="deterministic-source-inventory-compiler",
+                reason="Verified source inventory is ready for human review.",
+                artifact_hashes=hashes,
+            ),
+        )
+
+    def run_authorized_source_discovery(self, workflow_id: str) -> WorkflowSnapshot:
+        """Resume the four-role workflow without repeating completed provider or source calls."""
+
+        definitions = {
+            item.agent_name: item
+            for item in SPECIALIZED_AGENT_SEQUENCE
+        }
+        stages = {
+            WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE: (
+                definitions["Activity Evidence Discovery Agent"],
+                WorkflowState.DISCOVERING_TRANSCRIPTOMIC_EVIDENCE,
+            ),
+            WorkflowState.DISCOVERING_TRANSCRIPTOMIC_EVIDENCE: (
+                definitions["Transcriptomic Evidence Discovery Agent"],
+                WorkflowState.DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES,
+            ),
+            WorkflowState.DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES: (
+                definitions["Chemical Identity and Structure Source Discovery Agent"],
+                WorkflowState.DISCOVERING_SUPPORTING_METADATA,
+            ),
+            WorkflowState.DISCOVERING_SUPPORTING_METADATA: (
+                definitions["Supporting Metadata Discovery Agent"],
+                WorkflowState.VALIDATING_DISCOVERED_SOURCES,
+            ),
+        }
+        while True:
+            snapshot = self.get_build(workflow_id)
+            if snapshot.current_stage in stages:
+                definition, next_stage = stages[snapshot.current_stage]
+                self._run_source_discovery_agent(
+                    workflow_id,
+                    definition=definition,
+                    stage=snapshot.current_stage,
+                    next_stage=next_stage,
+                )
+                continue
+            if snapshot.current_stage is WorkflowState.VALIDATING_DISCOVERED_SOURCES:
+                return self._finalize_source_inventory(workflow_id)
+            if snapshot.current_stage is WorkflowState.AWAITING_SOURCE_INVENTORY_REVIEW:
+                return snapshot
+            raise InvalidTransition("The workflow is not in an authorized source-discovery stage.")
+
     def continue_training_dataset_workflow(
         self,
         workflow_id: str,
@@ -987,28 +1736,9 @@ class WorkflowService:
                     workflow is not None and workflow.component_requirements_json
                 )
             if requirements_ready:
-                artifacts = self.artifact_store.list_artifacts(workflow_id)
-                requirement = next(
-                    (
-                        item
-                        for item in reversed(artifacts)
-                        if item.artifact_type == "component_requirements"
-                    ),
-                    None,
-                )
-                if requirement is None:
-                    raise GuardNotSatisfied("Persisted component requirements are missing.")
-                return self.transition(
-                    workflow_id,
-                    TransitionRequest(
-                        target_state=WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE,
-                        expected_version=snapshot.version,
-                        idempotency_key=f"{idempotency_key}:authorize-source-discovery",
-                        initiator=ActorType.ORCHESTRATOR,
-                        initiator_id=actor,
-                        reason="Human explicitly authorized source discovery.",
-                        artifact_hashes=[requirement.sha256],
-                    ),
+                raise GuardNotSatisfied(
+                    "Source discovery requires the dedicated reviewed-adapter authorization "
+                    "action. Continuing the workflow cannot create authorization implicitly."
                 )
             self.derive_training_dataset_requirements(
                 workflow_id,
@@ -1021,11 +1751,9 @@ class WorkflowService:
             WorkflowState.DISCOVERING_TRANSCRIPTOMIC_EVIDENCE,
             WorkflowState.DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES,
             WorkflowState.DISCOVERING_SUPPORTING_METADATA,
+            WorkflowState.VALIDATING_DISCOVERED_SOURCES,
         }:
-            raise GuardNotSatisfied(
-                "No reviewed production source adapters are configured for this discovery "
-                "stage; provider execution is blocked before a paid turn."
-            )
+            return self.run_authorized_source_discovery(workflow_id)
         raise InvalidTransition(
             "The current training-dataset stage has no explicit continuation activity."
         )
@@ -3374,8 +4102,12 @@ class WorkflowService:
         if state is WorkflowState.DRAFT:
             return WorkflowStatus.DRAFT
         if state in {
+            WorkflowState.AWAITING_DATASET_SPECIFICATION_REVIEW,
             WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL,
             WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION,
+            WorkflowState.AWAITING_SOURCE_INVENTORY_REVIEW,
+            WorkflowState.AWAITING_SOURCE_DISCOVERY_REVISION,
+            WorkflowState.SOURCE_ACCESS_BLOCKED,
             WorkflowState.AWAITING_DATASET_APPROVAL,
             WorkflowState.AWAITING_SEARCH_REVIEW,
             WorkflowState.AWAITING_LABEL_APPROVAL,

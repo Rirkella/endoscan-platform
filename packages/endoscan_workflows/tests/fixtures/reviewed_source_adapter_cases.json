@@ -1,0 +1,38 @@
+{
+  "activity": [
+    {"case": "valid antagonist assay", "stable_identifier": "AID:1001", "target": "example receptor", "modality": "antagonism", "measurement_fields": ["activity outcome", "potency"], "access_status": "verified_available", "count_status": "exact", "exact_counts": {"tested": 12}},
+    {"case": "binding-only assay", "stable_identifier": "AID:1002", "modality": "binding", "access_status": "metadata_only", "count_status": "metadata_only"},
+    {"case": "agonist assay", "stable_identifier": "AID:1003", "modality": "agonism", "access_status": "requires_download", "count_status": "requires_download"},
+    {"case": "inaccessible result table", "stable_identifier": "AID:1004", "access_status": "unavailable", "count_status": "not_computed", "limitations": ["Result table is not publicly accessible."]},
+    {"case": "continuous activity", "stable_identifier": "AID:1005", "measurement_fields": ["continuous activity"], "access_status": "verified_available", "count_status": "partial"},
+    {"case": "counter-screen link", "stable_identifier": "AID:1006", "source_roles": ["counter_screen"], "access_status": "metadata_only", "count_status": "metadata_only"},
+    {"case": "fabricated assay ID", "stable_identifier": "unresolved", "validation_status": "unresolved", "access_status": "unavailable", "count_status": "not_computed"},
+    {"case": "malformed response", "malformed": true}
+  ],
+  "transcriptomics": [
+    {"case": "broad chemical perturbation study", "stable_identifier": "GSE10001", "perturbation_type": "chemical", "access_status": "requires_download", "count_status": "metadata_only"},
+    {"case": "chemical-exposure GEO study", "stable_identifier": "GSE10002", "perturbation_type": "chemical exposure", "experimental_context_fields": ["dose", "exposure time", "control"], "access_status": "requires_download", "count_status": "partial"},
+    {"case": "disease cohort", "stable_identifier": "GSE10003", "perturbation_type": "disease cohort", "access_status": "metadata_only", "count_status": "metadata_only", "limitations": ["Not a chemical perturbation study."]},
+    {"case": "genetic perturbation study", "stable_identifier": "GSE10004", "perturbation_type": "genetic", "access_status": "metadata_only", "count_status": "metadata_only", "limitations": ["Genetic perturbation is not a compound substitute."]},
+    {"case": "processed matrix available", "stable_identifier": "GSE10005", "downloadable_artifacts": ["processed matrix"], "access_status": "requires_download", "count_status": "requires_download"},
+    {"case": "raw-only study", "stable_identifier": "GSE10006", "downloadable_artifacts": ["raw matrix"], "access_status": "requires_download", "count_status": "requires_download"},
+    {"case": "missing dose/time", "stable_identifier": "GSE10007", "experimental_context_fields": ["control"], "access_status": "metadata_only", "count_status": "metadata_only", "unresolved_fields": ["dose", "exposure time"]},
+    {"case": "missing compound identifiers", "stable_identifier": "GSE10008", "identifier_fields": [], "access_status": "metadata_only", "count_status": "metadata_only", "unresolved_fields": ["compound identifier"]}
+  ],
+  "identity": [
+    {"case": "CID InChIKey SMILES available", "stable_identifier": "CID:2001", "identifier_fields": ["PubChem CID", "InChIKey"], "structure_fields": ["canonical SMILES", "isomeric SMILES"], "access_status": "verified_available", "count_status": "partial"},
+    {"case": "source-specific ID bridge", "stable_identifier": "CID:2002", "identifier_fields": ["PubChem CID", "source-specific ID"], "access_status": "verified_available", "count_status": "partial"},
+    {"case": "ambiguous synonym", "stable_identifier": "CID:2003", "access_status": "metadata_only", "count_status": "metadata_only", "limitations": ["Synonym is ambiguous."]},
+    {"case": "mixture", "stable_identifier": "CID:2004", "access_status": "metadata_only", "count_status": "metadata_only", "limitations": ["Record represents a mixture."]},
+    {"case": "salt", "stable_identifier": "CID:2005", "structure_fields": ["canonical SMILES"], "access_status": "partially_available", "count_status": "partial", "limitations": ["Salt handling requires later policy."]},
+    {"case": "missing structure", "stable_identifier": "CID:2006", "identifier_fields": ["PubChem CID"], "structure_fields": [], "access_status": "metadata_only", "count_status": "metadata_only"},
+    {"case": "malformed response", "malformed": true}
+  ],
+  "supporting": [
+    {"case": "public download metadata", "stable_identifier": "AID:3001", "downloadable_artifacts": ["public result table"], "access_status": "requires_download", "count_status": "metadata_only"},
+    {"case": "linked publication", "stable_identifier": "PMID:3002", "access_status": "metadata_only", "count_status": "metadata_only"},
+    {"case": "missing licence", "stable_identifier": "GSE3003", "access_status": "metadata_only", "licence_access_status": "unresolved", "count_status": "metadata_only"},
+    {"case": "inaccessible supplementary file", "stable_identifier": "GSE3004", "access_status": "unavailable", "count_status": "not_computed", "limitations": ["Supplementary file is inaccessible."]},
+    {"case": "malformed metadata", "malformed": true}
+  ]
+}

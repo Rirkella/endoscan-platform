@@ -26,6 +26,9 @@ from endoscan_workflows.harness import AgentHarness
 from endoscan_workflows.openai_provider import OpenAIAgentProvider
 from endoscan_workflows.preflight import ProviderAccessPreflight
 from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
+from endoscan_workflows.reviewed_source_adapters import (
+    production_reviewed_source_registry,
+)
 from endoscan_workflows.service import WorkflowService
 from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_probe import GeoValidationProbe
@@ -176,9 +179,11 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         workflow_database, ttl_seconds=agent_configuration.source_cache_ttl_seconds
     )
     source_client = ScientificSourceClient(
-        timeout_seconds=agent_configuration.source_request_timeout_seconds,
+        timeout_seconds=min(agent_configuration.source_request_timeout_seconds, 15.0),
         maximum_bytes=agent_configuration.source_response_maximum_bytes,
-        requests_per_second=agent_configuration.source_requests_per_second,
+        requests_per_second=min(agent_configuration.source_requests_per_second, 2.0),
+        maximum_attempts=1,
+        maximum_redirects=2,
     )
     discovery_tools = DiscoveryToolService(
         source_cache,
@@ -202,7 +207,12 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
             else None
         ),
     )
-    tool_registry = phase1_tool_registry(root, discovery_tools)
+    reviewed_source_adapters = production_reviewed_source_registry(
+        client=source_client,
+        cache=source_cache,
+        artifacts=artifact_store,
+    )
+    tool_registry = phase1_tool_registry(root, discovery_tools, reviewed_source_adapters)
     provider_registry = ProviderRegistry()
     provider_registry.register("fake", FakeAgentProvider)
     provider_registry.register(
@@ -216,6 +226,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         repo_root=root,
         harness=harness,
         agent_configuration=agent_configuration,
+        reviewed_source_adapters=reviewed_source_adapters,
     )
     recovered = workflow_service.recover_interrupted()
     app.state.workflow_database = workflow_database
@@ -226,6 +237,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.state.adapter_boundary_probe = AdapterBoundaryProbe(agent_configuration, tool_registry)
     app.state.source_cache = source_cache
     app.state.source_client = source_client
+    app.state.reviewed_source_adapters = reviewed_source_adapters
     app.state.geo_validation_probe = geo_validation_probe
     app.state.workflow_service = workflow_service
     app.state.admin_development_mode = (
@@ -234,6 +246,8 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.state.admin_mutation_limiter = AdminMutationLimiter()
     app.state.agent_capabilities = {
         **agent_configuration.public_status(),
+        "reviewed_source_adapters": reviewed_source_adapters.readiness(),
+        "reviewed_source_adapter_inventory": reviewed_source_adapters.public_inventory(),
         "available_modes": ["live", "cached", "replay"],
         "label": f"{agent_configuration.run_mode.value.title()} agent mode",
         "live_llm_calls": (

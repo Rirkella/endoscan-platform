@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import inspect, select, text, update
 from sqlalchemy.exc import DatabaseError
 
+from endoscan_workflows.config import AgentConfiguration, AgentRunMode
 from endoscan_workflows.contracts import (
     ActorType,
     ApprovalDecision,
@@ -19,6 +22,7 @@ from endoscan_workflows.contracts import (
     WorkflowState,
 )
 from endoscan_workflows.database import WorkflowDatabase
+from endoscan_workflows.discovery_tools import DiscoveryToolService
 from endoscan_workflows.errors import (
     ArtifactIntegrityError,
     ArtifactTooLarge,
@@ -28,9 +32,23 @@ from endoscan_workflows.errors import (
     WorkflowConflict,
     WorkflowNotFound,
 )
+from endoscan_workflows.harness import AgentHarness
 from endoscan_workflows.models import EndpointBuildRow, WorkflowErrorRow, WorkflowEventRow
-from endoscan_workflows.providers import ProviderFailure, ProviderTimeout
+from endoscan_workflows.providers import (
+    ProviderFailure,
+    ProviderRegistry,
+    ProviderTimeout,
+)
 from endoscan_workflows.repository import load_versioned_json
+from endoscan_workflows.reviewed_source_adapters import (
+    REVIEWED_ADAPTER_DEFINITIONS,
+    ReviewedSourceAdapter,
+    ReviewedSourceAdapterRegistry,
+    production_reviewed_source_registry,
+)
+from endoscan_workflows.source_cache import SourceResponseCache
+from endoscan_workflows.source_security import ScientificSourceClient
+from endoscan_workflows.tools import phase1_tool_registry
 from endoscan_workflows.training_dataset import TrainingDatasetSpecification
 
 
@@ -90,6 +108,10 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
         "specification_semantic_validation_json",
         "specification_compilation_outcome_json",
         "specification_review_record_json",
+        "source_discovery_authorization_json",
+        "source_discovery_budget_json",
+        "source_observations_json",
+        "source_fragments_json",
     }.issubset(columns)
     database.dispose()
 
@@ -377,14 +399,331 @@ def test_training_dataset_specification_approval_precedes_discovery(
     assert "dataset_specification_human_policy" in artifact_types
     assert "training_dataset_specification" in artifact_types
     assert service.agent_runs(build.id) == []
-    authorized = service.continue_training_dataset_workflow(
-        build.id,
-        expected_version=waiting.version,
-        actor="test-admin",
-        idempotency_key="authorize-source-discovery",
-    )
-    assert authorized.current_stage is WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE
+    with pytest.raises(GuardNotSatisfied, match="dedicated reviewed-adapter authorization"):
+        service.continue_training_dataset_workflow(
+            build.id,
+            expected_version=waiting.version,
+            actor="test-admin",
+            idempotency_key="authorize-source-discovery",
+        )
     assert service.agent_runs(build.id) == []
+
+
+def test_reviewed_source_authorization_is_explicit_optimistic_and_idempotent(
+    workflow_runtime,
+) -> None:
+    _database, _store, _providers, _harness, service = workflow_runtime
+    service.agent_configuration = AgentConfiguration(
+        provider="openai",
+        worker_provider="openai",
+        planner_provider="openai",
+        run_mode=AgentRunMode.LIVE,
+        api_key=SecretStr("test-placeholder-never-read"),
+        retry_count=0,
+    )
+    service.reviewed_source_adapters = ReviewedSourceAdapterRegistry(
+        ReviewedSourceAdapter(definition, object(), object(), object())  # type: ignore[arg-type]
+        for definition in REVIEWED_ADAPTER_DEFINITIONS
+    )
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="X receptor antagonist",
+            endpoint_slug="reviewed-authorization",
+            biological_goal=(
+                "Construct a compound-level public training dataset with transcriptomic responses."
+            ),
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="reviewed-source-authorization",
+        )
+    )
+    waiting = service.start_build(
+        build.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="reviewed-source-authorization:start",
+    )
+    approval = service.list_approvals(build.id, pending_only=True)[0]
+    approved = service.decide_approval(
+        approval["id"],
+        ApprovalDecision(
+            decision=ApprovalDecisionValue.APPROVE,
+            reviewer_id="test-admin",
+            expected_version=waiting.version,
+            idempotency_key="reviewed-source-authorization:approve",
+            artifact_hashes=approval["request"]["artifact_hashes"],
+            dataset_specification_policy=approved_specification_policy(),
+        ),
+    )
+    service.derive_training_dataset_requirements(
+        build.id,
+        actor="deterministic-orchestrator",
+        idempotency_key="reviewed-source-authorization:requirements",
+    )
+    readiness = service.source_discovery_readiness(build.id)
+    assert readiness["ready"] is True
+    assert readiness["provider_retries"] == 0
+    assert readiness["reviewed_adapters"]["ready"] is True
+
+    with pytest.raises(StaleWorkflowVersion):
+        service.authorize_source_discovery(
+            build.id,
+            expected_version=approved.version - 1,
+            actor="test-admin",
+            idempotency_key="reviewed-source-authorization:stale",
+            confirmed=True,
+        )
+    authorized = service.authorize_source_discovery(
+        build.id,
+        expected_version=approved.version,
+        actor="test-admin-utf8-é",
+        idempotency_key="reviewed-source-authorization:authorize",
+        confirmed=True,
+    )
+    repeated = service.authorize_source_discovery(
+        build.id,
+        expected_version=approved.version,
+        actor="test-admin-utf8-é",
+        idempotency_key="reviewed-source-authorization:authorize",
+        confirmed=True,
+    )
+    with pytest.raises(WorkflowConflict, match="already authorized"):
+        service.authorize_source_discovery(
+            build.id,
+            expected_version=authorized.version,
+            actor="test-admin",
+            idempotency_key="reviewed-source-authorization:different-click",
+            confirmed=True,
+        )
+    assert authorized.current_stage is WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE
+    assert repeated.version == authorized.version
+    assert service.agent_runs(build.id) == []
+
+
+def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    calls: list[tuple[str, int]] = []
+    source_requests: list[str] = []
+
+    class OfflineRoleProvider:
+        name = "openai"
+
+        def run_turn(self, request, history, *, interruption_requested):
+            assert interruption_requested is False
+            calls.append((request.agent_name, len(history)))
+            if not history:
+                operation, arguments = {
+                    "Activity Evidence Discovery Agent": (
+                        "search_activity_sources",
+                        {"query": "example enzyme inhibition", "maximum_results": 2},
+                    ),
+                    "Transcriptomic Evidence Discovery Agent": (
+                        "search_transcriptomic_sources",
+                        {"query": "example chemical perturbation", "maximum_results": 2},
+                    ),
+                    "Chemical Identity and Structure Source Discovery Agent": (
+                        "resolve_compound_identity_sample",
+                        {
+                            "sampled_identifiers": ["123"],
+                            "identifier_type": "cid",
+                            "maximum_results": 2,
+                        },
+                    ),
+                    "Supporting Metadata Discovery Agent": (
+                        "inspect_supporting_metadata",
+                        {"source_identifiers": ["1001"], "maximum_results": 2},
+                    ),
+                }[request.agent_name]
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request={
+                        "tool_name": operation,
+                        "arguments": arguments,
+                        "idempotency_key": f"offline-{operation}",
+                    },
+                    usage=UsageReport(
+                        input_tokens=10,
+                        output_tokens=2,
+                        cached_tokens=0,
+                        cost_cents=0.001,
+                        provider_invocations=1,
+                    ),
+                )
+            return ProviderTurn(
+                kind="output",
+                output={
+                    "schema_version": "1.0.0",
+                    "status": (
+                        "invalid_model_output"
+                        if request.agent_name == "Transcriptomic Evidence Discovery Agent"
+                        else "completed"
+                    ),
+                    "relevance_assessments": [],
+                    "ranked_observation_ids": [],
+                    "modality_fit_explanations": [],
+                    "unresolved_scientific_concerns": [],
+                    "recommended_follow_up_inspections": [],
+                    "safe_summary": "Offline typed review fixture completed.",
+                },
+                usage=UsageReport(
+                    input_tokens=10,
+                    output_tokens=5,
+                    cached_tokens=0,
+                    cost_cents=0.001,
+                    provider_invocations=1,
+                ),
+            )
+
+    def official_fixture(request: httpx.Request) -> httpx.Response:
+        source_requests.append(request.url.host or "")
+        if request.url.host == "pubchem.ncbi.nlm.nih.gov":
+            return httpx.Response(
+                200,
+                json={
+                    "PropertyTable": {
+                        "Properties": [
+                            {
+                                "CID": 123,
+                                "Title": "Example compound",
+                                "CanonicalSMILES": "CCO",
+                                "IsomericSMILES": "CCO",
+                                "InChIKey": "EXAMPLE-INCHIKEY",
+                            }
+                        ]
+                    }
+                },
+                request=request,
+            )
+        database_name = request.url.params.get("db")
+        if request.url.path.endswith("esearch.fcgi"):
+            identifier = "1001" if database_name == "pcassay" else "2001"
+            return httpx.Response(
+                200,
+                json={"esearchresult": {"idlist": [identifier]}},
+                request=request,
+            )
+        return httpx.Response(200, json={"linksets": []}, request=request)
+
+    source_client = ScientificSourceClient(
+        transport=httpx.MockTransport(official_fixture),
+        maximum_attempts=1,
+        sleep=lambda _seconds: None,
+    )
+    source_cache = SourceResponseCache(database)
+    reviewed = production_reviewed_source_registry(
+        client=source_client,
+        cache=source_cache,
+        artifacts=store,
+    )
+    discovery_tools = DiscoveryToolService(source_cache, store, source_client)
+    tools = phase1_tool_registry(service.repo_root, discovery_tools, reviewed)
+    providers = ProviderRegistry()
+    providers.register("openai", OfflineRoleProvider)
+    service.harness = AgentHarness(database, providers, tools)
+    service.reviewed_source_adapters = reviewed
+    service.agent_configuration = AgentConfiguration(
+        provider="openai",
+        worker_provider="openai",
+        planner_provider="openai",
+        run_mode=AgentRunMode.LIVE,
+        api_key=SecretStr("test-placeholder-never-read"),
+        retry_count=0,
+    )
+
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Example enzyme inhibition",
+            endpoint_slug="offline-four-role-orchestration",
+            biological_goal=(
+                "Construct a compound-level public training dataset with transcriptomic responses."
+            ),
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="offline-four-role-orchestration",
+        )
+    )
+    waiting = service.start_build(
+        build.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="offline-four-role-orchestration:start",
+    )
+    approval = service.list_approvals(build.id, pending_only=True)[0]
+    approved = service.decide_approval(
+        approval["id"],
+        ApprovalDecision(
+            decision=ApprovalDecisionValue.APPROVE,
+            reviewer_id="test-admin",
+            expected_version=waiting.version,
+            idempotency_key="offline-four-role-orchestration:approve",
+            artifact_hashes=approval["request"]["artifact_hashes"],
+            dataset_specification_policy=approved_specification_policy(),
+        ),
+    )
+    service.derive_training_dataset_requirements(
+        build.id,
+        actor="deterministic-orchestrator",
+        idempotency_key="offline-four-role-orchestration:requirements",
+    )
+    authorized = service.authorize_source_discovery(
+        build.id,
+        expected_version=approved.version,
+        actor="test-admin",
+        idempotency_key="offline-four-role-orchestration:authorize",
+        confirmed=True,
+    )
+    completed = service.run_authorized_source_discovery(build.id)
+    assert completed.current_stage is WorkflowState.AWAITING_SOURCE_INVENTORY_REVIEW
+    assert completed.status.value == "waiting"
+    assert len(service.agent_runs(build.id)) == 4
+    assert len(calls) == 8
+    assert {agent for agent, _history in calls} == {
+        "Activity Evidence Discovery Agent",
+        "Transcriptomic Evidence Discovery Agent",
+        "Chemical Identity and Structure Source Discovery Agent",
+        "Supporting Metadata Discovery Agent",
+    }
+    assert all(
+        service.agent_run(run["id"])["request"]["budget"]["retry_count"] == 0
+        for run in service.agent_runs(build.id)
+    )
+    workflow = service.training_dataset_workflow(build.id)
+    assert len(workflow["source_observations"]) == 4
+    assert len(workflow["source_fragments"]) == 4
+    transcript_fragment = next(
+        item["fragment"]
+        for item in workflow["source_fragments"]
+        if item["agent_name"] == "Transcriptomic Evidence Discovery Agent"
+    )
+    assert transcript_fragment["agent_review_status"] == "unavailable"
+    assert transcript_fragment["agent_terminal_outcome"] == "invalid_model_output"
+    assert any(
+        item["fragment"]["candidate_records"]
+        for item in workflow["source_fragments"]
+        if item["agent_name"] == "Activity Evidence Discovery Agent"
+    )
+    assert workflow["verified_source_inventory"] is not None
+    assert workflow["capability_matrix"]["field_cells"]
+    assert workflow["gap_report"]["maximum_discovery_rounds"] == 0
+    assert workflow["assembly_strategies"] is None
+    assert set(source_requests) <= {
+        "eutils.ncbi.nlm.nih.gov",
+        "pubchem.ncbi.nlm.nih.gov",
+    }
+
+    before = (len(calls), len(source_requests), len(service.agent_runs(build.id)))
+    service._assert_source_discovery_budget(build.id, "Supporting Metadata Discovery Agent")
+    with pytest.raises(GuardNotSatisfied, match="four-run"):
+        service._assert_source_discovery_budget(build.id, "Unscheduled Fifth Agent")
+    repeated = service.run_authorized_source_discovery(build.id)
+    assert repeated.version == completed.version
+    assert (len(calls), len(source_requests), len(service.agent_runs(build.id))) == before
+    assert authorized.current_stage is WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE
+    source_client.close()
 
 
 def test_training_dataset_specification_recovery_requires_explicit_idempotent_continue(

@@ -47,6 +47,7 @@ from .tools import ToolRegistry
 from .training_dataset import (
     DatasetSpecificationAgentOutcome,
     DatasetSpecificationReviewOutcome,
+    DiscoveryAgentReviewOutcome,
     TrainingDatasetAssemblyReview,
     VerifiedSourceInventoryFragment,
 )
@@ -57,6 +58,7 @@ OUTPUT_SCHEMAS: dict[str, type[BaseModel]] = {
     DiscoveryOutput.__name__: DiscoveryOutput,
     DatasetSpecificationAgentOutcome.__name__: DatasetSpecificationAgentOutcome,
     DatasetSpecificationReviewOutcome.__name__: DatasetSpecificationReviewOutcome,
+    DiscoveryAgentReviewOutcome.__name__: DiscoveryAgentReviewOutcome,
     VerifiedSourceInventoryFragment.__name__: VerifiedSourceInventoryFragment,
     TrainingDatasetAssemblyReview.__name__: TrainingDatasetAssemblyReview,
 }
@@ -76,6 +78,7 @@ def sdk_output_schema(name: str):
     strict = schema in {
         DatasetSpecificationAgentOutcome,
         DatasetSpecificationReviewOutcome,
+        DiscoveryAgentReviewOutcome,
         TrainingDatasetAssemblyReview,
         VerifiedSourceInventoryFragment,
     }
@@ -431,10 +434,12 @@ class OpenAIAgentProvider:
         if request.output_schema_name not in {
             DatasetSpecificationAgentOutcome.__name__,
             DatasetSpecificationReviewOutcome.__name__,
+            DiscoveryAgentReviewOutcome.__name__,
         }:
             return {}
 
         is_review = request.output_schema_name == DatasetSpecificationReviewOutcome.__name__
+        is_discovery = request.output_schema_name == DiscoveryAgentReviewOutcome.__name__
 
         def invalid_final_output(handler_input):
             diagnostic = self._structured_output_diagnostic(
@@ -446,6 +451,14 @@ class OpenAIAgentProvider:
             )
             capture["diagnostic"] = diagnostic
             outcome = (
+                DiscoveryAgentReviewOutcome(
+                    status="invalid_model_output",
+                    safe_summary=(
+                        "Agent review was unavailable; persisted tool observations remain valid."
+                    ),
+                )
+                if is_discovery
+                else
                 DatasetSpecificationReviewOutcome(
                     schema_version="1.0.0",
                     status="invalid_model_output",
@@ -491,6 +504,14 @@ class OpenAIAgentProvider:
             )
             capture["diagnostic"] = diagnostic
             outcome = (
+                DiscoveryAgentReviewOutcome(
+                    status="model_refused",
+                    safe_summary=(
+                        "Agent review was refused; persisted tool observations remain valid."
+                    ),
+                )
+                if is_discovery
+                else
                 DatasetSpecificationReviewOutcome(
                     schema_version="1.0.0",
                     status="model_refused",

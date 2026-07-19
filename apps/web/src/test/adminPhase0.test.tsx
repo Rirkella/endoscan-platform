@@ -399,6 +399,148 @@ describe("Phase-0 build detail information architecture", () => {
     expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
   });
 
+  it("renders reviewed-adapter readiness and the explicit bounded authorization action", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      contract_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      benchmark_mode: "blind_training_dataset_discovery",
+      legacy: false,
+      target_specification: { specification_id: "spec-ready" },
+      component_requirements: {
+        requirements: [{ requirement_id: "activity", role: "endpoint_activity", mandatory: true }],
+      },
+      source_discovery_readiness: {
+        ready: true,
+        provider_ready: true,
+        reviewed_adapters: {
+          ready: true,
+          approved_adapter_count: 4,
+          covered_roles: ["endpoint_activity", "transcriptomic_matrix", "compound_identity", "chemical_structure"],
+          source_retries: 0,
+        },
+        reviewed_adapter_inventory: [{
+          adapter_id: "pubchem-bioassay",
+          adapter_version: "1.0.0",
+          official_source_system: "PubChem BioAssay",
+          allowlisted_domains: ["eutils.ncbi.nlm.nih.gov", "pubchem.ncbi.nlm.nih.gov"],
+          approved_operations: ["search_activity_sources", "validate_activity_source"],
+          request_timeout_seconds: 15,
+          maximum_response_bytes: 500000,
+          requests_per_second: 2,
+          source_retry_count: 0,
+          cache_ttl_seconds: 86400,
+        }],
+        budget: {
+          maximum_agent_runs: 4,
+          maximum_turns_per_agent: 6,
+          maximum_total_tool_calls: 24,
+          maximum_total_cost_usd: 0.8,
+          provider_retries: 0,
+        },
+      },
+      verified_source_inventory: null,
+      capability_matrix: null,
+      gap_report: null,
+      assembly_strategies: null,
+    };
+    const requirementArtifact = { ...artifact, artifact_type: "component_requirements" };
+    installFetchMock({
+      ...detailRoutes(() => build("DERIVING_COMPONENT_REQUIREMENTS", 4, {
+        workflow_kind: "training_dataset_discovery",
+        benchmark_mode: "blind_training_dataset_discovery",
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [requirementArtifact] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+      [`POST /api/admin/endpoint-builds/${buildId}/authorize-source-discovery`]: {
+        body: build("DISCOVERING_ACTIVITY_EVIDENCE", 5, { workflow_kind: "training_dataset_discovery" }),
+      },
+      [`POST /api/admin/endpoint-builds/${buildId}/continue-training-dataset`]: {
+        body: build("AWAITING_SOURCE_INVENTORY_REVIEW", 10, { workflow_kind: "training_dataset_discovery" }),
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByTestId("source-discovery-readiness")).toHaveTextContent("Ready");
+    expect(screen.getByText(/PubChem BioAssay/)).toBeInTheDocument();
+    expect(screen.getByText(/24 total tools/)).toBeInTheDocument();
+    expect(screen.getByText(/0 provider retries/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Authorize reviewed source discovery" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /Approve assembly strategy/ })).not.toBeInTheDocument();
+  });
+
+  it("renders verified source review without downstream ingestion or training actions", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      legacy: false,
+      source_observations: [{
+        observation_artifact_hash: "f".repeat(64),
+        observation: {
+          observation_id: "obs-1",
+          source_system: "PubChem BioAssay",
+          stable_source_identifier: "AID:1001",
+          adapter_id: "pubchem-bioassay",
+          adapter_version: "1.0.0",
+          public_validation_status: "verified",
+          data_access_status: "requires_download",
+          limitations: ["Full results are not ingested."],
+        },
+      }],
+      source_fragments: [{
+        agent_name: "Activity Evidence Discovery Agent",
+        fragment: {
+          fragment_id: "fragment-1",
+          agent_review_status: "unavailable",
+          observation_ids: ["obs-1"],
+          limitations: ["Invalid final output; verified tool evidence was preserved."],
+        },
+      }],
+      verified_source_inventory: { sources: [{
+        source_id: "source-1",
+        source_system: "PubChem BioAssay",
+        stable_accession: "AID:1001",
+        source_roles: ["endpoint_activity"],
+        measurement_fields: ["activity outcome"],
+        identifier_fields: ["PubChem CID"],
+        structure_fields: [],
+        experimental_context_fields: ["assay context"],
+        count_status: "metadata_only",
+        access_status: "requires_download",
+        strengths: ["Official metadata verified."],
+        limitations: ["Full records require download."],
+        next_required_ingestion_actions: ["Review before bounded ingestion."],
+      }] },
+      capability_matrix: { cells: [], field_cells: [{
+        source_id: "source-1", field: "endpoint_activity", status: "requires_download",
+      }] },
+      gap_report: { gaps: [{ gap_id: "gap-identity", description: "No compound identifier bridge is verified." }] },
+      assembly_strategies: null,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_SOURCE_INVENTORY_REVIEW", 10, {
+        workflow_kind: "training_dataset_discovery",
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByRole("heading", { name: "Verified source inventory" })).toBeInTheDocument();
+    expect(screen.getAllByText(/AID:1001/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Metadata only · Access: Requires download/)).toBeInTheDocument();
+    expect(screen.getByText(/No compound identifier bridge/)).toBeInTheDocument();
+    expect(screen.getByText(/Invalid final output; verified tool evidence was preserved/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review source inventory" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Request later targeted discovery" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /ingest/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /train/i })).not.toBeInTheDocument();
+  });
+
   it("shows compact build and current-run IDs and copies their complete values", async () => {
     installFetchMock(detailRoutes(() => build()));
     renderApp(`/admin/endpoints/${buildId}`);

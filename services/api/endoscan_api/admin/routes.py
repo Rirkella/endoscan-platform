@@ -20,6 +20,7 @@ from .schemas import (
     ApprovalDecisionBody,
     CreateBuildBody,
     GeoValidationProbeBody,
+    SourceDiscoveryAuthorizationBody,
     WorkflowCommandBody,
 )
 
@@ -124,6 +125,26 @@ def continue_training_dataset(
     key: str = Depends(_key),
 ):
     return _command("continue_training_dataset_workflow", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/authorize-source-discovery",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def authorize_source_discovery(
+    build_id: str,
+    body: SourceDiscoveryAuthorizationBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    service = _service(request)
+    return service.authorize_source_discovery(
+        validate_resource_id(build_id, "Endpoint build"),
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+        confirmed=body.confirmation == "authorize_reviewed_source_discovery",
+    )
 
 
 @router.post(

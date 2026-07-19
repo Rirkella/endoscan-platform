@@ -94,9 +94,17 @@ def test_every_specialized_agent_reaches_its_schema_boundary_without_network(
     assert all(item["output_schema_version"] == "training-dataset-v1" for item in results)
     assert {item["output_schema_name"] for item in results} == {
         "DatasetSpecificationReviewOutcome",
-        "VerifiedSourceInventoryFragment",
+        "DiscoveryAgentReviewOutcome",
         "TrainingDatasetAssemblyReview",
     }
+    discovery_results = [
+        item for item in results if item["output_schema_name"] == "DiscoveryAgentReviewOutcome"
+    ]
+    assert len(discovery_results) == 4
+    assert all(
+        item["error_handler_names"] == ["invalid_final_output", "model_refusal"]
+        for item in discovery_results
+    )
     specification = next(
         item for item in results if item["agent_name"] == "Dataset Specification Review Agent"
     )

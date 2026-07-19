@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +25,10 @@ class CreateBuildBody(AdminRequest):
 class WorkflowCommandBody(AdminRequest):
     expected_version: int = Field(ge=0)
     actor: str = Field(default="local-admin", min_length=2, max_length=120)
+
+
+class SourceDiscoveryAuthorizationBody(WorkflowCommandBody):
+    confirmation: Literal["authorize_reviewed_source_discovery"]
 
 
 class GeoValidationProbeBody(AdminRequest):

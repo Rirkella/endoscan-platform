@@ -140,7 +140,14 @@ function TrainingDatasetWorkspace({ data, artifacts }: { data: AdminTrainingData
   const specificationArtifact = [...artifacts].reverse().find((item) => item.artifact_type === "training_dataset_specification");
   const humanPolicyArtifact = [...artifacts].reverse().find((item) => item.artifact_type === "dataset_specification_human_policy");
   const sources = records(record(data.verified_source_inventory).sources);
+  const discoveryReadiness = record(data.source_discovery_readiness);
+  const adapterReadiness = record(discoveryReadiness.reviewed_adapters);
+  const adapterInventory = records(discoveryReadiness.reviewed_adapter_inventory);
+  const discoveryBudget = record(data.source_discovery_budget ?? discoveryReadiness.budget);
+  const sourceObservations = records(data.source_observations);
+  const sourceFragments = records(data.source_fragments);
   const cells = records(record(data.capability_matrix).cells);
+  const fieldCells = records(record(data.capability_matrix).field_cells);
   const review = record(data.assembly_review);
   const strategies = records(review.strategies ?? record(data.assembly_strategies).strategies);
   const recommendedId = typeof review.recommended_strategy_id === "string" ? review.recommended_strategy_id : null;
@@ -157,9 +164,17 @@ function TrainingDatasetWorkspace({ data, artifacts }: { data: AdminTrainingData
         {Object.keys(specification).length ? <><dl className="admin-candidate-facts"><div><dt>Specification</dt><dd>{String(specification.specification_id)} · version {String(specification.contract_version ?? "1.0.0")}</dd></div><div><dt>Immutable hash</dt><dd><code>{specificationArtifact?.sha256 ?? "not available"}</code></dd></div><div><dt>Human policy</dt><dd>version {String(specification.approved_policy_version ?? "not applied")} · <code>{humanPolicyArtifact?.sha256 ?? "not available"}</code></dd></div><div><dt>Prediction task</dt><dd>{String(specification.intended_prediction_task ?? "Unresolved")}</dd></div><div><dt>Prediction unit</dt><dd>{String(specification.prediction_unit ?? "Unresolved")}</dd></div><div><dt>Activity representation</dt><dd>{textList(specification.acceptable_activity_representations).join(", ") || "Unresolved"}</dd></div><div><dt>Required fields</dt><dd>{textList(specification.mandatory_output_fields).join(", ") || "Awaiting specification"}</dd></div><div><dt>Nullable fields</dt><dd>{textList(specification.nullable_output_fields).join(", ") || "None"}</dd></div><div><dt>Optional fields</dt><dd>{textList(specification.optional_output_fields).join(", ") || "None"}</dd></div></dl><h3>Approved human policy decisions</h3><ul>{textList(specification.approved_policy_decisions).map((item) => <li key={item}>{item}</li>)}</ul></> : <p>Awaiting a strict, human-reviewed target specification.</p>}
       </section>
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Planned source-discovery agents</h2><span>{plannedAgents.length} not started</span></div>{plannedAgents.map((item) => <article key={String(item.agent_name)}><h3>{String(item.agent_name)}</h3><p>{String(item.provider)} / {String(item.model)} · {String(item.maximum_turns)} turns · {String(item.maximum_tool_calls)} tools · {String(item.maximum_input_tokens)} input tokens · {String(item.maximum_output_tokens)} output tokens · ${String(item.maximum_cost_usd)} · {String(item.timeout_seconds)} s · {String(item.provider_retries)} retries</p><p>Tools: {textList(item.allowed_tools).join(", ") || "none"}</p><p>Official adapters: {textList(item.allowed_official_source_adapters).join(", ")}</p><p>Output: {String(item.output_schema_name)}</p></article>)}</section>
+      <section className="admin-panel" data-testid="source-discovery-readiness"><div className="admin-panel-heading"><h2>Reviewed source adapters</h2><span>{discoveryReadiness.ready === true ? "Ready" : "Blocked"}</span></div>
+        <p>{String(adapterReadiness.approved_adapter_count ?? 0)} approved adapters cover {textList(adapterReadiness.covered_roles).length} component roles. Source retries: {String(adapterReadiness.source_retries ?? 0)}.</p>
+        {adapterInventory.map((adapter) => <article key={String(adapter.adapter_id)}><h3>{String(adapter.official_source_system)} · {String(adapter.adapter_id)}@{String(adapter.adapter_version)}</h3><p>Domains: {textList(adapter.allowlisted_domains).join(", ")}</p><p>Operations: {textList(adapter.approved_operations).join(", ")}</p><p>{String(adapter.request_timeout_seconds)} s · {String(adapter.maximum_response_bytes)} bytes · {String(adapter.requests_per_second)} req/s · {String(adapter.source_retry_count)} retries · cache {String(adapter.cache_ttl_seconds)} s</p></article>)}
+        <h3>Controlled workflow budget</h3><p>{String(discoveryBudget.maximum_agent_runs ?? 4)} agent runs · {String(discoveryBudget.maximum_turns_per_agent ?? 6)} turns/agent · {String(discoveryBudget.maximum_total_tool_calls ?? 24)} total tools · ${String(discoveryBudget.maximum_total_cost_usd ?? 0.8)} total · {String(discoveryBudget.provider_retries ?? 0)} provider retries</p>
+        {discoveryReadiness.ready !== true && <p>Execution remains fail-closed until provider, specification, requirements, stage, and reviewed adapters are ready.</p>}
+      </section>
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Component requirements</h2><span>{requirements.length}</span></div>{requirements.length ? <ul>{requirements.map((item) => <li key={String(item.requirement_id)}><strong>{humanizeMachineValue(String(item.role))}</strong> — {item.mandatory ? "required" : "optional"}</li>)}</ul> : <p>No requirements derived yet.</p>}</section>
-      <section className="admin-panel"><div className="admin-panel-heading"><h2>Verified source inventory</h2><span>{sources.length}</span></div>{sources.length ? sources.map((source) => <article key={String(source.source_id)}><h3>{String(source.source_system)} · {String(source.stable_accession)}</h3><p>{textList(source.source_roles).map(humanizeMachineValue).join(", ")}</p><p>{textList(source.limitations).join(" ") || "No recorded limitation."}</p></article>) : <p>No discovered or verified sources. Concrete strategies remain locked.</p>}</section>
-      <section className="admin-panel"><div className="admin-panel-heading"><h2>Capability matrix</h2><span>{cells.length} cells</span></div>{cells.length ? <div className="admin-artifact-list">{cells.map((cell, index) => <article key={`${String(cell.source_id)}-${String(cell.component)}-${index}`}><strong>{String(cell.source_id)}</strong><span>{humanizeMachineValue(String(cell.component))}: {humanizeMachineValue(String(cell.status))}</span></article>)}</div> : <p>Awaiting deterministic inventory analysis.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Source observations</h2><span>{sourceObservations.length}</span></div>{sourceObservations.length ? sourceObservations.map((item, index) => { const observation = record(item.observation); return <article key={String(observation.observation_id ?? index)}><h3>{String(observation.source_system)} · {String(observation.stable_source_identifier)}</h3><p>{String(observation.adapter_id)}@{String(observation.adapter_version)} · {humanizeMachineValue(String(observation.public_validation_status))} · {humanizeMachineValue(String(observation.data_access_status))}</p><p>Artifact <code>{String(item.observation_artifact_hash ?? observation.response_artifact_hash)}</code></p><p>{textList(observation.limitations).join(" ") || "No recorded limitation."}</p></article>; }) : <p>No reviewed-adapter observations have been persisted.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Agent source reviews</h2><span>{sourceFragments.length}</span></div>{sourceFragments.length ? sourceFragments.map((item, index) => { const fragment = record(item.fragment); return <article key={String(fragment.fragment_id ?? index)}><h3>{String(item.agent_name)}</h3><p>{humanizeMachineValue(String(fragment.agent_review_status ?? "unavailable"))} ({humanizeMachineValue(String(fragment.agent_terminal_outcome ?? "unavailable"))}) · {textList(fragment.observation_ids).length} authoritative observations</p><p>{textList(fragment.limitations).join(" ") || "No recorded limitation."}</p></article>; }) : <p>No bounded source-review agent has completed.</p>}</section>
+      <section className="admin-panel" id="verified-source-inventory"><div className="admin-panel-heading"><h2>Verified source inventory</h2><span>{sources.length}</span></div>{sources.length ? sources.map((source) => <article key={String(source.source_id)}><h3>{String(source.source_system)} · {String(source.stable_accession)}</h3><p>Roles: {textList(source.source_roles).map(humanizeMachineValue).join(", ")}</p><p>Verified fields: {[...textList(source.measurement_fields), ...textList(source.identifier_fields), ...textList(source.structure_fields), ...textList(source.experimental_context_fields)].join(", ") || "None verified"}</p><p>Counts: {humanizeMachineValue(String(source.count_status ?? "not_computed"))} · Access: {humanizeMachineValue(String(source.access_status ?? "unresolved"))}</p><p>{textList(source.strengths).join(" ") || "No recorded strength."}</p><p>{textList(source.limitations).join(" ") || "No recorded limitation."}</p><p>Next: {textList(source.next_required_ingestion_actions).join(" ") || "Human source-inventory review."}</p></article>) : <p>No discovered or verified sources. Concrete strategies remain locked.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Capability matrix</h2><span>{cells.length + fieldCells.length} cells</span></div>{cells.length || fieldCells.length ? <div className="admin-artifact-list">{[...cells, ...fieldCells].map((cell, index) => { const capability = String(cell.component ?? cell.field); return <article key={`${String(cell.source_id)}-${capability}-${index}`}><strong>{String(cell.source_id)}</strong><span>{humanizeMachineValue(capability)}: {humanizeMachineValue(String(cell.status))}</span></article>; })}</div> : <p>Awaiting deterministic inventory analysis.</p>}</section>
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Strategies considered</h2><span>{strategies.length}</span></div>{strategies.length ? strategies.map((strategy) => <article key={String(strategy.strategy_id)}><h3>{strategy.strategy_id === recommendedId ? "Recommended: " : ""}{String(strategy.strategy_id)}</h3><p>{textList(strategy.scientific_risks).join(" ") || "No scientific risks recorded."}</p></article>) : <p>No assembly strategy exists before verified discovery.</p>}</section>
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Recommended assembly graph</h2><span>{nodes.length} nodes</span></div>{nodes.length ? <><ul>{nodes.map((node) => <li key={String(node.node_id)}><strong>{String(node.label)}</strong> ({humanizeMachineValue(String(node.node_type))})</li>)}</ul><p>{edges.map((edge) => `${String(edge.from_node)} → ${String(edge.to_node)}`).join(" · ")}</p></> : <p>No source graph selected.</p>}</section>
       <section className="admin-panel"><div className="admin-panel-heading"><h2>Preparation plan</h2><span>{records(plan.steps).length} steps</span></div>{records(plan.steps).length ? <ol>{records(plan.steps).map((step) => <li key={String(step.step_id)}><strong>{String(step.action)}</strong> — {humanizeMachineValue(String(step.status))}</li>)}</ol> : <p>Preparation remains deferred until a verified strategy exists.</p>}</section>
@@ -573,6 +588,24 @@ export function AdminEndpointDetail() {
     }
   }
 
+  async function authorizeSourceDiscovery() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      const authorized = await api.adminAuthorizeSourceDiscovery(build.id, build.version);
+      await api.adminContinueTrainingDataset(build.id, authorized.version);
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof EndoscanApiError
+          ? reason.detail
+          : "Reviewed source discovery could not be authorized.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copyIdentifier(kind: "build" | "run", value: string) {
     try {
       await navigator.clipboard.writeText(value);
@@ -606,6 +639,8 @@ export function AdminEndpointDetail() {
   const canPause = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
   const canCancel = !["CANCELLED", "COMPLETED"].includes(build.current_stage);
   const canRetry = build.current_stage === "FAILED" && errors.at(-1)?.retryable === true;
+  const sourceDiscoveryReady = record(trainingWorkflow?.source_discovery_readiness).ready === true;
+  const requirementsReady = artifacts.some((item) => item.artifact_type === "component_requirements");
   const selectedIndex = Math.max(0, candidates.findIndex((candidate) => candidate.candidate_id === selected));
   const selectedCandidate = candidates[selectedIndex];
   const developerDiagnostic = trace ? safeDeveloperDiagnostic(trace) : null;
@@ -890,10 +925,17 @@ export function AdminEndpointDetail() {
                 ["COMPILING_TARGET_DATASET_SPECIFICATION", "SPECIFYING_TARGET_DATASET", "DERIVING_COMPONENT_REQUIREMENTS"].includes(
                   build.current_stage,
                 ) && (
-                  <button disabled={busy} onClick={() => void continueTrainingDataset()}>
-                    {build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && artifacts.some((item) => item.artifact_type === "component_requirements") ? "Authorize source discovery" : build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" ? "Derive component requirements" : "Continue active stage"}
+                  <button
+                    disabled={busy || (build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && requirementsReady && !sourceDiscoveryReady)}
+                    title={build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && requirementsReady && !sourceDiscoveryReady ? "Provider, approved adapters, specification, requirements, and stage must all be ready." : undefined}
+                    onClick={() => void (build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && requirementsReady ? authorizeSourceDiscovery() : continueTrainingDataset())}
+                  >
+                    {build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && requirementsReady ? "Authorize reviewed source discovery" : build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" ? "Derive component requirements" : "Continue active stage"}
                   </button>
                 )}
+              {build.workflow_kind === "training_dataset_discovery" && ["DISCOVERING_ACTIVITY_EVIDENCE", "DISCOVERING_TRANSCRIPTOMIC_EVIDENCE", "DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES", "DISCOVERING_SUPPORTING_METADATA", "VALIDATING_DISCOVERED_SOURCES"].includes(build.current_stage) && <button disabled={busy} onClick={() => void continueTrainingDataset()}>Resume authorized source discovery</button>}
+              {build.current_stage === "AWAITING_SOURCE_INVENTORY_REVIEW" && <button disabled={busy} onClick={() => document.getElementById("verified-source-inventory")?.scrollIntoView({ behavior: "smooth" })}>Review source inventory</button>}
+              {build.current_stage === "AWAITING_SOURCE_INVENTORY_REVIEW" && <button className="admin-secondary" disabled title="Gap-directed discovery is intentionally deferred in this phase">Request later targeted discovery</button>}
               {canPause && <button disabled={busy} onClick={() => void command("pause")}>Pause</button>}
               {build.current_stage === "PAUSED" && <button disabled={busy} onClick={() => void command("resume")}>Resume</button>}
               {isSpecificationRevision && <>

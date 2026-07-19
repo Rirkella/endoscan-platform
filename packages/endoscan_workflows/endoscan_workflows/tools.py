@@ -572,7 +572,7 @@ def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
     return registry
 
 
-def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
+def phase1_tool_registry(repo_root: Path, discovery_service, adapter_registry=None) -> ToolRegistry:
     """Phase-0 tools plus bounded Phase-1 compatibility and staged discovery tools."""
     from .discovery_tools import (
         CompareDatasetCandidatesInput,
@@ -697,7 +697,7 @@ def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
                 ),
             )
         )
-    return extend_training_dataset_tool_registry(registry)
+    return extend_training_dataset_tool_registry(registry, adapter_registry)
 
 
 def extend_training_dataset_tool_registry(
@@ -705,8 +705,12 @@ def extend_training_dataset_tool_registry(
 ) -> ToolRegistry:
     """Add reviewed, typed multi-source tools without enabling arbitrary network access."""
 
+    from .reviewed_source_adapters import (
+        ReviewedSourceAdapterRegistry,
+        ReviewedSourceOperationInput,
+    )
+    from .training_dataset import VerifiedSourceObservationBatch
     from .training_dataset_tools import (
-        ActivitySourceSearchInput,
         CoverageAuditInput,
         CoverageAuditOutput,
         IdentityFieldInspectionInput,
@@ -715,18 +719,13 @@ def extend_training_dataset_tool_registry(
         MappingManifestOutput,
         RecordAvailabilityInput,
         RecordAvailabilityOutput,
-        SourceAdapterRegistry,
-        SourceSearchOutput,
-        SourceValidationOutput,
-        StableSourceIdentifierInput,
-        TranscriptomicSourceSearchInput,
         audit_coverage,
         build_compound_mapping_manifest,
         inspect_source_identity_fields,
         inspect_source_record_availability,
     )
 
-    adapters = adapter_registry or SourceAdapterRegistry()
+    adapters = adapter_registry or ReviewedSourceAdapterRegistry()
     discovery_stages = [
         WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE,
         WorkflowState.DISCOVERING_TRANSCRIPTOMIC_EVIDENCE,
@@ -748,6 +747,7 @@ def extend_training_dataset_tool_registry(
         implementation,
         stages,
         effect=SideEffectClassification.NONE,
+        contextual=False,
     ):
         registry.register(
             RegisteredTool(
@@ -766,34 +766,19 @@ def extend_training_dataset_tool_registry(
                 input_model,
                 output_model,
                 implementation,
+                contextual=contextual,
             )
         )
 
-    register(
+    source_operations = [
         "search_activity_sources",
-        "Search configured reviewed activity adapters with a typed target request.",
-        ActivitySourceSearchInput,
-        SourceSearchOutput,
-        adapters.search_activity,
-        discovery_stages,
-        SideEffectClassification.EXTERNAL_READ,
-    )
-    register(
-        "search_transcriptomic_sources",
-        "Search configured reviewed chemical-perturbation transcriptomic adapters.",
-        TranscriptomicSourceSearchInput,
-        SourceSearchOutput,
-        adapters.search_transcriptomics,
-        discovery_stages,
-        SideEffectClassification.EXTERNAL_READ,
-    )
-    validation_operations = [
         "validate_activity_source",
         "fetch_activity_source_metadata",
         "inspect_activity_result_availability",
         "inspect_activity_identifier_fields",
         "summarize_activity_outcomes",
         "inspect_counter_screen_relationships",
+        "search_transcriptomic_sources",
         "validate_transcriptomic_source",
         "fetch_transcriptomic_source_metadata",
         "inspect_perturbation_design",
@@ -802,34 +787,44 @@ def extend_training_dataset_tool_registry(
         "inspect_processed_matrix_availability",
         "inspect_raw_matrix_availability",
         "inspect_feature_schema",
+        "inspect_source_identity_fields",
+        "inspect_source_record_availability",
+        "resolve_compound_identity_sample",
+        "inspect_supporting_metadata",
+        "inspect_official_file_listing",
+        "inspect_linked_publications",
+        "inspect_source_access",
     ]
-    for operation in validation_operations:
+    for operation in source_operations:
         register(
             operation,
-            "Inspect one stable identifier through its configured reviewed source adapter.",
-            StableSourceIdentifierInput,
-            SourceValidationOutput,
-            adapters.validate,
+            "Execute one typed operation through an approved reviewed official-source adapter.",
+            ReviewedSourceOperationInput,
+            VerifiedSourceObservationBatch,
+            lambda request, invocation, selected=operation: adapters.execute(
+                selected, request, invocation
+            ),
             discovery_stages,
             SideEffectClassification.EXTERNAL_READ,
+            contextual=True,
         )
     register(
-        "inspect_source_identity_fields",
-        "Compare declared source identity fields without resolving compounds.",
+        "compare_verified_identity_fields",
+        "Compare already verified source identity fields without resolving compounds.",
         IdentityFieldInspectionInput,
         IdentityFieldInspectionOutput,
         inspect_source_identity_fields,
         [*discovery_stages, *evaluation_stages],
     )
     register(
-        "inspect_source_record_availability",
-        "Classify verified record access without downloading source tables.",
+        "classify_verified_record_availability",
+        "Classify already verified record access without downloading source tables.",
         RecordAvailabilityInput,
         RecordAvailabilityOutput,
         inspect_source_record_availability,
         [*discovery_stages, *evaluation_stages],
     )
-    for operation in ("build_compound_mapping_manifest", "resolve_compound_identity_sample"):
+    for operation in ("build_compound_mapping_manifest",):
         register(
             operation,
             "Build a bounded deterministic identifier mapping manifest from supplied records.",

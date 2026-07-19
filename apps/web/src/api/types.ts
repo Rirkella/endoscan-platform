@@ -53,6 +53,11 @@ export interface AdminTrainingDatasetWorkflow {
   specification_compilation_outcome?: Record<string, unknown> | null;
   specification_review?: Record<string, unknown> | null;
   component_requirements?: Record<string, unknown> | null;
+  source_discovery_authorization?: Record<string, unknown> | null;
+  source_discovery_budget?: Record<string, unknown> | null;
+  source_discovery_readiness?: Record<string, unknown> | null;
+  source_observations?: Array<Record<string, unknown>>;
+  source_fragments?: Array<Record<string, unknown>>;
   verified_source_inventory?: Record<string, unknown> | null;
   capability_matrix?: Record<string, unknown> | null;
   assembly_strategies?: Record<string, unknown> | null;
@@ -62,6 +67,8 @@ export interface AdminTrainingDatasetWorkflow {
   assembly_review?: Record<string, unknown> | null;
   planned_discovery_agents?: Array<Record<string, unknown>>;
   discovery_round?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AdminArtifact {

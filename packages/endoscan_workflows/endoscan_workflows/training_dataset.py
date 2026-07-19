@@ -245,6 +245,22 @@ class CapabilityStatus(StrEnum):
     UNRESOLVED = "unresolved"
 
 
+class ObservationCountStatus(StrEnum):
+    EXACT = "exact"
+    PARTIAL = "partial"
+    METADATA_ONLY = "metadata_only"
+    NOT_COMPUTED = "not_computed"
+    REQUIRES_DOWNLOAD = "requires_download"
+
+
+class AgentReviewStatus(StrEnum):
+    COMPLETED = "completed"
+    UNAVAILABLE = "unavailable"
+    REFUSED = "refused"
+    INVALID_OUTPUT = "invalid_output"
+    PARTIAL = "partial"
+
+
 class SourceValidationStatus(StrEnum):
     VERIFIED = "verified"
     PARTIAL = "partial"
@@ -1291,6 +1307,72 @@ def derive_component_requirements(
     )
 
 
+class ObservationReviewAnnotation(StrictContract):
+    observation_id: str = Field(min_length=3, max_length=160)
+    assessment: str = Field(min_length=1, max_length=2000)
+
+
+class DiscoveryAgentReviewOutcome(StrictContract):
+    """Non-authoritative model review over already persisted source observations."""
+
+    status: Literal["completed", "invalid_model_output", "model_refused"]
+    relevance_assessments: list[ObservationReviewAnnotation] = Field(
+        default_factory=list, max_length=100
+    )
+    ranked_observation_ids: list[str] = Field(default_factory=list, max_length=100)
+    modality_fit_explanations: list[ObservationReviewAnnotation] = Field(
+        default_factory=list, max_length=100
+    )
+    unresolved_scientific_concerns: list[str] = Field(default_factory=list, max_length=100)
+    recommended_follow_up_inspections: list[str] = Field(default_factory=list, max_length=50)
+    safe_summary: str = Field(default="", max_length=2000)
+
+
+class VerifiedSourceObservation(StrictContract):
+    """Immutable facts parsed from one reviewed official-source adapter response."""
+
+    observation_id: str = Field(min_length=3, max_length=160)
+    adapter_id: str = Field(min_length=3, max_length=160)
+    adapter_version: str = Field(min_length=1, max_length=40)
+    review_policy_version: str = Field(min_length=1, max_length=40)
+    source_system: str = Field(min_length=2, max_length=160)
+    stable_source_identifier: str = Field(min_length=1, max_length=300)
+    source_roles: list[ComponentRole] = Field(min_length=1, max_length=30)
+    request_operation: str = Field(min_length=2, max_length=160)
+    public_validation_status: SourceValidationStatus
+    target: str | None = Field(default=None, max_length=500)
+    modality: str | None = Field(default=None, max_length=300)
+    perturbation_type: str | None = Field(default=None, max_length=300)
+    measurement_fields: list[str] = Field(default_factory=list, max_length=100)
+    identifier_fields: list[str] = Field(default_factory=list, max_length=100)
+    structure_fields: list[str] = Field(default_factory=list, max_length=100)
+    experimental_context_fields: list[str] = Field(default_factory=list, max_length=100)
+    data_access_status: CapabilityStatus
+    downloadable_artifact_types: list[str] = Field(default_factory=list, max_length=100)
+    exact_counts: dict[str, int] = Field(default_factory=dict, max_length=50)
+    count_status: ObservationCountStatus = ObservationCountStatus.NOT_COMPUTED
+    licence_access_status: CapabilityStatus = CapabilityStatus.UNRESOLVED
+    official_evidence_references: list[str] = Field(min_length=1, max_length=100)
+    retrieved_at: str = Field(min_length=10, max_length=80)
+    response_artifact_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    response_artifact_id: str = Field(min_length=3, max_length=160)
+    strengths: list[str] = Field(default_factory=list, max_length=100)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+    unresolved_fields: list[str] = Field(default_factory=list, max_length=100)
+    next_required_ingestion_action: str = Field(min_length=3, max_length=2000)
+
+
+class VerifiedSourceObservationBatch(StrictContract):
+    adapter_id: str
+    adapter_version: str
+    operation: str
+    cache_status: Literal["live", "cached", "fixture"]
+    observations: list[VerifiedSourceObservation] = Field(default_factory=list, max_length=25)
+    source_request_artifact_ids: list[str] = Field(default_factory=list, max_length=10)
+    source_request_count: int = Field(ge=0, le=10)
+    limitations: list[str] = Field(default_factory=list, max_length=50)
+
+
 class SourceCapability(StrictContract):
     component: ComponentRole
     status: CapabilityStatus
@@ -1320,6 +1402,13 @@ class VerifiedSourceRecord(StrictContract):
     unresolved_questions: list[str] = Field(default_factory=list, max_length=100)
     validation_status: SourceValidationStatus
     artifact_hashes: list[str] = Field(default_factory=list, max_length=100)
+    exact_counts: dict[str, int] = Field(default_factory=dict, max_length=50)
+    count_status: ObservationCountStatus = ObservationCountStatus.NOT_COMPUTED
+    strengths: list[str] = Field(default_factory=list, max_length=100)
+    next_required_ingestion_actions: list[str] = Field(default_factory=list, max_length=50)
+    adapter_provenance: list[str] = Field(default_factory=list, max_length=100)
+    observation_ids: list[str] = Field(default_factory=list, max_length=100)
+    model_annotations: dict[str, str] = Field(default_factory=dict, max_length=50)
 
     @model_validator(mode="after")
     def roles_match_capabilities(self) -> VerifiedSourceRecord:
@@ -1352,7 +1441,7 @@ class VerifiedSourceInventory(StrictContract):
 
 
 class VerifiedSourceInventoryFragment(StrictContract):
-    """Bounded agent output; validation and merging remain deterministic."""
+    """Deterministically compiled adapter evidence plus non-authoritative review annotations."""
 
     fragment_id: str = Field(min_length=3, max_length=160)
     component_roles: list[ComponentRole] = Field(min_length=1, max_length=20)
@@ -1360,6 +1449,227 @@ class VerifiedSourceInventoryFragment(StrictContract):
     evidence_used: list[str] = Field(default_factory=list, max_length=200)
     limitations: list[str] = Field(default_factory=list, max_length=100)
     unresolved_questions: list[str] = Field(default_factory=list, max_length=100)
+    observation_ids: list[str] = Field(default_factory=list, max_length=200)
+    adapter_provenance: list[str] = Field(default_factory=list, max_length=100)
+    agent_review_status: AgentReviewStatus = AgentReviewStatus.UNAVAILABLE
+    agent_terminal_outcome: Literal[
+        "completed", "invalid_model_output", "model_refused", "unavailable"
+    ] = "unavailable"
+    model_annotations: dict[str, str] = Field(default_factory=dict, max_length=100)
+
+
+def _observation_record(
+    observation: VerifiedSourceObservation,
+    annotations: dict[str, str],
+) -> VerifiedSourceRecord:
+    status = observation.data_access_status
+    capabilities = [
+        SourceCapability(
+            component=role,
+            status=status,
+            fields=sorted(
+                set(
+                    observation.measurement_fields
+                    + observation.identifier_fields
+                    + observation.structure_fields
+                    + observation.experimental_context_fields
+                )
+            ),
+            evidence_references=observation.official_evidence_references,
+            limitation="; ".join(observation.limitations) or None,
+        )
+        for role in observation.source_roles
+    ]
+    record_payload = {
+        "source_system": observation.source_system,
+        "stable_source_identifier": observation.stable_source_identifier,
+        "roles": sorted(role.value for role in observation.source_roles),
+        "measurement_fields": sorted(observation.measurement_fields),
+        "identifier_fields": sorted(observation.identifier_fields),
+        "structure_fields": sorted(observation.structure_fields),
+        "context_fields": sorted(observation.experimental_context_fields),
+        "access_status": observation.data_access_status.value,
+        "validation_status": observation.public_validation_status.value,
+    }
+    digest = hashlib.sha256(
+        json.dumps(record_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:24]
+    return VerifiedSourceRecord(
+        source_id=f"source-{digest}",
+        source_roles=list(dict.fromkeys(observation.source_roles)),
+        source_system=observation.source_system,
+        stable_accession=observation.stable_source_identifier,
+        official_source=observation.source_system,
+        verified_public_availability=(
+            observation.public_validation_status is SourceValidationStatus.VERIFIED
+        ),
+        capabilities=capabilities,
+        identifier_fields=observation.identifier_fields,
+        structure_fields=observation.structure_fields,
+        measurement_fields=observation.measurement_fields,
+        experimental_context_fields=observation.experimental_context_fields,
+        downloadable_artifacts=observation.downloadable_artifact_types,
+        access_status=observation.data_access_status,
+        licence_status=observation.licence_access_status,
+        source_references=observation.official_evidence_references,
+        evidence_quality="Tool-verified through an approved reviewed source adapter.",
+        limitations=observation.limitations,
+        unresolved_questions=observation.unresolved_fields,
+        validation_status=observation.public_validation_status,
+        artifact_hashes=[observation.response_artifact_hash],
+        exact_counts=observation.exact_counts,
+        count_status=observation.count_status,
+        strengths=observation.strengths,
+        next_required_ingestion_actions=[observation.next_required_ingestion_action],
+        adapter_provenance=[
+            f"{observation.adapter_id}@{observation.adapter_version}"
+        ],
+        observation_ids=[observation.observation_id],
+        model_annotations=annotations,
+    )
+
+
+def compile_verified_source_fragment(
+    *,
+    fragment_id: str,
+    component_roles: list[ComponentRole],
+    observations: list[VerifiedSourceObservation],
+    review: DiscoveryAgentReviewOutcome | None,
+) -> VerifiedSourceInventoryFragment:
+    """Compile a source fragment without allowing model text to overwrite verified facts."""
+
+    status = AgentReviewStatus.UNAVAILABLE
+    terminal_outcome: Literal[
+        "completed", "invalid_model_output", "model_refused", "unavailable"
+    ] = "unavailable"
+    annotations: dict[str, str] = {}
+    limitations: list[str] = []
+    unresolved: list[str] = []
+    if review is not None:
+        terminal_outcome = review.status
+        status = (
+            AgentReviewStatus.COMPLETED
+            if review.status == "completed"
+            else AgentReviewStatus.UNAVAILABLE
+        )
+        valid_ids = {item.observation_id for item in observations}
+        annotations = {
+            item.observation_id: item.assessment
+            for item in [
+                *review.relevance_assessments,
+                *review.modality_fit_explanations,
+            ]
+            if item.observation_id in valid_ids
+        }
+        unresolved.extend(review.unresolved_scientific_concerns)
+    if not observations:
+        limitations.append("No tool-verified source observations were produced for this role.")
+    if terminal_outcome in {"invalid_model_output", "model_refused"}:
+        limitations.append(
+            "Agent review was unavailable; persisted tool-derived observations remain "
+            "authoritative."
+        )
+    records = [
+        _observation_record(
+            item,
+            (
+                {item.observation_id: annotations[item.observation_id]}
+                if item.observation_id in annotations
+                else {}
+            ),
+        )
+        for item in observations
+    ]
+    return VerifiedSourceInventoryFragment(
+        fragment_id=fragment_id,
+        component_roles=list(dict.fromkeys(component_roles)),
+        candidate_records=records,
+        evidence_used=sorted(
+            {
+                reference
+                for item in observations
+                for reference in item.official_evidence_references
+            }
+        ),
+        limitations=limitations,
+        unresolved_questions=sorted(set(unresolved)),
+        observation_ids=[item.observation_id for item in observations],
+        adapter_provenance=sorted(
+            {f"{item.adapter_id}@{item.adapter_version}" for item in observations}
+        ),
+        agent_review_status=status,
+        agent_terminal_outcome=terminal_outcome,
+        model_annotations=annotations,
+    )
+
+
+def compile_verified_source_inventory(
+    *,
+    inventory_id: str,
+    specification_id: str,
+    requirements: TrainingDatasetComponentRequirements,
+    fragments: list[VerifiedSourceInventoryFragment],
+) -> VerifiedSourceInventory:
+    """Deduplicate identical records while retaining conflicting verified observations."""
+
+    records: dict[str, VerifiedSourceRecord] = {}
+    for fragment in fragments:
+        for candidate in fragment.candidate_records:
+            existing = records.get(candidate.source_id)
+            if existing is None:
+                records[candidate.source_id] = candidate
+                continue
+            records[candidate.source_id] = existing.model_copy(
+                update={
+                    "artifact_hashes": sorted(
+                        set(existing.artifact_hashes + candidate.artifact_hashes)
+                    ),
+                    "observation_ids": sorted(
+                        set(existing.observation_ids + candidate.observation_ids)
+                    ),
+                    "adapter_provenance": sorted(
+                        set(existing.adapter_provenance + candidate.adapter_provenance)
+                    ),
+                    "strengths": sorted(set(existing.strengths + candidate.strengths)),
+                    "next_required_ingestion_actions": sorted(
+                        set(
+                            existing.next_required_ingestion_actions
+                            + candidate.next_required_ingestion_actions
+                        )
+                    ),
+                    "model_annotations": {
+                        **existing.model_annotations,
+                        **candidate.model_annotations,
+                    },
+                }
+            )
+    required_roles = list(dict.fromkeys(item.role for item in requirements.requirements))
+    covered = {
+        role
+        for record in records.values()
+        for role in record.source_roles
+        if record.validation_status is SourceValidationStatus.VERIFIED
+        and any(
+            capability.component is role
+            and capability.status is not CapabilityStatus.UNAVAILABLE
+            for capability in record.capabilities
+        )
+    }
+    return VerifiedSourceInventory(
+        inventory_id=inventory_id,
+        version=1,
+        specification_id=specification_id,
+        sources=list(records.values()),
+        discovery_complete_for_roles=[role for role in required_roles if role in covered],
+        missing_roles=[role for role in required_roles if role not in covered],
+        limitations=sorted(
+            {
+                limitation
+                for fragment in fragments
+                for limitation in fragment.limitations
+            }
+        ),
+    )
 
 
 class CapabilityMatrixCell(StrictContract):
@@ -1376,6 +1686,9 @@ class SourceCapabilityMatrix(StrictContract):
     inventory_version: int = Field(ge=1)
     components: list[ComponentRole]
     cells: list[CapabilityMatrixCell] = Field(default_factory=list, max_length=10_000)
+    field_cells: list[FieldCapabilityMatrixCell] = Field(
+        default_factory=list, max_length=50_000
+    )
 
     @model_validator(mode="after")
     def unique_cells(self) -> SourceCapabilityMatrix:
@@ -1383,6 +1696,13 @@ class SourceCapabilityMatrix(StrictContract):
         if len(keys) != len(set(keys)):
             raise ValueError("capability matrix cells must be unique")
         return self
+
+
+class FieldCapabilityMatrixCell(StrictContract):
+    source_id: str
+    field: str
+    status: CapabilityStatus
+    evidence_references: list[str] = Field(default_factory=list, max_length=100)
 
 
 def build_capability_matrix(
@@ -1404,11 +1724,63 @@ def build_capability_matrix(
                     evidence_references=capability.evidence_references if capability else [],
                 )
             )
+    field_cells: list[FieldCapabilityMatrixCell] = []
+    field_definitions = {
+        "endpoint_activity": lambda item: bool(item.measurement_fields),
+        "assay_metadata": lambda item: ComponentRole.ASSAY_METADATA in item.source_roles,
+        "counter_screen_metadata": lambda item: ComponentRole.COUNTER_SCREEN
+        in item.source_roles,
+        "transcriptomic_matrix": lambda item: ComponentRole.TRANSCRIPTOMIC_MATRIX
+        in item.source_roles,
+        "transcriptomic_conditions": lambda item: bool(item.experimental_context_fields),
+        "controls_reference": lambda item: any(
+            "control" in field.casefold() or "reference" in field.casefold()
+            for field in item.experimental_context_fields
+        ),
+        "compound_name": lambda item: any(
+            "name" in field.casefold() for field in item.identifier_fields
+        ),
+        "source_specific_id": lambda item: bool(item.stable_accession),
+        "pubchem_cid": lambda item: "PubChem CID" in item.identifier_fields,
+        "inchikey": lambda item: "InChIKey" in item.identifier_fields,
+        "canonical_smiles": lambda item: "canonical SMILES" in item.structure_fields,
+        "isomeric_smiles": lambda item: "isomeric SMILES" in item.structure_fields,
+        "processed_matrix": lambda item: any(
+            "processed" in value.casefold() for value in item.downloadable_artifacts
+        ),
+        "raw_matrix": lambda item: any(
+            "raw" in value.casefold() for value in item.downloadable_artifacts
+        ),
+        "downloadable_records": lambda item: bool(item.downloadable_artifacts),
+        "public_access": lambda item: item.verified_public_availability,
+        "licence": lambda item: item.licence_status
+        is not CapabilityStatus.UNRESOLVED,
+        "exact_counts": lambda item: item.count_status is ObservationCountStatus.EXACT,
+        "exact_overlap_computable": lambda _item: False,
+    }
+    for source in inventory.sources:
+        for field_name, present in field_definitions.items():
+            status = CapabilityStatus.UNAVAILABLE
+            if present(source):
+                status = source.access_status
+            elif field_name == "exact_overlap_computable":
+                status = CapabilityStatus.REQUIRES_DOWNLOAD
+            elif field_name in {"licence", "exact_counts"}:
+                status = CapabilityStatus.UNRESOLVED
+            field_cells.append(
+                FieldCapabilityMatrixCell(
+                    source_id=source.source_id,
+                    field=field_name,
+                    status=status,
+                    evidence_references=source.source_references,
+                )
+            )
     return SourceCapabilityMatrix(
         inventory_id=inventory.inventory_id,
         inventory_version=inventory.version,
         components=components,
         cells=cells,
+        field_cells=field_cells,
     )
 
 
@@ -1672,6 +2044,85 @@ class AssemblyGapReport(StrictContract):
         ]
 
 
+def build_source_assembly_gap_report(
+    *,
+    report_id: str,
+    inventory: VerifiedSourceInventory,
+    matrix: SourceCapabilityMatrix,
+) -> AssemblyGapReport:
+    """Describe only deterministic pre-ingestion gaps; never launch a follow-up search."""
+
+    gaps: list[AssemblyGap] = []
+    status_by_component: dict[ComponentRole, set[CapabilityStatus]] = defaultdict(set)
+    for cell in matrix.cells:
+        status_by_component[cell.component].add(cell.status)
+    descriptions = {
+        ComponentRole.ENDPOINT_ACTIVITY: "No direct endpoint-activity records are verified.",
+        ComponentRole.TRANSCRIPTOMIC_MATRIX: (
+            "No perturbational transcriptomic source is verified."
+        ),
+        ComponentRole.SOURCE_ID_MAPPING: "No compound identifier bridge is verified.",
+        ComponentRole.CHEMICAL_STRUCTURE: "No canonical chemical-structure path is verified.",
+        ComponentRole.TRANSCRIPTOMIC_CONDITIONS: (
+            "Transcriptomic condition metadata is insufficient or unresolved."
+        ),
+        ComponentRole.SAMPLE_METADATA: "Sample controls or reference metadata are unresolved.",
+        ComponentRole.PROVENANCE_LICENSE: "Licence or public-access metadata is unresolved.",
+    }
+    for role in inventory.missing_roles:
+        description = descriptions.get(role, f"Required component {role.value} is unresolved.")
+        gaps.append(
+            AssemblyGap(
+                gap_id=f"gap-{role.value}",
+                component=role,
+                description=description,
+                blocking=True,
+                targeted_search_request=(
+                    f"Later reviewed discovery may inspect official sources for {role.value}."
+                ),
+            )
+        )
+    for role, statuses in status_by_component.items():
+        if CapabilityStatus.REQUIRES_DOWNLOAD in statuses:
+            gaps.append(
+                AssemblyGap(
+                    gap_id=f"gap-{role.value}-requires-download",
+                    component=role,
+                    description=(
+                        f"Verified {role.value} metadata requires a later bounded ingestion step."
+                    ),
+                    blocking=False,
+                    targeted_search_request=(
+                        f"Do not search again; ingest the approved {role.value} source artifact."
+                    ),
+                )
+            )
+    if inventory.sources and not any(
+        {"PubChem CID", "InChIKey"} & set(item.identifier_fields)
+        for item in inventory.sources
+    ):
+        gaps.append(
+            AssemblyGap(
+                gap_id="gap-compound-identifier-bridge",
+                component=ComponentRole.SOURCE_ID_MAPPING,
+                description="No deterministic compound identifier bridge is currently verified.",
+                blocking=True,
+                targeted_search_request=(
+                    "Later reviewed discovery may inspect a bounded official identity mapping."
+                ),
+            )
+        )
+    return AssemblyGapReport(
+        report_id=report_id,
+        inventory_id=inventory.inventory_id,
+        inventory_version=inventory.version,
+        gaps=gaps,
+        discovery_round=0,
+        maximum_discovery_rounds=0,
+        requires_human_scope_review=bool(gaps),
+    )
+
+
 class TrainingDatasetAssemblyReview(StrictContract):
     review_id: str = Field(min_length=3, max_length=160)
     specification_id: str
@@ -1757,7 +2208,7 @@ SPECIALIZED_AGENT_SEQUENCE = [
     SpecializedAgentDefinition(
         agent_name="Activity Evidence Discovery Agent",
         role="worker",
-        output_schema_name="VerifiedSourceInventoryFragment",
+        output_schema_name="DiscoveryAgentReviewOutcome",
         allowed_tools=[
             "search_activity_sources",
             "validate_activity_source",
@@ -1773,7 +2224,7 @@ SPECIALIZED_AGENT_SEQUENCE = [
     SpecializedAgentDefinition(
         agent_name="Transcriptomic Evidence Discovery Agent",
         role="worker",
-        output_schema_name="VerifiedSourceInventoryFragment",
+        output_schema_name="DiscoveryAgentReviewOutcome",
         allowed_tools=[
             "search_transcriptomic_sources",
             "validate_transcriptomic_source",
@@ -1791,7 +2242,7 @@ SPECIALIZED_AGENT_SEQUENCE = [
     SpecializedAgentDefinition(
         agent_name="Chemical Identity and Structure Source Discovery Agent",
         role="worker",
-        output_schema_name="VerifiedSourceInventoryFragment",
+        output_schema_name="DiscoveryAgentReviewOutcome",
         allowed_tools=[
             "inspect_source_identity_fields",
             "inspect_source_record_availability",
@@ -1804,12 +2255,12 @@ SPECIALIZED_AGENT_SEQUENCE = [
     SpecializedAgentDefinition(
         agent_name="Supporting Metadata Discovery Agent",
         role="worker",
-        output_schema_name="VerifiedSourceInventoryFragment",
+        output_schema_name="DiscoveryAgentReviewOutcome",
         allowed_tools=[
-            "fetch_activity_source_metadata",
-            "fetch_transcriptomic_source_metadata",
-            "inspect_signature_conditions",
-            "inspect_source_record_availability",
+            "inspect_supporting_metadata",
+            "inspect_official_file_listing",
+            "inspect_linked_publications",
+            "inspect_source_access",
         ],
         receives_artifacts=["component_requirements", "discovered_source_fragments"],
         produces_artifact="supporting_metadata_inventory_fragment",
@@ -1862,23 +2313,25 @@ SPECIALIZED_AGENT_INSTRUCTIONS = {
         "Discover bounded official public compound-level activity evidence for the approved "
         "endpoint specification. Use only exposed tools. Distinguish antagonism, agonism, "
         "binding, downstream effects, cytotoxicity, and assay interference. Return only source "
-        "records supported by tool evidence; an empty fragment is valid."
+        "review annotations for persisted observation IDs only; an empty review is valid."
     ),
     "Transcriptomic Evidence Discovery Agent": (
         "Discover bounded official public chemical-perturbation transcriptomic sources using "
         "only exposed tools. Reject disease cohorts and genetic perturbations as substitutes "
-        "for compound-induced responses. Return only source records supported by tool evidence; "
-        "an empty fragment is valid."
+        "for compound-induced responses. Return only annotations for persisted observation IDs; "
+        "an empty review is valid."
     ),
     "Chemical Identity and Structure Source Discovery Agent": (
         "Assess identity and structure resources and mapping paths for already discovered "
         "sources using only exposed deterministic tools. Do not resolve large compound sets in "
-        "the model and do not introduce undiscovered sources as verified records."
+        "the model and do not introduce undiscovered sources as verified records. Return only "
+        "bounded annotations over persisted observation IDs."
     ),
     "Supporting Metadata Discovery Agent": (
         "Inspect only the missing assay, condition, sample, provenance, and licence metadata "
         "needed by the approved component requirements. Use exposed tools and return explicit "
-        "unresolved fields instead of assumptions."
+        "unresolved fields instead of assumptions. Return only bounded annotations over "
+        "persisted observation IDs."
     ),
     "Training Dataset Assembly Strategy Planner": (
         "Propose source-neutral assembly strategies only from the verified source inventory and "
