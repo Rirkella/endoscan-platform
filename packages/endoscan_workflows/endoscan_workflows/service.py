@@ -62,6 +62,7 @@ STATE_PROGRESS = {
     WorkflowState.DRAFT: 0,
     WorkflowState.DISCOVERING_DATA: 8,
     WorkflowState.AWAITING_DATASET_APPROVAL: 15,
+    WorkflowState.AWAITING_SEARCH_REVIEW: 15,
     WorkflowState.CURATING_DATA: 22,
     WorkflowState.AWAITING_LABEL_APPROVAL: 30,
     WorkflowState.RESOLVING_IDENTITIES: 38,
@@ -430,18 +431,45 @@ class WorkflowService:
             trace_artifact.sha256,
         ]
         if output.recommended_candidate_id is None:
-            return self.transition(
+            self.transition(
                 workflow_id,
                 TransitionRequest(
-                    target_state=WorkflowState.FAILED,
+                    target_state=WorkflowState.AWAITING_SEARCH_REVIEW,
                     expected_version=expected_version,
                     idempotency_key=f"{idempotency_key}:no-valid-candidate",
                     initiator=ActorType.ORCHESTRATOR,
                     initiator_id="workflow-service",
-                    reason="Discovery completed without a public_valid dataset recommendation.",
+                    reason=(
+                        "Discovery completed without a scientifically suitable dataset "
+                        "recommendation and requires human search review."
+                    ),
                     artifact_hashes=artifact_hashes,
                 ),
             )
+            search_review = ApprovalRequest(
+                workflow_id=workflow_id,
+                stage=WorkflowState.AWAITING_SEARCH_REVIEW,
+                approval_type=ApprovalType.SEARCH_REVISION,
+                proposed_decision=f"Review bounded {run_mode} discovery revision {revision}.",
+                evidence_summary=output.decision_summary,
+                source_references=[candidate.source for candidate in output.candidates],
+                limitations=output.limitations,
+                artifact_hashes=[
+                    candidate_artifact.sha256,
+                    strategy_artifact.sha256,
+                    recommendation_artifact.sha256,
+                ],
+                agent_recommendation=(
+                    output.proposed_next_search_strategy
+                    or "Revise one bounded search dimension before another discovery attempt."
+                ),
+                requested_action="Request a revised search or cancel the workflow.",
+            )
+            self.create_approval(
+                search_review,
+                idempotency_key=f"{idempotency_key}:search-review-v{revision}",
+            )
+            return self.get_build(workflow_id)
         self.transition(
             workflow_id,
             TransitionRequest(
@@ -536,9 +564,7 @@ class WorkflowService:
                     "duration_ms": call.get("duration_ms"),
                     "original_arguments": result_payload.get("original_arguments"),
                     "normalized_arguments": result_payload.get("normalized_arguments"),
-                    "normalization_warnings": result_payload.get(
-                        "normalization_warnings", []
-                    ),
+                    "normalization_warnings": result_payload.get("normalization_warnings", []),
                     "source_diagnostic": result_payload.get("source_diagnostic"),
                     "error": result_payload.get("error"),
                     "bounded_output": bounded_output,
@@ -1282,8 +1308,35 @@ class WorkflowService:
         )
         if not advance:
             return self._snapshot(session, build)
+        if approval.approval_type == ApprovalType.SEARCH_REVISION.value:
+            if decision.decision not in {
+                ApprovalDecisionValue.REQUEST_REVISION,
+                ApprovalDecisionValue.REJECT,
+                ApprovalDecisionValue.CANCEL_WORKFLOW,
+            }:
+                raise InvalidTransition(
+                    "Search review permits only revised search, rejection, or cancellation."
+                )
+            target = (
+                WorkflowState.DISCOVERING_DATA
+                if decision.decision is ApprovalDecisionValue.REQUEST_REVISION
+                else WorkflowState.CANCELLED
+            )
+            return self._apply_transition(
+                session,
+                build,
+                TransitionRequest(
+                    target_state=target,
+                    expected_version=build.version,
+                    idempotency_key=f"{decision.idempotency_key}:transition",
+                    initiator=ActorType.HUMAN,
+                    initiator_id=decision.reviewer_id,
+                    reason=f"Search review decision: {decision.decision.value}.",
+                    artifact_hashes=decision.artifact_hashes,
+                ),
+            )
         if approval.approval_type != ApprovalType.DATASET_SELECTION.value:
-            raise InvalidTransition("Phase 0 advances only dataset-selection approvals.")
+            raise InvalidTransition("This approval type does not advance the Phase-1 workflow.")
         target_by_decision = {
             ApprovalDecisionValue.APPROVE: WorkflowState.CURATING_DATA,
             ApprovalDecisionValue.CHOOSE_ALTERNATIVE: WorkflowState.CURATING_DATA,
@@ -1458,6 +1511,7 @@ class WorkflowService:
             return WorkflowStatus.DRAFT
         if state in {
             WorkflowState.AWAITING_DATASET_APPROVAL,
+            WorkflowState.AWAITING_SEARCH_REVIEW,
             WorkflowState.AWAITING_LABEL_APPROVAL,
             WorkflowState.AWAITING_TRAINING_APPROVAL,
             WorkflowState.AWAITING_SCIENTIFIC_APPROVAL,

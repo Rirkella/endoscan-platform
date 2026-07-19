@@ -27,6 +27,7 @@ class WorkflowState(str, Enum):
     DRAFT = "DRAFT"
     DISCOVERING_DATA = "DISCOVERING_DATA"
     AWAITING_DATASET_APPROVAL = "AWAITING_DATASET_APPROVAL"
+    AWAITING_SEARCH_REVIEW = "AWAITING_SEARCH_REVIEW"
     CURATING_DATA = "CURATING_DATA"
     AWAITING_LABEL_APPROVAL = "AWAITING_LABEL_APPROVAL"
     RESOLVING_IDENTITIES = "RESOLVING_IDENTITIES"
@@ -74,6 +75,7 @@ class ActorType(str, Enum):
 class ApprovalType(str, Enum):
     ENDPOINT_DEFINITION = "endpoint_definition"
     DATASET_SELECTION = "dataset_selection"
+    SEARCH_REVISION = "search_revision"
     LABEL_RULES = "label_rules"
     IDENTITY_CONFLICT = "identity_conflict"
     TRAINING_AUTHORIZATION = "training_authorization"

@@ -189,7 +189,7 @@ def test_adapter_boundary_probe_reaches_model_boundary_without_state_or_network(
             "exception_class": None,
             "sdk_version": "0.18.2",
             "model": "gpt-5.4-mini",
-            "tool_count": 6,
+            "tool_count": 1,
             "output_schema_name": "DiscoveryOutput",
             "network_requests": 0,
         }

@@ -22,10 +22,10 @@ class AgentConfiguration(BaseModel):
     run_mode: AgentRunMode = AgentRunMode.REPLAY
     api_key: SecretStr | None = None
     maximum_turns: int = Field(default=6, ge=1, le=32)
-    maximum_tool_calls: int = Field(default=6, ge=1, le=64)
+    maximum_tool_calls: int = Field(default=8, ge=1, le=64)
     timeout_seconds: float = Field(default=120.0, gt=0, le=600)
-    maximum_input_tokens: int = Field(default=8_000, ge=1)
-    maximum_output_tokens: int = Field(default=1_500, ge=1)
+    maximum_input_tokens: int = Field(default=20_000, ge=1)
+    maximum_output_tokens: int = Field(default=2_500, ge=1)
     maximum_cost_usd: float = Field(default=0.20, ge=0, le=100)
     retry_count: int = Field(default=0, ge=0, le=5)
     input_cost_per_million_usd: float = Field(default=0.75, ge=0)
@@ -66,10 +66,10 @@ class AgentConfiguration(BaseModel):
             run_mode=AgentRunMode(mode),
             api_key=SecretStr(key) if key else None,
             maximum_turns=int(os.environ.get("ENDOSCAN_AGENT_MAX_TURNS", "6")),
-            maximum_tool_calls=int(os.environ.get("ENDOSCAN_AGENT_MAX_TOOL_CALLS", "6")),
+            maximum_tool_calls=int(os.environ.get("ENDOSCAN_AGENT_MAX_TOOL_CALLS", "8")),
             timeout_seconds=float(os.environ.get("ENDOSCAN_AGENT_TIMEOUT_SECONDS", "120")),
-            maximum_input_tokens=int(os.environ.get("ENDOSCAN_AGENT_MAX_INPUT_TOKENS", "8000")),
-            maximum_output_tokens=int(os.environ.get("ENDOSCAN_AGENT_MAX_OUTPUT_TOKENS", "1500")),
+            maximum_input_tokens=int(os.environ.get("ENDOSCAN_AGENT_MAX_INPUT_TOKENS", "20000")),
+            maximum_output_tokens=int(os.environ.get("ENDOSCAN_AGENT_MAX_OUTPUT_TOKENS", "2500")),
             maximum_cost_usd=float(os.environ.get("ENDOSCAN_AGENT_MAX_COST_USD", "0.20")),
             retry_count=int(os.environ.get("ENDOSCAN_AGENT_RETRY_COUNT", "0")),
             input_cost_per_million_usd=float(

@@ -15,7 +15,12 @@ from pydantic import SecretStr
 
 from endoscan_workflows.boundary_probe import AdapterBoundaryProbe
 from endoscan_workflows.config import AgentConfiguration, AgentRunMode
-from endoscan_workflows.discovery import DISCOVERY_TOOLS, DiscoveryOutput, discovery_request
+from endoscan_workflows.discovery import (
+    DISCOVERY_STAGE_TOOLS,
+    DISCOVERY_TOOLS,
+    DiscoveryOutput,
+    discovery_request,
+)
 from endoscan_workflows.openai_provider import TOOL_ENVELOPE, OpenAIAgentProvider
 from endoscan_workflows.tools import phase1_tool_registry
 
@@ -65,7 +70,7 @@ def test_exact_production_adapter_reaches_model_boundary_without_network(monkeyp
     assert result.model_call_boundary_reached is True
     assert result.network_requests == 0
     assert result.sdk_version == "0.18.2"
-    assert result.tool_count == len(DISCOVERY_TOOLS) == 6
+    assert result.tool_count == len(DISCOVERY_STAGE_TOOLS["search_planning"]) == 1
     assert result.output_schema_name == "DiscoveryOutput"
     assert result.developer_message is None
 
@@ -85,12 +90,15 @@ def test_production_agent_tools_and_output_schema_are_strict_sdk_inputs() -> Non
         configuration=configuration,
     )
     adapter = OpenAIAgentProvider(configuration, tools)
+    request = request.model_copy(
+        update={"available_tools": DISCOVERY_STAGE_TOOLS["search_planning"]}
+    )
     agent = adapter._build_agent(request)
     assert agent.instructions == request.instructions
     assert agent.model == "gpt-5.4-mini"
     assert agent.output_type is DiscoveryOutput
     assert agent.tool_use_behavior == "stop_on_first_tool"
-    assert len(agent.tools) == 6
+    assert len(agent.tools) == 1
     for name in DISCOVERY_TOOLS:
         ensure_strict_json_schema(copy.deepcopy(tools.get(name).input_model.model_json_schema()))
     AgentOutputSchema(DiscoveryOutput)

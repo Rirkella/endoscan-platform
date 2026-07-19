@@ -3,7 +3,7 @@ import type { AdminBuild, AdminTimelineEvent } from "./api/types";
 export const WORKFLOW_STAGES = [
   { label: "Definition", states: ["DRAFT"] },
   { label: "Discovery", states: ["DISCOVERING_DATA"] },
-  { label: "Dataset review", states: ["AWAITING_DATASET_APPROVAL"] },
+  { label: "Dataset review", states: ["AWAITING_DATASET_APPROVAL", "AWAITING_SEARCH_REVIEW"] },
   { label: "Curation", states: ["CURATING_DATA", "AWAITING_LABEL_APPROVAL"] },
   { label: "Identity", states: ["RESOLVING_IDENTITIES"] },
   { label: "Quality audit", states: ["AUDITING_DATASET", "AUDITING_LEAKAGE"] },
@@ -17,6 +17,7 @@ const STATE_LABELS: Record<string, string> = {
   DRAFT: "Draft ready to start",
   DISCOVERING_DATA: "Searching for candidate datasets",
   AWAITING_DATASET_APPROVAL: "Waiting for dataset review",
+  AWAITING_SEARCH_REVIEW: "Waiting for revised-search review",
   CURATING_DATA: "Preparing the selected dataset",
   AWAITING_LABEL_APPROVAL: "Waiting for label review",
   RESOLVING_IDENTITIES: "Resolving compound identities",
@@ -137,6 +138,10 @@ export function toolLabel(name: string): string {
     list_known_source_adapters: "Listed available source adapters",
     summarize_existing_endpoint_pipeline: "Reviewed the existing endpoint pipeline",
     create_dataset_candidate_artifact: "Prepared candidate comparison artifact",
+    search_geo_series: "Searched GEO Series",
+    validate_geo_accessions: "Validated GEO accessions",
+    inspect_geo_candidates: "Inspected candidate metadata and sample design",
+    compare_dataset_candidates: "Compared candidate facts",
   };
   return labels[name] ?? humanizeMachineValue(name);
 }

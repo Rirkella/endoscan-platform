@@ -328,6 +328,40 @@ class GeoSampleDesignOutput(ToolContract):
     prompt_injection_warnings: list[str]
 
 
+class GeoCandidateInspectionResult(ToolContract):
+    """Compact verified facts for one independently inspected GEO candidate."""
+
+    schema_version: str = "1.0.0"
+    accession: str
+    status: Literal["inspected", "failed", "not_public_valid"]
+    verified_title: str = Field(default="", max_length=500)
+    organism: list[str] = Field(default_factory=list, max_length=4)
+    study_type: list[str] = Field(default_factory=list, max_length=4)
+    sample_count: int = Field(default=0, ge=0)
+    biological_context: str = Field(default="", max_length=800)
+    cell_lines_or_tissues: list[str] = Field(default_factory=list, max_length=8)
+    treatment_groups: list[str] = Field(default_factory=list, max_length=8)
+    likely_control_groups: list[str] = Field(default_factory=list, max_length=8)
+    replicate_information: dict[str, int] = Field(default_factory=dict, max_length=12)
+    dose_metadata: list[str] = Field(default_factory=list, max_length=8)
+    time_metadata: list[str] = Field(default_factory=list, max_length=8)
+    linked_publication_ids: list[str] = Field(default_factory=list, max_length=5)
+    metadata_completeness: Literal["low", "moderate", "high"] = "low"
+    explicit_uncertainties: list[str] = Field(default_factory=list, max_length=10)
+    source_artifact_references: list[str] = Field(default_factory=list, max_length=4)
+    evidence_references: list[str] = Field(default_factory=list, max_length=12)
+    cache_status: Literal["live", "cached", "not_available"] = "not_available"
+    safe_error_category: str | None = Field(default=None, max_length=120)
+
+
+class GeoCandidatesInspectionOutput(ToolContract):
+    schema_version: str = "1.0.0"
+    results: list[GeoCandidateInspectionResult] = Field(min_length=1, max_length=5)
+    inspected_count: int = Field(ge=0, le=5)
+    failed_count: int = Field(ge=0, le=5)
+    evidence_references: list[str] = Field(default_factory=list, max_length=50)
+
+
 class PublicationMetadataInput(ToolContract):
     publication_ids: list[str] = Field(min_length=1, max_length=10)
 
@@ -346,17 +380,17 @@ class DatasetComparisonCandidate(ToolContract):
 
     accession: str = Field(pattern=r"^GSE[1-9][0-9]{1,8}$")
     title: str = Field(max_length=500)
-    organism: list[str] = Field(default_factory=list, max_length=10)
+    organism: list[str] = Field(default_factory=list, max_length=4)
     sample_count: int = Field(default=0, ge=0, le=1_000_000)
-    biological_context: str = Field(default="", max_length=2000)
-    likely_treatment_groups: list[str] = Field(default_factory=list, max_length=50)
-    likely_control_groups: list[str] = Field(default_factory=list, max_length=50)
-    dose_time_evidence: str = Field(default="", max_length=2000)
-    source_artifact_ids: list[str] = Field(default_factory=list, max_length=50)
+    biological_context: str = Field(default="", max_length=800)
+    likely_treatment_groups: list[str] = Field(default_factory=list, max_length=8)
+    likely_control_groups: list[str] = Field(default_factory=list, max_length=8)
+    dose_time_evidence: str = Field(default="", max_length=800)
+    source_artifact_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
 class CompareDatasetCandidatesInput(ToolContract):
-    candidates: list[DatasetComparisonCandidate] = Field(min_length=1, max_length=10)
+    candidates: list[DatasetComparisonCandidate] = Field(min_length=1, max_length=5)
 
 
 class CompareDatasetCandidatesOutput(ToolContract):
@@ -381,6 +415,7 @@ class DiscoveryToolService:
         self.ncbi_email = ncbi_email
         self.ncbi_api_key = ncbi_api_key
         self._search_state: dict[tuple[str, str | None], dict[str, Any]] = {}
+        self._public_valid_accessions: dict[str, set[str]] = {}
 
     def search_geo_series(
         self, request: SearchGeoSeriesInput, invocation: ToolInvocation
@@ -571,6 +606,9 @@ class DiscoveryToolService:
         results: list[GeoValidationOutput] = []
         for accession in request.accessions:
             results.append(self._validate_geo_candidate(accession, invocation))
+        workflow_key = invocation.workflow_id or "unbound"
+        validated = self._public_valid_accessions.setdefault(workflow_key, set())
+        validated.update(item.accession for item in results if item.status == "public_valid")
         valid = sum(item.status == "public_valid" for item in results)
         unavailable = sum(
             item.status in {"indexed_but_record_unavailable", "temporarily_unavailable"}
@@ -582,9 +620,7 @@ class DiscoveryToolService:
             unavailable_count=unavailable,
             invalid_count=len(results) - valid - unavailable,
             source_artifact_references=[
-                f"artifact:{item.source_artifact_id}"
-                for item in results
-                if item.source_artifact_id
+                f"artifact:{item.source_artifact_id}" for item in results if item.source_artifact_id
             ],
             cache_states=[item.cache_status for item in results],
         )
@@ -671,9 +707,7 @@ class DiscoveryToolService:
                     else "record_type_mismatch"
                 ),
                 cache_status=cache_status,
-                source_diagnostic=diagnostic.model_copy(
-                    update={"parser_outcome": parser_outcome}
-                ),
+                source_diagnostic=diagnostic.model_copy(update={"parser_outcome": parser_outcome}),
             )
         title = str(parsed.get("title") or "").strip()
         if not title:
@@ -723,9 +757,7 @@ class DiscoveryToolService:
                 validation_timestamp=now,
                 safe_warning_or_error_category="record_not_public",
                 cache_status=cache_status,
-                source_diagnostic=diagnostic.model_copy(
-                    update={"parser_outcome": "not_public"}
-                ),
+                source_diagnostic=diagnostic.model_copy(update={"parser_outcome": "not_public"}),
             )
         return GeoValidationOutput(
             accession=requested,
@@ -744,9 +776,7 @@ class DiscoveryToolService:
             ],
             validation_timestamp=now,
             cache_status=cache_status,
-            source_diagnostic=diagnostic.model_copy(
-                update={"parser_outcome": "public_valid"}
-            ),
+            source_diagnostic=diagnostic.model_copy(update={"parser_outcome": "public_valid"}),
         )
 
     @staticmethod
@@ -888,6 +918,140 @@ class DiscoveryToolService:
             evidence_references=[f"artifact:{artifact_id}#Sample_records"],
             uncertainty=uncertainty,
             prompt_injection_warnings=warnings,
+        )
+
+    def inspect_geo_candidates(
+        self, request: GeoAccessionsInput, invocation: ToolInvocation
+    ) -> GeoCandidatesInspectionOutput:
+        """Batch compact metadata and sample-design facts for public-valid candidates.
+
+        Each accession is independent. The tool intentionally returns verified facts and
+        uncertainty only; scientific suitability and recommendation remain agent decisions.
+        """
+
+        workflow_key = invocation.workflow_id or "unbound"
+        public_valid = self._public_valid_accessions.get(workflow_key, set())
+        results: list[GeoCandidateInspectionResult] = []
+        for accession in request.accessions:
+            if accession not in public_valid:
+                results.append(
+                    GeoCandidateInspectionResult(
+                        accession=accession,
+                        status="not_public_valid",
+                        explicit_uncertainties=[
+                            "The accession was not established as public_valid in this workflow."
+                        ],
+                        safe_error_category="public_validation_required",
+                    )
+                )
+                continue
+            try:
+                idempotency_prefix = (invocation.idempotency_key or "inspect-geo-candidates")[:120]
+                metadata_invocation = invocation.model_copy(
+                    update={
+                        "tool_name": "fetch_geo_series_metadata",
+                        "idempotency_key": f"{idempotency_prefix}:{accession}:metadata",
+                    }
+                )
+                design_invocation = invocation.model_copy(
+                    update={
+                        "tool_name": "inspect_geo_sample_design",
+                        "idempotency_key": f"{idempotency_prefix}:{accession}:design",
+                    }
+                )
+                metadata = self.fetch_geo_series_metadata(
+                    GeoAccessionInput(accession=accession), metadata_invocation
+                )
+                design = self.inspect_geo_sample_design(
+                    GeoAccessionInput(accession=accession), design_invocation
+                )
+            except SourceToolError as exc:
+                results.append(
+                    GeoCandidateInspectionResult(
+                        accession=accession,
+                        status="failed",
+                        explicit_uncertainties=[
+                            "Official GEO metadata could not be parsed for this candidate."
+                        ],
+                        safe_error_category=(
+                            exc.diagnostic.source_error_category
+                            if exc.diagnostic
+                            else "candidate_source_failure"
+                        ),
+                    )
+                )
+                continue
+            except (KeyError, TypeError, ValueError):
+                results.append(
+                    GeoCandidateInspectionResult(
+                        accession=accession,
+                        status="failed",
+                        explicit_uncertainties=[
+                            "Stored GEO metadata could not be reduced into the inspection contract."
+                        ],
+                        safe_error_category="candidate_parser_failure",
+                    )
+                )
+                continue
+
+            uncertainties = [
+                *design.missing_metadata,
+                *design.uncertainty,
+            ][:10]
+            completeness_fields = (
+                bool(metadata.title),
+                bool(metadata.organism),
+                bool(metadata.study_type),
+                metadata.sample_count > 0,
+                bool(design.likely_treatment_groups),
+                bool(design.likely_control_groups),
+                bool(design.cell_lines_or_tissues),
+                bool(design.dose_fields or design.time_fields),
+            )
+            completeness_score = sum(completeness_fields)
+            completeness = (
+                "high"
+                if completeness_score >= 7
+                else "moderate"
+                if completeness_score >= 4
+                else "low"
+            )
+            evidence = list(
+                dict.fromkeys([*metadata.evidence_references, *design.evidence_references])
+            )[:12]
+            results.append(
+                GeoCandidateInspectionResult(
+                    accession=accession,
+                    status="inspected",
+                    verified_title=metadata.title[:500],
+                    organism=metadata.organism[:4],
+                    study_type=metadata.study_type[:4],
+                    sample_count=metadata.sample_count,
+                    biological_context=metadata.summary[:800],
+                    cell_lines_or_tissues=[item[:240] for item in design.cell_lines_or_tissues[:8]],
+                    treatment_groups=[item[:240] for item in design.likely_treatment_groups[:8]],
+                    likely_control_groups=[item[:240] for item in design.likely_control_groups[:8]],
+                    replicate_information=dict(list(sorted(design.replicate_counts.items()))[:12]),
+                    dose_metadata=[item[:240] for item in design.dose_fields[:8]],
+                    time_metadata=[item[:240] for item in design.time_fields[:8]],
+                    linked_publication_ids=metadata.related_publication_ids[:5],
+                    metadata_completeness=completeness,
+                    explicit_uncertainties=uncertainties,
+                    source_artifact_references=[f"artifact:{metadata.raw_source_artifact_id}"],
+                    evidence_references=evidence,
+                    cache_status=metadata.cache_status,
+                )
+            )
+        evidence_references = list(
+            dict.fromkeys(
+                reference for result in results for reference in result.evidence_references
+            )
+        )[:50]
+        return GeoCandidatesInspectionOutput(
+            results=results,
+            inspected_count=sum(item.status == "inspected" for item in results),
+            failed_count=sum(item.status != "inspected" for item in results),
+            evidence_references=evidence_references,
         )
 
     def fetch_publication_metadata(
@@ -1037,31 +1201,40 @@ class DiscoveryToolService:
             )
             text = response.content.decode("utf-8", errors="replace")
             if _looks_like_html_or_search_form(text):
-                diagnostic = response.diagnostic.model_copy(
-                    update={
-                        "source_error_category": "generic_geo_page",
-                        "exception_class": "SourceFormatError",
-                        "developer_message": (
-                            "GEO Accession Display returned a generic HTML/search document "
-                            "instead of a machine-readable Series record."
-                        ),
-                    }
-                ) if response.diagnostic else None
+                diagnostic = (
+                    response.diagnostic.model_copy(
+                        update={
+                            "source_error_category": "generic_geo_page",
+                            "exception_class": "SourceFormatError",
+                            "developer_message": (
+                                "GEO Accession Display returned a generic HTML/search document "
+                                "instead of a machine-readable Series record."
+                            ),
+                        }
+                    )
+                    if response.diagnostic
+                    else None
+                )
                 raise SourceFormatError(
                     "GEO returned a generic page instead of a Series record.",
                     diagnostic=diagnostic,
                 )
             parsed = _parse_geo_soft(text)
             if not parsed.get("record_accession") and not parsed.get("accession"):
-                diagnostic = response.diagnostic.model_copy(
-                    update={
-                        "source_error_category": "malformed_geo_record",
-                        "exception_class": "SourceFormatError",
-                        "developer_message": (
-                            "GEO text response did not contain a Series record marker or accession."
-                        ),
-                    }
-                ) if response.diagnostic else None
+                diagnostic = (
+                    response.diagnostic.model_copy(
+                        update={
+                            "source_error_category": "malformed_geo_record",
+                            "exception_class": "SourceFormatError",
+                            "developer_message": (
+                                "GEO text response did not contain a Series record marker "
+                                "or accession."
+                            ),
+                        }
+                    )
+                    if response.diagnostic
+                    else None
+                )
                 raise SourceFormatError(
                     "GEO returned an unrecognized machine-readable record.",
                     diagnostic=diagnostic,
@@ -1213,10 +1386,13 @@ def _artifact_content_type(source_content_type: str) -> str:
 
 def _looks_like_html_or_search_form(value: str) -> bool:
     head = value[:4_000].casefold()
-    return any(
-        marker in head
-        for marker in ("<!doctype html", "<html", "<form", "geo accession display")
-    ) and "^series" not in head
+    return (
+        any(
+            marker in head
+            for marker in ("<!doctype html", "<html", "<form", "geo accession display")
+        )
+        and "^series" not in head
+    )
 
 
 def _parse_geo_soft(value: str) -> dict[str, Any]:

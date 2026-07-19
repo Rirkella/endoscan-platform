@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from endoscan_workflows.benchmark import (
     BENCHMARK_CASES,
@@ -16,15 +16,20 @@ from endoscan_workflows.config import AgentConfiguration, AgentRunMode
 from endoscan_workflows.contracts import (
     AgentRunResult,
     AgentRunStatus,
+    ApprovalDecision,
+    ApprovalDecisionValue,
     EndpointBuildCreate,
+    UsageReport,
     WorkflowState,
 )
 from endoscan_workflows.discovery import (
     DatasetCandidate,
     DiscoveryOutput,
     EvidenceReference,
+    discovery_request,
     validate_evidence_references,
 )
+from endoscan_workflows.harness import AgentHarness
 
 
 def candidate(*, evidence: list[EvidenceReference], status: str = "recommended_for_human_review"):
@@ -122,14 +127,83 @@ def test_configuration_honors_bounded_live_settings(monkeypatch) -> None:
     configuration = AgentConfiguration.from_env()
     assert configuration.run_mode is AgentRunMode.LIVE
     assert configuration.maximum_turns == 6
-    assert configuration.maximum_tool_calls == 6
-    assert configuration.maximum_input_tokens == 8000
-    assert configuration.maximum_output_tokens == 1500
+    assert configuration.maximum_tool_calls == 8
+    assert configuration.maximum_input_tokens == 20000
+    assert configuration.maximum_output_tokens == 2500
     assert configuration.maximum_cost_usd == 0.20
     assert configuration.timeout_seconds == 120
     assert configuration.retry_count == 0
     assert configuration.public_status()["configured_budget"]["retry_count"] == 0
     assert "unit-test-key-never-display" not in json.dumps(configuration.public_status())
+
+
+def test_latest_live_precheck_projection_is_allowed_under_new_input_budget() -> None:
+    configuration = AgentConfiguration(
+        provider="openai",
+        run_mode=AgentRunMode.LIVE,
+        api_key=SecretStr("offline-placeholder"),
+    )
+    request = discovery_request(
+        workflow_id="build-offline-budget",
+        step_id="step-offline-budget",
+        endpoint_name="Oxidative stress",
+        biological_goal="Bounded offline budget check.",
+        configuration=configuration,
+    )
+    assert request.budget.maximum_input_tokens == 20000
+    assert (
+        AgentHarness._estimated_next_turn_budget_error(
+            request,
+            UsageReport(input_tokens=6703),
+            UsageReport(input_tokens=3353),
+            estimated_next_input=4218,
+        )
+        is None
+    )
+
+
+def test_discovery_substage_exposes_only_the_next_valid_tool() -> None:
+    request = discovery_request(
+        workflow_id="build-offline-stage-policy",
+        step_id="step-offline-stage-policy",
+        endpoint_name="Oxidative stress",
+        biological_goal="Bounded offline stage policy check.",
+        configuration=AgentConfiguration(
+            provider="openai",
+            run_mode=AgentRunMode.LIVE,
+            api_key=SecretStr("offline-placeholder"),
+        ),
+    )
+    assert AgentHarness._discovery_turn_policy(request, []) == (
+        "search_planning",
+        ["search_geo_series"],
+    )
+    histories = [
+        {
+            "tool_name": "search_geo_series",
+            "output": {"result_count": 5, "new_accession_count": 5},
+        },
+        {
+            "tool_name": "validate_geo_accessions",
+            "output": {"public_valid_count": 5},
+        },
+        {
+            "tool_name": "inspect_geo_candidates",
+            "output": {"inspected_count": 5},
+        },
+        {
+            "tool_name": "compare_dataset_candidates",
+            "output": {"candidates": []},
+        },
+    ]
+    expected = [
+        ("candidate_validation", ["validate_geo_accessions"]),
+        ("candidate_inspection", ["inspect_geo_candidates"]),
+        ("final_comparison", ["compare_dataset_candidates"]),
+        ("final_output", []),
+    ]
+    for history, policy in zip(histories, expected, strict=True):
+        assert AgentHarness._discovery_turn_policy(request, [history]) == policy
 
 
 def test_all_zero_searches_have_a_valid_no_candidate_contract() -> None:
@@ -172,7 +246,7 @@ def test_all_zero_searches_have_a_valid_no_candidate_contract() -> None:
     assert parsed.requires_human_review is True
 
 
-def test_no_candidate_output_fails_without_creating_dataset_approval(
+def test_no_candidate_output_enters_search_review_without_dataset_approval(
     workflow_runtime,
 ) -> None:
     _database, store, _providers, _harness, service = workflow_runtime
@@ -217,12 +291,31 @@ def test_no_candidate_output_fails_without_creating_dataset_approval(
         actor="test-admin",
         idempotency_key="no-candidate-review-start",
     )
-    assert started.current_stage is WorkflowState.FAILED
-    assert started.pending_approval_id is None
+    assert started.current_stage is WorkflowState.AWAITING_SEARCH_REVIEW
+    assert started.pending_approval_id is not None
     assert not any(
-        item["approval_type"] == "dataset_selection"
-        for item in service.list_approvals(started.id)
+        item["approval_type"] == "dataset_selection" for item in service.list_approvals(started.id)
     )
+    search_review = next(
+        item
+        for item in service.list_approvals(started.id)
+        if item["approval_type"] == "search_revision"
+    )
+    assert search_review["request"]["requested_action"] == (
+        "Request a revised search or cancel the workflow."
+    )
+    revised = service.decide_approval(
+        search_review["id"],
+        ApprovalDecision(
+            decision=ApprovalDecisionValue.REQUEST_REVISION,
+            reviewer_id="test-admin",
+            reviewer_comment="Broaden one bounded scientific filter.",
+            expected_version=started.version,
+            idempotency_key="no-candidate-revised-search",
+            artifact_hashes=search_review["request"]["artifact_hashes"],
+        ),
+    )
+    assert revised.current_stage is WorkflowState.DISCOVERING_DATA
     candidate_artifact = next(
         item
         for item in store.list_artifacts(started.id)

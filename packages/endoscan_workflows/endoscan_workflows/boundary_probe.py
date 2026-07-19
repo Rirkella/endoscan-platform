@@ -10,7 +10,7 @@ from agents.models.interface import Model, ModelProvider
 
 from .config import AgentConfiguration, AgentRunMode
 from .contracts import AdapterBoundaryProbeResult
-from .discovery import DISCOVERY_TOOLS, DiscoveryOutput, discovery_request
+from .discovery import DISCOVERY_STAGE_TOOLS, DiscoveryOutput, discovery_request
 from .openai_provider import OpenAIAgentProvider
 from .providers import sanitize_local_sdk_message
 from .tools import ToolRegistry
@@ -54,6 +54,16 @@ class AdapterBoundaryProbe:
                 update={"provider": "openai", "run_mode": AgentRunMode.LIVE}
             ),
         )
+        request = request.model_copy(
+            update={
+                "available_tools": DISCOVERY_STAGE_TOOLS["search_planning"],
+                "context": {
+                    **request.context,
+                    "discovery_substage": "search_planning",
+                    "tools_exposed": DISCOVERY_STAGE_TOOLS["search_planning"],
+                },
+            }
+        )
         adapter = OpenAIAgentProvider(self.configuration, self.tools)
         try:
             agent = adapter._build_agent(request)
@@ -96,7 +106,7 @@ class AdapterBoundaryProbe:
             exception_class=exception_class,
             sdk_version=OpenAIAgentProvider.sdk_version(),
             model=self.configuration.model,
-            tool_count=len(DISCOVERY_TOOLS),
+            tool_count=len(DISCOVERY_STAGE_TOOLS["search_planning"]),
             output_schema_name=DiscoveryOutput.__name__,
             network_requests=0,
         )

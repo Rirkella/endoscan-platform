@@ -1,7 +1,8 @@
 # Phase 1: bounded live dataset discovery
 
 Phase 1 adds one real provider adapter and one specialized Dataset Discovery and Evaluation Agent
-for the oxidative-stress endpoint. It ends at `AWAITING_DATASET_APPROVAL`. Dataset download,
+for the oxidative-stress endpoint. A recommendation ends at `AWAITING_DATASET_APPROVAL`; an honest
+no-candidate result ends at `AWAITING_SEARCH_REVIEW`. Dataset download,
 curation, labeling, training, endpoint registration, Anthropic, general web search, RAG, vector
 storage, multi-agent handoffs, and MCP remain deferred.
 
@@ -79,18 +80,25 @@ one concept with `OR`. For example, oxidative stress is combined with
 `(expression profiling by array OR expression profiling by high throughput sequencing)`. It never
 renders human and mouse, or array and sequencing, as mutually mandatory `AND` filters.
 
-## Bounded tools and sources
+## Bounded tools, substages, and sources
 
-The tool inventory is:
+The registered compatibility inventory remains bounded, but the live model sees only the tool
+schemas valid for its current discovery substage:
 
-1. `search_geo_series`
-2. `validate_geo_accession`
-3. `fetch_geo_series_metadata`
-4. `inspect_geo_sample_design`
-5. `fetch_publication_metadata` for dataset-linked PMIDs only
-6. `compare_dataset_candidates`
+1. search planning: `search_geo_series`
+2. candidate validation: `validate_geo_accessions`
+3. candidate inspection: `inspect_geo_candidates`
+4. final comparison: `compare_dataset_candidates`
+5. final structured output: no tools
 
-A run may execute at most four unique GEO searches within the six-call overall tool budget.
+`inspect_geo_candidates` accepts one to five accessions established as `public_valid` in the same
+workflow. It independently combines official Series metadata and sample-design inspection into
+compact facts: title, organism, study type, sample count, context, treatment/control groups,
+replicates, dose/time, linked PMIDs, completeness, uncertainty, and evidence references. One
+candidate parser/source failure does not fail the other candidates. The deterministic tool does not
+make suitability or recommendation decisions.
+
+A run may execute at most four unique GEO searches within the eight-call overall tool budget.
 Complementary focused searches are preferred over one compound query. Normalized duplicate queries
 are not executed twice, returned GSE accessions are deduplicated across searches, and broadening
 stops after two candidate accessions have been found. Candidate ranking begins only after official
@@ -143,19 +151,27 @@ count, and estimated cost. The harness enforces the configured turn/tool/token/c
 Admin Console shows the compact usage summary without hidden reasoning. For a non-default model,
 configure explicit per-million-token prices or the estimate remains zero rather than guessing.
 
-The controlled Phase-1 live defaults are six model turns, six total tool calls, 8,000 cumulative
-input tokens, 1,500 cumulative output tokens, `$0.20` estimated cost, zero provider retries, and a
+The controlled Phase-1 live defaults are six model turns, eight total tool calls, 20,000 cumulative
+input tokens, 2,500 cumulative output tokens, `$0.20` estimated cost, zero provider retries, and a
 120-second timeout. All remain environment-configurable. Usage is checked after every successful
 model turn. Before another turn, the harness uses the previous measured turn as a conservative
 estimate and stops before the provider call when that estimate would exceed the remaining token or
 cost budget.
 
-Provider context is compacted between turns: only the six latest structured tool-result entries are
-retained; result, publication, and sample lists are capped at five; abstracts and summaries are
-truncated; schema versions and retrieval timestamps are excluded from model context. The immutable
-trace and source artifacts still preserve the audit data. For a two-turn discovery this removes
-repeated raw/audit payloads and is expected to save roughly 30-60% of follow-up prompt content,
-depending on GEO metadata size, without removing safety instructions, schemas, or evidence rules.
+Provider context is compacted between turns into a structured discovery-state summary. It retains
+the endpoint goal, executed search plans, accessions, validation statuses, compact inspected facts,
+unresolved questions, remaining tool budget, and exact evidence references. Raw SOFT bodies, HTTP
+diagnostics after successful parsing, storage paths, event history, hashes not used as evidence,
+duplicate metadata, and internal traces are excluded. Candidate lists are capped at five;
+treatment/control groups, publications, excerpts, and field lengths are explicitly bounded. The
+immutable trace and source artifacts still preserve the audit data. Stage-specific schemas plus
+deterministic reduction are expected to remove roughly 40-70% of follow-up prompt content compared
+with replaying all six schemas and verbose tool outputs, depending on GEO metadata size.
+
+Before each turn the trace records safe estimates for system instructions, endpoint definition,
+exposed tool schemas, compact conversation state, and structured-output schema, together with
+cumulative input, projected next-turn input, remaining input/cost budgets, substage, and exposed
+tool count. Cached tokens remain separately reported and are not added a second time to total input.
 
 ## Evaluation
 
@@ -177,7 +193,7 @@ Use a monitored development environment, never a shared production deployment:
 
 1. Set `ENDOSCAN_ADMIN_MODE=development`, `ENDOSCAN_AGENT_PROVIDER=openai`,
    `ENDOSCAN_AGENT_MODE=live`, `OPENAI_API_KEY`, and the controlled acceptance limits: six model
-   turns, six tool calls, 8,000 cumulative input tokens, 1,500 cumulative output tokens, `$0.20`,
+   turns, eight tool calls, 20,000 cumulative input tokens, 2,500 cumulative output tokens, `$0.20`,
    zero provider retries, and 120 seconds.
 2. Start the normal API and web development services.
 3. Create one **Oxidative stress** endpoint build and start it once.

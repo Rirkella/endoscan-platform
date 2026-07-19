@@ -163,8 +163,45 @@ class AgentHarness:
                     started,
                 )
                 break
+            discovery_substage, exposed_tools = self._discovery_turn_policy(request, history)
+            turn_request = request.model_copy(
+                update={
+                    "available_tools": exposed_tools,
+                    "context": {
+                        **request.context,
+                        "discovery_substage": discovery_substage,
+                        "tools_exposed": exposed_tools,
+                        "tool_budget_remaining": max(
+                            0, request.budget.maximum_tool_calls - tool_calls
+                        ),
+                    },
+                }
+            )
+            context_components = self._context_component_estimates(provider, turn_request, history)
+            component_estimate = sum(context_components.values())
+            estimated_next_input = max(
+                component_estimate,
+                last_turn_usage.input_tokens if last_turn_usage else 0,
+            )
+            emit(
+                "agent_run.context_precheck",
+                "ready",
+                discovery_substage=discovery_substage,
+                tools_exposed=exposed_tools,
+                exposed_tool_count=len(exposed_tools),
+                cumulative_input_tokens=usage.input_tokens,
+                estimated_next_turn_input_tokens=estimated_next_input,
+                remaining_input_tokens=max(
+                    0, request.budget.maximum_input_tokens - usage.input_tokens
+                ),
+                remaining_cost_cents=max(0.0, request.budget.maximum_cost_cents - usage.cost_cents),
+                context_components=context_components,
+            )
             estimated_budget_error = self._estimated_next_turn_budget_error(
-                request, usage, last_turn_usage
+                request,
+                usage,
+                last_turn_usage,
+                estimated_next_input=estimated_next_input,
             )
             if estimated_budget_error:
                 code, estimate = estimated_budget_error
@@ -194,11 +231,13 @@ class AgentHarness:
                 turn=turn_number,
                 provider_invocation=provider_invocations,
                 retry_attempt=retries,
+                discovery_substage=discovery_substage,
+                tools_exposed=exposed_tools,
             )
             try:
                 turn = self._provider_turn(
                     provider,
-                    request,
+                    turn_request,
                     history,
                     interruption_request(),
                     timeout=max(0.01, request.budget.timeout_seconds - elapsed),
@@ -274,6 +313,8 @@ class AgentHarness:
                 turn=turns,
                 provider_invocation=provider_invocations,
                 kind=turn.kind,
+                discovery_substage=discovery_substage,
+                tools_exposed=exposed_tools,
             )
             budget_error = self._budget_error(request, usage)
             if budget_error:
@@ -315,7 +356,7 @@ class AgentHarness:
                     break
                 tool_calls += 1
                 requested = turn.tool_request
-                if requested.tool_name not in request.available_tools:
+                if requested.tool_name not in turn_request.available_tools:
                     tool_result = ToolResult(
                         tool_name=requested.tool_name,
                         status=ToolCallStatus.PROHIBITED,
@@ -329,15 +370,15 @@ class AgentHarness:
                         ),
                     )
                     call_id = self._record_prohibited_call(
-                        run_id, request, requested, tool_result, tool_calls
+                        run_id, turn_request, requested, tool_result, tool_calls
                     )
                 else:
-                    call_id, tool_result = self._invoke_tool(run_id, request, requested, tool_calls)
+                    call_id, tool_result = self._invoke_tool(
+                        run_id, turn_request, requested, tool_calls
+                    )
                 source_diagnostics = []
                 if tool_result.source_diagnostic:
-                    source_diagnostics.append(
-                        tool_result.source_diagnostic.model_dump(mode="json")
-                    )
+                    source_diagnostics.append(tool_result.source_diagnostic.model_dump(mode="json"))
                 if isinstance(tool_result.output, dict):
                     for candidate_result in tool_result.output.get("results", []):
                         if isinstance(candidate_result, dict) and isinstance(
@@ -348,6 +389,14 @@ class AgentHarness:
                     "tool_call.completed",
                     tool_result.status.value,
                     tool_name=requested.tool_name,
+                    discovery_substage=discovery_substage,
+                    tools_exposed=exposed_tools,
+                    tool_requested=requested.tool_name,
+                    tool_executed=(
+                        requested.tool_name
+                        if tool_result.status is not ToolCallStatus.PROHIBITED
+                        else None
+                    ),
                     tool_call_id=call_id,
                     replayed=tool_result.replayed,
                     model_supplied_arguments=tool_result.original_arguments,
@@ -376,6 +425,7 @@ class AgentHarness:
                             if tool_result.source_diagnostic
                             else None
                         ),
+                        "discovery_substage": discovery_substage,
                     }
                 )
                 if tool_result.status is not ToolCallStatus.COMPLETED:
@@ -390,9 +440,7 @@ class AgentHarness:
                         turns,
                         tool_calls,
                         started,
-                        retryable=(
-                            tool_result.error.retryable if tool_result.error else False
-                        ),
+                        retryable=(tool_result.error.retryable if tool_result.error else False),
                         category=(
                             tool_result.error.category if tool_result.error else "agent_runtime"
                         ),
@@ -776,6 +824,79 @@ class AgentHarness:
         return call_id
 
     @staticmethod
+    def _discovery_turn_policy(
+        request: AgentRunRequest, history: list[dict]
+    ) -> tuple[str, list[str]]:
+        """Select the bounded discovery substage and expose only valid tools."""
+
+        configured = request.context.get("stage_tool_sets")
+        if not isinstance(configured, dict) or not configured:
+            return "provider_default", list(request.available_tools)
+
+        tool_history = [item for item in history if isinstance(item.get("tool_name"), str)]
+        substage = "search_planning"
+        if tool_history:
+            latest = tool_history[-1]
+            tool_name = latest["tool_name"]
+            output = latest.get("output") if isinstance(latest.get("output"), dict) else {}
+            if tool_name == "search_geo_series":
+                result_count = int(
+                    output.get("new_accession_count", output.get("result_count", 0)) or 0
+                )
+                substage = "candidate_validation" if result_count > 0 else "final_output"
+            elif tool_name == "validate_geo_accessions":
+                substage = (
+                    "candidate_inspection"
+                    if int(output.get("public_valid_count", 0) or 0) > 0
+                    else "final_output"
+                )
+            elif tool_name == "inspect_geo_candidates":
+                substage = (
+                    "final_comparison"
+                    if int(output.get("inspected_count", 0) or 0) > 0
+                    else "final_output"
+                )
+            elif tool_name in {"compare_dataset_candidates", "fetch_publication_metadata"}:
+                substage = "final_output"
+
+        configured_tools = configured.get(substage, [])
+        if not isinstance(configured_tools, list):
+            configured_tools = []
+        allowed = set(request.available_tools)
+        return substage, [name for name in configured_tools if name in allowed]
+
+    @staticmethod
+    def _context_component_estimates(provider, request, history) -> dict[str, int]:
+        """Return safe approximate token counts without persisting model reasoning."""
+
+        estimator = getattr(provider, "estimate_context_components", None)
+        if callable(estimator):
+            estimates = estimator(request, list(history))
+            if isinstance(estimates, dict) and all(
+                isinstance(key, str) and isinstance(value, int) and value >= 0
+                for key, value in estimates.items()
+            ):
+                return estimates
+        endpoint = {
+            "endpoint_name": request.context.get("endpoint_name"),
+            "biological_goal": request.context.get("biological_goal"),
+        }
+
+        def estimate(value: Any) -> int:
+            return max(1, (len(canonical_json(redact(value))) + 3) // 4)
+
+        return {
+            "system_instructions": estimate({"sha256_only": True}),
+            "endpoint_definition": estimate(endpoint),
+            "exposed_tool_schemas": estimate(request.available_tools),
+            "conversation_history": estimate(
+                [item.get("discovery_substage") for item in history[-6:]]
+            ),
+            "tool_results": estimate(history[-6:]),
+            "structured_output_schema": estimate(request.output_schema_name),
+        }
+
+    @staticmethod
     def _add_usage(left: UsageReport, right: UsageReport) -> UsageReport:
         return UsageReport(
             input_tokens=left.input_tokens + right.input_tokens,
@@ -800,6 +921,8 @@ class AgentHarness:
         request: AgentRunRequest,
         usage: UsageReport,
         last_turn_usage: UsageReport | None,
+        *,
+        estimated_next_input: int | None = None,
     ) -> tuple[str, dict[str, float | int]] | None:
         """Use the last measured turn as a conservative estimate for the next model turn."""
 
@@ -809,7 +932,11 @@ class AgentHarness:
             (
                 "input_token_budget_precheck",
                 usage.input_tokens,
-                last_turn_usage.input_tokens,
+                (
+                    estimated_next_input
+                    if estimated_next_input is not None
+                    else last_turn_usage.input_tokens
+                ),
                 request.budget.maximum_input_tokens,
             ),
             (

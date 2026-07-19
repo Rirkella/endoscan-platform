@@ -8,6 +8,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from endoscan_workflows.config import AgentConfiguration, AgentRunMode
 from endoscan_workflows.contracts import (
@@ -136,6 +137,65 @@ def test_prohibited_tool_is_rejected_and_recorded(workflow_runtime) -> None:
     assert result.status is AgentRunStatus.FAILED
     assert result.error.code == "prohibited_tool"
     assert service.agent_run(run_id)["tools"][0]["status"] == "prohibited"
+
+
+def test_discovery_tool_cannot_run_outside_its_substage(workflow_runtime) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    build, _discovering, step, _request, _default, _service = harness_context(workflow_runtime)
+    request = discovery_request(
+        workflow_id=build.id,
+        step_id=step.id,
+        endpoint_name=build.endpoint_name,
+        biological_goal=build.biological_goal,
+        configuration=AgentConfiguration(
+            provider="openai",
+            run_mode=AgentRunMode.LIVE,
+            api_key=SecretStr("offline-placeholder-never-used"),
+        ),
+    )
+    providers = ProviderRegistry()
+    providers.register(
+        "openai",
+        lambda: FakeAgentProvider(
+            [
+                ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="validate_geo_accessions",
+                        arguments={"accessions": ["GSE12345"]},
+                    ),
+                )
+            ]
+        ),
+    )
+
+    def external_request_forbidden(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("Out-of-stage tool policy attempted an external request")
+
+    tools = phase1_tool_registry(
+        REPO_ROOT,
+        DiscoveryToolService(
+            SourceResponseCache(database),
+            store,
+            ScientificSourceClient(
+                transport=httpx.MockTransport(external_request_forbidden),
+                sleep=lambda _seconds: None,
+            ),
+        ),
+    )
+    run_id, result = AgentHarness(database, providers, tools).run(request, DiscoveryOutput)
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error.code == "prohibited_tool"
+    stored = service.agent_run(run_id)
+    assert stored["tools"][0]["tool_name"] == "validate_geo_accessions"
+    assert stored["tools"][0]["status"] == "prohibited"
+    started = next(
+        event
+        for event in stored["trace"]["events"]
+        if event["event_type"] == "provider.turn.started"
+    )
+    assert started["detail"]["discovery_substage"] == "search_planning"
+    assert started["detail"]["tools_exposed"] == ["search_geo_series"]
 
 
 def test_tool_input_validation_failure(workflow_runtime) -> None:
@@ -749,9 +809,7 @@ def test_one_geo_parser_failure_does_not_terminally_fail_discovery(
     workflow_runtime,
 ) -> None:
     database, store, _providers, _harness, _service = workflow_runtime
-    _build, _discovering, _step, request, _default, _service2 = harness_context(
-        workflow_runtime
-    )
+    _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
     accessions = ["GSE330744", "GSE338134", "GSE314573", "GSE314406", "GSE301422"]
 
     def geo(request: httpx.Request) -> httpx.Response:
@@ -779,9 +837,7 @@ def test_one_geo_parser_failure_does_not_terminally_fail_discovery(
     source_client = ScientificSourceClient(
         transport=httpx.MockTransport(geo), sleep=lambda _seconds: None
     )
-    discovery_tools = DiscoveryToolService(
-        SourceResponseCache(database), store, source_client
-    )
+    discovery_tools = DiscoveryToolService(SourceResponseCache(database), store, source_client)
 
     class CandidateIsolationProvider:
         name = "candidate-isolation"
@@ -877,10 +933,7 @@ def test_one_geo_parser_failure_does_not_terminally_fail_discovery(
     assert result.turns == 2
     assert result.tool_calls == 1
     stored = _service.agent_run(run_id)
-    statuses = [
-        item["status"]
-        for item in stored["tool_calls"][0]["result"]["output"]["results"]
-    ]
+    statuses = [item["status"] for item in stored["tool_calls"][0]["result"]["output"]["results"]]
     assert statuses == [
         "public_valid",
         "public_valid",
@@ -1047,9 +1100,7 @@ def test_terminal_source_failure_persists_safe_diagnostic_and_failed_trace(
     source_client = ScientificSourceClient(
         transport=httpx.MockTransport(prohibited_redirect), sleep=lambda _seconds: None
     )
-    discovery_tools = DiscoveryToolService(
-        SourceResponseCache(database), store, source_client
-    )
+    discovery_tools = DiscoveryToolService(SourceResponseCache(database), store, source_client)
 
     class TerminalSourceProvider:
         name = "terminal-source-test"
@@ -1106,9 +1157,7 @@ def test_terminal_source_failure_persists_safe_diagnostic_and_failed_trace(
             idempotency_key="terminal-source-build",
         )
     )
-    caplog.set_level(
-        logging.WARNING, logger="uvicorn.error.endoscan.workflow.source_tool"
-    )
+    caplog.set_level(logging.WARNING, logger="uvicorn.error.endoscan.workflow.source_tool")
     try:
         finished = service.start_build(
             created.id,
@@ -1190,3 +1239,323 @@ def test_production_registry_is_never_mutated(workflow_runtime) -> None:
     _run_id, result = harness.run(request, DiscoveryOutput)
     assert result.status is AgentRunStatus.COMPLETED
     assert hashlib.sha256(registry.read_bytes()).hexdigest() == before
+
+
+def test_latest_live_trace_regression_completes_offline_with_stage_specific_tools(
+    workflow_runtime,
+) -> None:
+    database, _store, _providers, _harness, service = workflow_runtime
+    accessions = ["GSE330744", "GSE338134", "GSE314573", "GSE314406", "GSE301422"]
+
+    class OfflineDiscoveryTools:
+        def search_geo_series(self, request, _invocation):
+            return {
+                "typed_request": request.model_dump(mode="json"),
+                "rendered_query": "offline oxidative-stress GEO fixture query",
+                "normalized_query": "offline oxidative-stress geo fixture query",
+                "strategy_reason": request.strategy_reason,
+                "results": [
+                    {
+                        "accession": accession,
+                        "title": f"Offline verified title for {accession}",
+                        "organism": "Homo sapiens",
+                        "study_type": "Expression profiling by high throughput sequencing",
+                        "sample_count": 12,
+                    }
+                    for accession in accessions
+                ],
+                "result_count": 5,
+                "new_accession_count": 5,
+                "retrieval_timestamp": datetime.now(UTC),
+                "source_artifact_id": "offline-search-artifact",
+                "cache_status": "cached",
+                "search_executed": True,
+                "stop_reason": None,
+            }
+
+        def validate_geo_accessions(self, request, _invocation):
+            return {
+                "results": [
+                    {
+                        "accession": accession,
+                        "status": "public_valid",
+                        "exists_in_geo_index": True,
+                        "public_record_available": True,
+                        "title": f"Offline verified title for {accession}",
+                        "organism": ["Homo sapiens"],
+                        "study_type": ["Expression profiling by high throughput sequencing"],
+                        "source_reference": f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={accession}",
+                        "source_artifact_id": f"source-{accession}",
+                        "evidence_references": [f"artifact:source-{accession}#Series_title"],
+                        "validation_timestamp": datetime.now(UTC),
+                        "retryable": False,
+                        "cache_status": "cached",
+                    }
+                    for accession in request.accessions
+                ],
+                "public_valid_count": len(request.accessions),
+                "unavailable_count": 0,
+                "invalid_count": 0,
+                "source_artifact_references": [
+                    f"artifact:source-{accession}" for accession in request.accessions
+                ],
+                "cache_states": ["cached" for _ in request.accessions],
+            }
+
+        def inspect_geo_candidates(self, request, _invocation):
+            return {
+                "results": [
+                    {
+                        "accession": accession,
+                        "status": "inspected",
+                        "verified_title": f"Offline verified title for {accession}",
+                        "organism": ["Homo sapiens"],
+                        "study_type": ["Expression profiling by high throughput sequencing"],
+                        "sample_count": 12,
+                        "biological_context": "Bounded offline candidate context.",
+                        "cell_lines_or_tissues": ["cultured cells"],
+                        "treatment_groups": ["treated"],
+                        "likely_control_groups": ["vehicle control"],
+                        "replicate_information": {"treated": 3, "vehicle control": 3},
+                        "dose_metadata": ["dose recorded"],
+                        "time_metadata": ["24 h"],
+                        "linked_publication_ids": [],
+                        "metadata_completeness": "high",
+                        "explicit_uncertainties": ["Scientific suitability requires review."],
+                        "source_artifact_references": [f"artifact:source-{accession}"],
+                        "evidence_references": [f"artifact:source-{accession}#Sample_records"],
+                        "cache_status": "cached",
+                    }
+                    for accession in request.accessions
+                ],
+                "inspected_count": len(request.accessions),
+                "failed_count": 0,
+                "evidence_references": [
+                    f"artifact:source-{accession}#Sample_records"
+                    for accession in request.accessions
+                ],
+            }
+
+        @staticmethod
+        def compare_dataset_candidates(request, _invocation):
+            return {
+                "candidates": [
+                    candidate.model_dump(mode="json") for candidate in request.candidates
+                ],
+                "comparison_fields": [
+                    "sample_count",
+                    "organism",
+                    "biological_context",
+                    "treatment_evidence",
+                    "control_evidence",
+                    "dose_time_evidence",
+                ],
+            }
+
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: {}
+
+    class LatestTraceProvider:
+        name = "openai"
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.exposures: list[list[str]] = []
+
+        def estimate_context_components(self, _request, history):
+            return {"bounded_context": 4218 if len(history) == 2 else 1200}
+
+        def run_turn(self, request, _history, **_kwargs):
+            self.calls += 1
+            self.exposures.append(list(request.available_tools))
+            input_tokens = [3350, 3353, 4218, 1200, 1000][self.calls - 1]
+            usage = UsageReport(
+                input_tokens=input_tokens,
+                output_tokens=80,
+                cached_tokens=0,
+                cost_cents=0.1,
+                provider_request_ids=[f"offline-request-{self.calls}"],
+            )
+            if self.calls == 1:
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="search_geo_series",
+                        arguments={
+                            "scientific_terms": ["oxidative stress", "transcriptomic"],
+                            "organism_alternatives": ["Homo sapiens", "Mus musculus"],
+                            "study_type_alternatives": ["sequencing"],
+                            "cell_tissue_terms": [],
+                            "treatment_terms": [],
+                            "maximum_results": 5,
+                            "publication_date_start": None,
+                            "publication_date_end": None,
+                            "strategy_reason": "Replay the latest bounded live search offline.",
+                        },
+                        idempotency_key="offline-search",
+                    ),
+                    usage=usage,
+                )
+            if self.calls == 2:
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="validate_geo_accessions",
+                        arguments={"accessions": accessions},
+                        idempotency_key="offline-validation",
+                    ),
+                    usage=usage,
+                )
+            if self.calls == 3:
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="inspect_geo_candidates",
+                        arguments={"accessions": accessions},
+                        idempotency_key="offline-inspection",
+                    ),
+                    usage=usage,
+                )
+            if self.calls == 4:
+                candidates = [
+                    {
+                        "accession": accession,
+                        "title": f"Offline verified title for {accession}",
+                        "organism": ["Homo sapiens"],
+                        "sample_count": 12,
+                        "biological_context": "Bounded offline candidate context.",
+                        "likely_treatment_groups": ["treated"],
+                        "likely_control_groups": ["vehicle control"],
+                        "dose_time_evidence": "Dose and time recorded.",
+                        "source_artifact_ids": [f"source-{accession}"],
+                    }
+                    for accession in accessions
+                ]
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request=ProviderToolRequest(
+                        tool_name="compare_dataset_candidates",
+                        arguments={"candidates": candidates},
+                        idempotency_key="offline-comparison",
+                    ),
+                    usage=usage,
+                )
+            candidates = [
+                {
+                    "candidate_id": f"candidate-{accession}",
+                    "accession": accession,
+                    "title": f"Offline verified title for {accession}",
+                    "source": f"https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={accession}",
+                    "organism": ["Homo sapiens"],
+                    "data_type": "Transcriptomic GEO Series",
+                    "sample_count": 12,
+                    "biological_context": "Bounded offline candidate context.",
+                    "treatment_control_evidence": "Treatment and control labels require review.",
+                    "dose_time_evidence": (
+                        "Dose and time were present but suitability was unresolved."
+                    ),
+                    "strengths": ["Official public GEO record."],
+                    "limitations": ["Scientific suitability was not established by the fixture."],
+                    "exclusion_reasons": ["No candidate was preferred in this bounded fixture."],
+                    "recommendation_status": "reject",
+                    "evidence_references": [
+                        {
+                            "source_artifact_id": f"source-{accession}",
+                            "field_path": "Sample_records",
+                            "supports_claim": "Treatment/control metadata summary.",
+                        }
+                    ],
+                    "accession_verified": True,
+                    "license_verified": False,
+                    "geo_validation_status": "public_valid",
+                }
+                for accession in accessions
+            ]
+            return ProviderTurn(
+                kind="output",
+                output={
+                    "endpoint_name": "Oxidative stress",
+                    "endpoint_definition_summary": "Response-defined oxidative-stress endpoint.",
+                    "run_mode": "live",
+                    "live_discovery": True,
+                    "search_strategy": "One bounded offline regression search.",
+                    "queries_executed": ["offline oxidative-stress GEO fixture query"],
+                    "search_strategy_steps": [],
+                    "candidates": candidates,
+                    "recommended_candidate_id": None,
+                    "recommendation": "No suitable dataset identified in the bounded fixture.",
+                    "decision_summary": "Five public records were inspected without selecting one.",
+                    "rejected_candidates": [
+                        {"accession": accession, "reason": "Requires revised scientific search."}
+                        for accession in accessions
+                    ],
+                    "unresolved_questions": [
+                        "Which perturbation design should the revised search target?"
+                    ],
+                    "proposed_next_search_strategy": (
+                        "Target direct oxidant perturbations with matched controls."
+                    ),
+                    "requires_human_review": True,
+                    "evidence_references": [],
+                    "limitations": ["Offline deterministic regression; no live source request."],
+                    "confidence_category": "low",
+                },
+                usage=usage,
+            )
+
+    provider = LatestTraceProvider()
+    providers = ProviderRegistry()
+    providers.register("openai", lambda: provider)
+    service.harness = AgentHarness(
+        database,
+        providers,
+        phase1_tool_registry(REPO_ROOT, OfflineDiscoveryTools()),
+    )
+    service.agent_configuration = AgentConfiguration(
+        provider="openai",
+        run_mode=AgentRunMode.LIVE,
+        api_key=SecretStr("offline-placeholder-never-used"),
+    )
+    created = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Oxidative stress",
+            endpoint_slug="latest-live-trace-offline-regression",
+            biological_goal="Evaluate the latest live trace without external requests.",
+            created_by="test-admin",
+            idempotency_key="latest-live-trace-offline-regression-build",
+        )
+    )
+    finished = service.start_build(
+        created.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="latest-live-trace-offline-regression-start",
+    )
+
+    assert finished.current_stage is WorkflowState.AWAITING_SEARCH_REVIEW
+    assert len(service.agent_runs(created.id)) == 1
+    run = service.agent_run(service.agent_runs(created.id)[0]["id"])
+    assert run["status"] == "completed"
+    assert run["turns"] == 5
+    assert len(run["tool_calls"]) == 4
+    assert run["usage"]["input_tokens"] == 13121
+    assert provider.calls == 5
+    assert provider.exposures == [
+        ["search_geo_series"],
+        ["validate_geo_accessions"],
+        ["inspect_geo_candidates"],
+        ["compare_dataset_candidates"],
+        [],
+    ]
+    assert not any(event["event_type"] == "provider.retry" for event in run["trace"]["events"])
+    context_events = [
+        event
+        for event in run["trace"]["events"]
+        if event["event_type"] == "agent_run.context_precheck"
+    ]
+    assert context_events[2]["detail"]["cumulative_input_tokens"] == 6703
+    assert context_events[2]["detail"]["estimated_next_turn_input_tokens"] == 4218
+    assert context_events[2]["detail"]["remaining_input_tokens"] == 13297
+    approvals = service.list_approvals(created.id)
+    assert not any(item["approval_type"] == "dataset_selection" for item in approvals)
+    assert any(item["approval_type"] == "search_revision" for item in approvals)

@@ -128,7 +128,10 @@ def refresh_source_metadata(
     service = _service(request)
     build_id = validate_resource_id(build_id, "Endpoint build")
     build = service.get_build(build_id)
-    if build.current_stage is not WorkflowState.AWAITING_DATASET_APPROVAL:
+    if build.current_stage not in {
+        WorkflowState.AWAITING_DATASET_APPROVAL,
+        WorkflowState.AWAITING_SEARCH_REVIEW,
+    }:
         return service.run_discovery(
             build_id,
             expected_version=body.expected_version,

@@ -646,6 +646,17 @@ describe("Phase-1 live discovery presentation", () => {
   });
 
   it("shows a structured no-candidate outcome without a dataset approval action", async () => {
+    const searchReview: AdminApproval = {
+      ...approval,
+      stage: "AWAITING_SEARCH_REVIEW",
+      approval_type: "search_revision",
+      request: {
+        ...approval.request,
+        evidence_summary: "Five public-valid candidates were inspected without a suitable result.",
+        agent_recommendation: "Target direct oxidant perturbations with matched controls.",
+        requested_action: "Request a revised search or cancel the workflow.",
+      },
+    };
     const noCandidateRun: AdminAgentRun = {
       ...run,
       provider: "openai",
@@ -655,11 +666,22 @@ describe("Phase-1 live discovery presentation", () => {
       turns: 3,
       tools: [
         { id: "tool-search-1", tool_name: "search_geo_series", status: "completed", duration_ms: 20 },
-        { id: "tool-search-2", tool_name: "search_geo_series", status: "completed", duration_ms: 20 },
+        { id: "tool-validation", tool_name: "validate_geo_accessions", status: "completed", duration_ms: 20 },
+        { id: "tool-inspection", tool_name: "inspect_geo_candidates", status: "completed", duration_ms: 20 },
       ],
+      tool_calls: [{
+        tool_name: "inspect_geo_candidates",
+        result: { output: { inspected_count: 5, failed_count: 0 } },
+      }],
+      trace: { events: [
+        { event_type: "provider.turn.started", detail: { turn: 1, discovery_substage: "search_planning", tools_exposed: ["search_geo_series"] } },
+        { event_type: "provider.turn.started", detail: { turn: 2, discovery_substage: "candidate_validation", tools_exposed: ["validate_geo_accessions"] } },
+        { event_type: "provider.turn.started", detail: { turn: 3, discovery_substage: "candidate_inspection", tools_exposed: ["inspect_geo_candidates"] } },
+        { event_type: "provider.turn.started", detail: { turn: 4, discovery_substage: "final_output", tools_exposed: [] } },
+      ] },
     };
     installFetchMock({
-      ...detailRoutes(() => build("FAILED", 4)),
+      ...detailRoutes(() => build("AWAITING_SEARCH_REVIEW", 4, { pending_approval_id: approvalId })),
       [`GET /api/admin/artifacts/${artifactId}/preview`]: {
         body: {
           artifact,
@@ -671,15 +693,19 @@ describe("Phase-1 live discovery presentation", () => {
           },
         },
       },
-      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [searchReview] },
       [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [noCandidateRun] },
       [`GET /api/admin/agent-runs/${runId}`]: { body: noCandidateRun },
     });
     renderApp(`/admin/endpoints/${buildId}`);
-    expect(await screen.findByText("No review required")).toBeInTheDocument();
+    expect(await screen.findByText("Search review required")).toBeInTheDocument();
     expect(screen.getByText("Bounded GEO searches found no suitable candidate")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Request revised search" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request revised search" })).toBeInTheDocument();
+    expect(screen.getByText("Target direct oxidant perturbations with matched controls.")).toBeInTheDocument();
+    expect(screen.getByText("Tools exposed per turn")).toBeInTheDocument();
+    expect(screen.getByText("5 inspected / 0 unresolved")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
     expect(screen.queryByText("Completed for review")).not.toBeInTheDocument();
   });
 

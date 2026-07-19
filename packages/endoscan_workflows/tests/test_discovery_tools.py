@@ -503,9 +503,7 @@ def test_cached_mode_refuses_external_request_on_cache_miss(workflow_runtime) ->
 
 
 def test_geo_batch_deduplicates_and_preserves_order() -> None:
-    request = GeoAccessionsInput(
-        accessions=[" gse12345 ", "GSE22222", "GSE12345", "GSE33333"]
-    )
+    request = GeoAccessionsInput(accessions=[" gse12345 ", "GSE22222", "GSE12345", "GSE33333"])
     assert request.accessions == ["GSE12345", "GSE22222", "GSE33333"]
     with pytest.raises(ValidationError):
         GeoAccessionsInput(
@@ -530,9 +528,7 @@ def test_geo_batch_registry_enforces_stage_permission_and_maximum() -> None:
         "run_context": {"run_mode": "replay"},
         "idempotency_key": "batch-policy",
     }
-    wrong_stage = registry.invoke(
-        ToolInvocation(**base, workflow_stage=WorkflowState.TRAINING)
-    )
+    wrong_stage = registry.invoke(ToolInvocation(**base, workflow_stage=WorkflowState.TRAINING))
     missing_permission = registry.invoke(
         ToolInvocation(
             **{**base, "permission_scope": []},
@@ -566,6 +562,105 @@ def test_geo_batch_registry_enforces_stage_permission_and_maximum() -> None:
 def test_geo_batch_rejects_arbitrary_url_before_network() -> None:
     with pytest.raises(ValidationError):
         GeoAccessionsInput(accessions=["https://example.com/GSE12345"])
+
+
+def test_batch_candidate_inspection_is_compact_and_requires_public_validation(
+    workflow_runtime,
+) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        accession = request.url.params.get("acc", "GSE12345")
+        return httpx.Response(
+            200,
+            text=GEO_SOFT_FIXTURE.replace("GSE12345", accession),
+            headers={"content-type": "text/plain"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(handler), sleep=lambda _seconds: None
+    )
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    validate_invocation = invocation(workflow_id, mode=AgentRunMode.LIVE)
+    inspected_invocation = validate_invocation.model_copy(
+        update={"tool_name": "inspect_geo_candidates"}
+    )
+    service.validate_geo_accessions(
+        GeoAccessionsInput(accessions=["GSE12345", "GSE22222"]),
+        validate_invocation,
+    )
+    output = service.inspect_geo_candidates(
+        GeoAccessionsInput(accessions=["GSE12345", "GSE22222"]),
+        inspected_invocation,
+    )
+    unvalidated = service.inspect_geo_candidates(
+        GeoAccessionsInput(accessions=["GSE33333"]),
+        inspected_invocation,
+    )
+    client.close()
+
+    assert output.inspected_count == 2
+    assert output.failed_count == 0
+    assert all(item.status == "inspected" for item in output.results)
+    assert all(
+        item.verified_title == "Oxidative stress response in human cells" for item in output.results
+    )
+    assert all(item.treatment_groups == ["treated replicate 1"] for item in output.results)
+    assert all(
+        item.likely_control_groups == ["vehicle control replicate 1"] for item in output.results
+    )
+    assert all(item.metadata_completeness == "high" for item in output.results)
+    assert all(len(item.biological_context) <= 800 for item in output.results)
+    assert "raw_source" not in output.model_dump_json()
+    assert "source_diagnostic" not in output.model_dump_json()
+    assert unvalidated.results[0].status == "not_public_valid"
+    assert unvalidated.results[0].safe_error_category == "public_validation_required"
+
+
+def test_batch_candidate_inspection_isolates_one_parser_failure(
+    workflow_runtime, monkeypatch
+) -> None:
+    database, artifacts, _providers, _harness, workflow_service = workflow_runtime
+    workflow_id = create_build(workflow_service)
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                text=GEO_SOFT_FIXTURE.replace(
+                    "GSE12345", request.url.params.get("acc", "GSE12345")
+                ),
+                headers={"content-type": "text/plain"},
+                request=request,
+            )
+        ),
+        sleep=lambda _seconds: None,
+    )
+    service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
+    validate_invocation = invocation(workflow_id, mode=AgentRunMode.LIVE)
+    service.validate_geo_accessions(
+        GeoAccessionsInput(accessions=["GSE12345", "GSE22222"]), validate_invocation
+    )
+    original = service.fetch_geo_series_metadata
+
+    def one_failure(request, tool_invocation):
+        if request.accession == "GSE22222":
+            raise SourceFormatError("fixture parser failure")
+        return original(request, tool_invocation)
+
+    monkeypatch.setattr(service, "fetch_geo_series_metadata", one_failure)
+    output = service.inspect_geo_candidates(
+        GeoAccessionsInput(accessions=["GSE12345", "GSE22222"]),
+        validate_invocation.model_copy(update={"tool_name": "inspect_geo_candidates"}),
+    )
+    client.close()
+
+    assert output.inspected_count == 1
+    assert output.failed_count == 1
+    assert output.results[0].status == "inspected"
+    assert output.results[1].status == "failed"
+    assert output.results[1].safe_error_category == "candidate_source_failure"
 
 
 def test_geo_validation_accession_mismatch_is_structured(workflow_runtime) -> None:
@@ -822,9 +917,7 @@ def test_geo_transient_source_failures_are_candidate_level(
     def handler(request: httpx.Request) -> httpx.Response:
         if kind == "timeout":
             raise httpx.ReadTimeout("raw-private-detail", request=request)
-        return httpx.Response(
-            int(kind), headers={"content-type": "text/plain"}, request=request
-        )
+        return httpx.Response(int(kind), headers={"content-type": "text/plain"}, request=request)
 
     client = ScientificSourceClient(transport=httpx.MockTransport(handler), sleep=lambda _: None)
     service = DiscoveryToolService(SourceResponseCache(database), artifacts, client)
@@ -916,8 +1009,7 @@ def test_five_real_probe_profiles_with_geo_text_reach_parser_and_artifacts(
     assert all(item.source_artifact_sha256 for item in result.results)
     assert all(item.source_diagnostic.content_type == "geo/text" for item in result.results)
     assert all(
-        item.source_diagnostic.artifact_content_type == "text/plain"
-        for item in result.results
+        item.source_diagnostic.artifact_content_type == "text/plain" for item in result.results
     )
     client.close()
 

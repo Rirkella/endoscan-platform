@@ -504,12 +504,13 @@ def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
 
 
 def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
-    """Phase-0 tools plus the six bounded Phase-1 scientific metadata tools."""
+    """Phase-0 tools plus bounded Phase-1 compatibility and staged discovery tools."""
     from .discovery_tools import (
         CompareDatasetCandidatesInput,
         CompareDatasetCandidatesOutput,
         GeoAccessionInput,
         GeoAccessionsInput,
+        GeoCandidatesInspectionOutput,
         GeoSampleDesignOutput,
         GeoSeriesMetadataOutput,
         GeoValidationBatchOutput,
@@ -568,6 +569,19 @@ def phase1_tool_registry(repo_root: Path, discovery_service) -> ToolRegistry:
             GeoAccessionInput,
             GeoSampleDesignOutput,
             discovery_service.inspect_geo_sample_design,
+            ["source:geo:read"],
+            SideEffectClassification.EXTERNAL_READ,
+        ),
+        (
+            "inspect_geo_candidates",
+            (
+                "Inspect one to five public_valid GEO candidates as an independent bounded batch. "
+                "Return compact verified metadata, treatment/control and sample-design facts, "
+                "evidence references, and explicit uncertainty without deciding suitability."
+            ),
+            GeoAccessionsInput,
+            GeoCandidatesInspectionOutput,
+            discovery_service.inspect_geo_candidates,
             ["source:geo:read"],
             SideEffectClassification.EXTERNAL_READ,
         ),

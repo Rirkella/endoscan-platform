@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -169,11 +170,14 @@ def test_follow_up_context_is_compact_but_preserves_evidence_bindings() -> None:
                 "schema_version": "1.0.0",
                 "retrieval_timestamp": "2026-07-18T00:00:00Z",
                 "source_artifact_id": "artifact-safe-reference",
+                "raw_soft_body": "RAW-SOFT-MUST-NOT-REACH-MODEL",
+                "source_diagnostic": {"http_status": 200, "storage_path": "local/path"},
                 "results": [
                     {"accession": f"GSE{10000 + index}", "summary": "x" * 2000}
                     for index in range(9)
                 ],
             },
+            "workflow_event_history": ["audit-event-must-not-reach-model"],
         }
     ]
     compact = OpenAIAgentProvider._compact_history(history)
@@ -182,7 +186,11 @@ def test_follow_up_context_is_compact_but_preserves_evidence_bindings() -> None:
     assert "retrieval_timestamp" not in output
     assert output["source_artifact_id"] == "artifact-safe-reference"
     assert len(output["results"]) == 5
-    assert all(len(item["summary"]) == 1000 for item in output["results"])
+    assert all("summary" not in item for item in output["results"])
+    assert "x" * 2000 not in json.dumps(compact)
+    assert "RAW-SOFT-MUST-NOT-REACH-MODEL" not in json.dumps(compact)
+    assert "audit-event-must-not-reach-model" not in json.dumps(compact)
+    assert "artifact-safe-reference" in json.dumps(compact)
 
 
 def test_provider_timeout_is_normalized() -> None:

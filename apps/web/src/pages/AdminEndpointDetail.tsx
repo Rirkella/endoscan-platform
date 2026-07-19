@@ -109,6 +109,45 @@ type GeoSearchSummary = {
   strategyReason: string;
 };
 
+type TurnExposureSummary = {
+  turn: number;
+  substage: string;
+  tools: string[];
+};
+
+function turnExposureSummaries(run: AdminAgentRun): TurnExposureSummary[] {
+  return (run.trace?.events ?? []).flatMap((event) => {
+    if (event.event_type !== "provider.turn.started") return [];
+    const detail = event.detail;
+    if (!detail || typeof detail !== "object" || Array.isArray(detail)) return [];
+    const record = detail as Record<string, unknown>;
+    const tools = Array.isArray(record.tools_exposed)
+      ? record.tools_exposed.filter((item): item is string => typeof item === "string")
+      : [];
+    return [{
+      turn: typeof record.turn === "number" ? record.turn : 0,
+      substage: typeof record.discovery_substage === "string" ? record.discovery_substage : "unknown",
+      tools,
+    }];
+  });
+}
+
+function candidateInspectionCounts(run: AdminAgentRun): { inspected: number; failed: number } | null {
+  for (const call of run.tool_calls ?? []) {
+    if (call.tool_name !== "inspect_geo_candidates") continue;
+    const result = call.result;
+    if (!result || typeof result !== "object" || Array.isArray(result)) continue;
+    const output = (result as Record<string, unknown>).output;
+    if (!output || typeof output !== "object" || Array.isArray(output)) continue;
+    const record = output as Record<string, unknown>;
+    return {
+      inspected: typeof record.inspected_count === "number" ? record.inspected_count : 0,
+      failed: typeof record.failed_count === "number" ? record.failed_count : 0,
+    };
+  }
+  return null;
+}
+
 function geoSearchSummaries(run: AdminAgentRun): GeoSearchSummary[] {
   return (run.tool_calls ?? []).flatMap((call) => {
     if (call.tool_name !== "search_geo_series") return [];
@@ -369,6 +408,8 @@ export function AdminEndpointDetail() {
   const scientificSourceDiagnostics = trace ? sourceDiagnostics(trace) : [];
   const providerRetries = trace ? traceEventCount(trace, "provider.retry") : 0;
   const geoSearches = trace ? geoSearchSummaries(trace) : [];
+  const turnExposures = trace ? turnExposureSummaries(trace) : [];
+  const inspectionCounts = trace ? candidateInspectionCounts(trace) : null;
   const normalizationSummaries = trace ? toolNormalizationSummaries(trace) : [];
   const normalizationWarningCount = normalizationSummaries.reduce(
     (count, summary) => count + summary.warningCodes.length,
@@ -495,6 +536,7 @@ export function AdminEndpointDetail() {
                 </div>
                 <div className="admin-decision-evidence">
                   <div><h3>Limitations</h3><ul>{pending.request.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                  <div><h3>Proposed next search</h3><p>{pending.request.agent_recommendation}</p></div>
                 </div>
                 <label className="admin-comment-field">Reviewer comment<textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Required to request a revised search" /></label>
                 <div className="admin-approval-actions">
@@ -589,6 +631,7 @@ export function AdminEndpointDetail() {
                   <div><dt>Model turns</dt><dd>{trace.turns}</dd></div>
                   <div><dt>Provider retries</dt><dd>{providerRetries}</dd></div>
                   <div><dt>Tool calls</dt><dd>{agentTools.length}</dd></div>
+                  <div><dt>Candidate inspection</dt><dd>{inspectionCounts ? `${inspectionCounts.inspected} inspected / ${inspectionCounts.failed} unresolved` : "Not reached"}</dd></div>
                   <div><dt>Duration</dt><dd>{(trace.duration_ms / 1000).toFixed(2)} s</dd></div>
                   <div><dt>Provider</dt><dd>{trace.provider}</dd></div>
                   <div><dt>Model</dt><dd>{trace.model_identifier}</dd></div>
@@ -598,6 +641,7 @@ export function AdminEndpointDetail() {
                   <div><dt>Estimated cost</dt><dd>${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}</dd></div>
                 </dl>
                 {geoSearches.length > 0 && <div className="admin-trace-summary"><h4>Rendered GEO queries</h4><ol>{geoSearches.map((search, index) => <li key={`${search.renderedQuery}-${index}`}><strong>{search.strategyReason}</strong><code>{search.renderedQuery}</code><span>{search.resultCount} results / {search.cacheStatus}</span></li>)}</ol></div>}
+                {turnExposures.length > 0 && <div className="admin-trace-summary"><h4>Tools exposed per turn</h4><ol>{turnExposures.map((turn) => <li key={`${turn.turn}-${turn.substage}`}><strong>Turn {turn.turn}: {humanizeMachineValue(turn.substage)}</strong><span>{turn.tools.length > 0 ? turn.tools.map(toolLabel).join(", ") : "Final structured output only"}</span></li>)}</ol></div>}
                 {normalizationWarningCount > 0 && <p className="admin-secondary-note">{emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
                 {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
                 {scientificSourceDiagnostics.length > 0 && <div className="admin-trace-summary"><h4>Scientific-source diagnostics</h4>{scientificSourceDiagnostics.map((diagnostic, index) => <SourceDiagnosticDetails diagnostic={diagnostic} key={`${diagnostic.tool_name}-${index}`} />)}</div>}
