@@ -534,6 +534,9 @@ class AgentHarness:
                                 "The structured response requires revision before source "
                                 "discovery."
                             ),
+                            "blocking_questions": [],
+                            "approval_questions": [],
+                            "missing_core_elements": [],
                             "unresolved_questions": [],
                             "limitations": ["No valid dataset specification was produced."],
                             "failure_category": "schema_validation_failed",

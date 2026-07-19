@@ -15,6 +15,7 @@ from endoscan_workflows.training_dataset import (
     ComponentRole,
     DatasetSpecificationAgentOutcome,
     DiscoveryBeforeStrategyGuard,
+    EndpointSemanticModality,
     GraphNodeType,
     JoinabilityDiagnostic,
     JoinabilityStatus,
@@ -33,7 +34,10 @@ from endoscan_workflows.training_dataset import (
     VerifiedSourceRecord,
     build_capability_matrix,
     derive_component_requirements,
+    derive_endpoint_request_semantic_hints,
     materialize_training_dataset_specification,
+    specification_question_kind,
+    validate_dataset_specification_semantics,
 )
 
 MANDATORY_FIELDS = [
@@ -75,7 +79,7 @@ def specification(**changes) -> TrainingDatasetSpecification:
             ActivityRepresentation.BINARY,
         ],
         "acceptable_transcriptomic_representations": ["processed differential signature"],
-        "compound_identity_requirements": ["PubChem CID", "InChIKey"],
+        "compound_identity_requirements": ["canonical compound identifier", "InChIKey"],
         "chemical_structure_requirements": ["canonical SMILES", "isomeric SMILES"],
         "experimental_context_requirements": ["cell or tissue", "dose", "exposure time", "control"],
         "mandatory_output_fields": MANDATORY_FIELDS,
@@ -104,12 +108,13 @@ def specification_draft(**changes) -> TrainingDatasetSpecificationDraft:
         "explicit_prediction_grain": None,
         "acceptable_activity_evidence_types": ["continuous_activity"],
         "acceptable_transcriptomic_evidence_types": ["processed differential signature"],
-        "compound_identity_requirements": ["PubChem CID", "InChIKey"],
+        "compound_identity_requirements": ["canonical compound identifier", "InChIKey"],
         "chemical_structure_requirements": ["canonical SMILES"],
         "experimental_context_requirements": ["cell", "dose", "time", "control"],
         "mandatory_target_table_fields": MANDATORY_FIELDS,
         "minimum_evidence_requirements": ["official primary public record"],
         "intended_scope_of_claim": "Research use for the explicit endpoint and contexts only.",
+        "explicit_exclusions": ["Adjacent endpoint modalities"],
         "explicit_ambiguities": ["Permitted contexts require review."],
         "assumptions": [],
         "human_decisions_required": ["Approve the prediction grain."],
@@ -125,16 +130,24 @@ def test_specification_outcome_enforces_terminal_semantics() -> None:
         specification=specification_draft(),
         requires_human_review=True,
         decision_summary="Review the proposed target contract.",
+        blocking_questions=[],
+        approval_questions=["Approve the prediction grain."],
+        missing_core_elements=[],
         unresolved_questions=[],
         limitations=[],
         failure_category=None,
         safe_failure_summary=None,
     )
     assert completed.specification is not None
-    for status, category in [
-        ("invalid_model_output", "schema_validation_failed"),
-        ("model_refused", "model_refusal"),
-        ("insufficient_endpoint_definition", "missing_structured_output"),
+    for status, category, missing, blocking in [
+        ("invalid_model_output", "schema_validation_failed", [], []),
+        ("model_refused", "model_refusal", [], []),
+        (
+            "insufficient_endpoint_definition",
+            None,
+            ["biological_target_or_process"],
+            ["Which biological target is intended?"],
+        ),
     ]:
         outcome = DatasetSpecificationAgentOutcome(
             schema_version="1.0.0",
@@ -142,6 +155,9 @@ def test_specification_outcome_enforces_terminal_semantics() -> None:
             specification=None,
             requires_human_review=True,
             decision_summary="Human revision is required.",
+            blocking_questions=blocking,
+            approval_questions=[],
+            missing_core_elements=missing,
             unresolved_questions=[],
             limitations=["No valid specification was produced."],
             failure_category=category,
@@ -155,6 +171,9 @@ def test_specification_outcome_enforces_terminal_semantics() -> None:
             specification=specification_draft(),
             requires_human_review=True,
             decision_summary="Invalid.",
+            blocking_questions=[],
+            approval_questions=[],
+            missing_core_elements=[],
             unresolved_questions=[],
             limitations=[],
             failure_category="schema_validation_failed",
@@ -170,6 +189,136 @@ def test_draft_materialization_does_not_invent_policy_thresholds() -> None:
     assert full.minimum_coverage_requirements == {}
     assert full.minimum_class_size_requirements == {}
     assert full.permitted_biological_contexts == []
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "target", "modality"),
+    [
+        ("X receptor antagonist", "X receptor", EndpointSemanticModality.ANTAGONISM),
+        ("Y receptor agonist", "Y receptor", EndpointSemanticModality.AGONISM),
+        ("Z enzyme inhibitor", "Z enzyme", EndpointSemanticModality.INHIBITION),
+        ("A receptor binding", "A receptor", EndpointSemanticModality.BINDING),
+    ],
+)
+def test_semantic_hints_recognize_sufficient_generic_endpoints(
+    endpoint: str, target: str, modality: EndpointSemanticModality
+) -> None:
+    hints = derive_endpoint_request_semantic_hints(
+        endpoint,
+        "Construct a compound-level prediction training dataset.",
+    )
+    assert hints.core_definition_status == "sufficient"
+    assert hints.explicit_target_terms == [target]
+    assert hints.explicit_modality_terms == [modality]
+    assert hints.missing_core_elements == []
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "expected_missing"),
+    [
+        ("receptor activity", "biological_target_or_process"),
+        ("toxicity", "biological_target_or_process"),
+        ("hormonal effects", "biological_target_or_process"),
+    ],
+)
+def test_semantic_hints_expose_exact_missing_core_elements(
+    endpoint: str, expected_missing: str
+) -> None:
+    hints = derive_endpoint_request_semantic_hints(
+        endpoint,
+        "Construct a compound-level prediction training dataset.",
+    )
+    assert hints.core_definition_status == "insufficient"
+    assert expected_missing in hints.missing_core_elements
+
+
+def test_semantic_hints_detect_contradictory_modalities() -> None:
+    hints = derive_endpoint_request_semantic_hints(
+        "X receptor antagonist and agonist",
+        "Construct a compound-level prediction training dataset.",
+    )
+    assert hints.core_definition_status == "contradictory"
+    assert "contradictory_core_definition" in hints.missing_core_elements
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Should activity be binary versus continuous?",
+        "Which observation grain should be used?",
+        "What minimum evidence threshold is required?",
+        "Which aggregation policy should be used?",
+    ],
+)
+def test_dataset_policy_questions_are_approval_only(question: str) -> None:
+    assert specification_question_kind(question) == "approval"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Which receptor is intended?",
+        "Is agonism or antagonism requested?",
+        "Is the endpoint receptor activity or a downstream phenotype?",
+    ],
+)
+def test_core_endpoint_questions_remain_blocking(question: str) -> None:
+    assert specification_question_kind(question) == "blocking"
+
+
+def test_semantic_validator_flags_policy_only_null_draft_without_fabricating_one() -> None:
+    hints = derive_endpoint_request_semantic_hints(
+        "X receptor antagonist",
+        "Construct a compound-level prediction dataset with transcriptomic responses.",
+    )
+    outcome = DatasetSpecificationAgentOutcome(
+        schema_version="1.0.0",
+        status="insufficient_endpoint_definition",
+        specification=None,
+        requires_human_review=True,
+        decision_summary="Construction policies remain unresolved.",
+        blocking_questions=["Should activity be binary versus continuous?"],
+        approval_questions=[],
+        missing_core_elements=["requested_modality_or_prediction_claim"],
+        unresolved_questions=["Which observation grain should be used?"],
+        limitations=[],
+        failure_category=None,
+        safe_failure_summary=None,
+    )
+    validation = validate_dataset_specification_semantics(hints, outcome)
+    assert validation.status == "semantic_contract_violation"
+    assert validation.violation_code == "non_blocking_policy_treated_as_core_missing"
+    assert validation.requires_explicit_human_rerun is True
+    assert outcome.specification is None
+
+
+def test_semantic_validator_permits_completed_draft_with_approval_questions() -> None:
+    hints = derive_endpoint_request_semantic_hints(
+        "X receptor antagonist",
+        "Construct a compound training dataset with transcriptomic responses.",
+    )
+    outcome = DatasetSpecificationAgentOutcome(
+        schema_version="1.0.0",
+        status="completed",
+        specification=specification_draft(
+            endpoint_name="X receptor antagonist",
+            biological_target="X receptor",
+            endpoint_modality="antagonism",
+            endpoint_definition="Compound-level X receptor antagonism.",
+        ),
+        requires_human_review=True,
+        decision_summary="Review the source-neutral draft.",
+        blocking_questions=[],
+        approval_questions=["Should activity be binary versus continuous?"],
+        missing_core_elements=[],
+        unresolved_questions=[],
+        limitations=[],
+        failure_category=None,
+        safe_failure_summary=None,
+    )
+    validation = validate_dataset_specification_semantics(hints, outcome)
+    assert validation.status == "valid"
+    assert validation.requires_explicit_human_rerun is False
 
 
 def source(

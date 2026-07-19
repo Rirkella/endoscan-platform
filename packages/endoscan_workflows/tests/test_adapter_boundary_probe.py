@@ -103,6 +103,7 @@ def test_every_specialized_agent_reaches_its_schema_boundary_without_network(
     ]
     assert specification["output_schema_size"] < 8_000
     assert specification["provider_retries"] == 0
+    assert specification["semantic_hints_present"] is True
 
 
 def test_production_agent_tools_and_output_schema_are_strict_sdk_inputs() -> None:

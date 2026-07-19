@@ -559,10 +559,38 @@ export function AdminEndpointDetail() {
   const isAssemblyApproval = pending?.approval_type === "training_dataset_assembly_strategy";
   const isSpecificationApproval = pending?.approval_type === "dataset_specification";
   const isSpecificationRevision = build.current_stage === "AWAITING_DATASET_SPECIFICATION_REVISION";
-  const specificationOutcome = trainingWorkflow?.specification_agent_outcome;
+  const specificationOutcome = record(trainingWorkflow?.specification_agent_outcome);
+  const specificationSemanticValidation = record(
+    trainingWorkflow?.specification_semantic_validation,
+  );
+  const specificationOutcomeStatus = typeof specificationOutcome.status === "string"
+    ? specificationOutcome.status
+    : "unknown_model_behavior";
   const specificationFailureCategory = typeof specificationOutcome?.failure_category === "string"
     ? specificationOutcome.failure_category
     : "unknown_model_behavior";
+  const hasSpecificationSemanticViolation =
+    specificationSemanticValidation.status === "semantic_contract_violation";
+  const specificationRevisionTitle = hasSpecificationSemanticViolation
+    ? "Dataset specification policy needs revision"
+    : specificationOutcomeStatus === "insufficient_endpoint_definition"
+      ? "Endpoint definition needs clarification"
+      : specificationOutcomeStatus === "model_refused"
+        ? "Dataset specification request was refused"
+        : "Dataset specification needs revision";
+  const specificationRevisionExplanation = hasSpecificationSemanticViolation
+    ? "The endpoint already contains an explicit target and modality, but the agent treated non-blocking dataset-policy choices as blocking."
+    : specificationOutcomeStatus === "insufficient_endpoint_definition"
+      ? "The agent produced a valid structured response but could not create a dataset-specification draft from the endpoint definition."
+      : specificationOutcomeStatus === "model_refused"
+        ? "The provider returned a valid refusal outcome. No source discovery was started."
+        : "The agent response did not match the required structured contract. No source discovery was started.";
+  const specificationQuestions = [
+    ...textList(specificationOutcome.blocking_questions),
+    ...textList(specificationOutcome.approval_questions),
+    ...textList(specificationOutcome.unresolved_questions),
+  ].filter((item, index, all) => all.indexOf(item) === index);
+  const specificationLimitations = textList(specificationOutcome.limitations);
 
   function requestConfirmation(kind: Confirmation["kind"], approval?: AdminApproval, trigger?: HTMLElement) {
     confirmationTrigger.current = trigger ?? null;
@@ -642,17 +670,22 @@ export function AdminEndpointDetail() {
             <div className="admin-decision-heading">
               <div>
                 <span className="admin-section-kicker">Human decision</span>
-                <h2 id="decision-title">{isSpecificationRevision ? "Dataset specification needs revision" : isAssemblyApproval ? "Assembly strategy review required" : isSpecificationApproval ? "Target specification review required" : pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
-                <p>{isSpecificationRevision ? "The agent response did not match the required structured contract. No source discovery was started." : isAssemblyApproval ? "Approve only the immutable verified source graph and deterministic preparation plan; training remains deferred." : isSpecificationApproval ? "Review the target structure before any source discovery or strategy planning begins." : pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
+                <h2 id="decision-title">{isSpecificationRevision ? specificationRevisionTitle : isAssemblyApproval ? "Assembly strategy review required" : isSpecificationApproval ? "Target specification review required" : pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
+                <p>{isSpecificationRevision ? specificationRevisionExplanation : isAssemblyApproval ? "Approve only the immutable verified source graph and deterministic preparation plan; training remains deferred." : isSpecificationApproval ? "Review the target structure before any source discovery or strategy planning begins." : pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
               </div>
               {pending && <span className="admin-review-flag">Action required</span>}
             </div>
             {isSpecificationRevision ? (
               <div className="admin-approval-card admin-no-candidate-review">
                 <div className="admin-recommendation">
-                  <span>Structured-output review gate</span>
-                  <h3>No valid dataset specification was produced</h3>
-                  <p>Failure category: {humanizeMachineValue(specificationFailureCategory)}</p>
+                  <span>Dataset specification review gate</span>
+                  <h3>{String(specificationOutcome.decision_summary ?? "No valid dataset specification was produced")}</h3>
+                  <p>Outcome status: {humanizeMachineValue(specificationOutcomeStatus)}</p>
+                  {specificationOutcomeStatus === "invalid_model_output" && (
+                    <p>Failure category: {humanizeMachineValue(specificationFailureCategory)}</p>
+                  )}
+                  {specificationQuestions.length > 0 && <><h4>Questions</h4><ul>{specificationQuestions.map((item) => <li key={item}>{item}</li>)}</ul></>}
+                  {specificationLimitations.length > 0 && <><h4>Limitations</h4><ul>{specificationLimitations.map((item) => <li key={item}>{item}</li>)}</ul></>}
                 </div>
                 <div className="admin-approval-actions">
                   <button className="admin-secondary" disabled={busy} onClick={() => void command("revise-endpoint-request")}>Revise endpoint request</button>
@@ -840,7 +873,21 @@ export function AdminEndpointDetail() {
                 {turnExposures.length > 0 && <div className="admin-trace-summary"><h4>Tools exposed per turn</h4><ol>{turnExposures.map((turn) => <li key={`${turn.turn}-${turn.substage}`}><strong>Turn {turn.turn}: {humanizeMachineValue(turn.substage)}</strong><span>{turn.tools.length > 0 ? turn.tools.map(toolLabel).join(", ") : "Final structured output only"}</span></li>)}</ol></div>}
                 {normalizationWarningCount > 0 && <p className="admin-secondary-note">{controlledVocabularyWarningCount > 0 ? `${controlledVocabularyWarningCount} controlled-vocabulary ${controlledVocabularyWarningCount === 1 ? "value was" : "values were"} normalized before execution.` : emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
                 {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
-                {outputDiagnostic && <details className="admin-trace-summary"><summary>Technical audit</summary><dl><div><dt>Failure category</dt><dd>{humanizeMachineValue(String(outputDiagnostic.failure_classification ?? "unknown_model_behavior"))}</dd></div><div><dt>Schema</dt><dd>{String(outputDiagnostic.output_schema_name ?? "unknown")} · {String(outputDiagnostic.output_schema_version ?? "unknown")}</dd></div><div><dt>Request IDs</dt><dd>{Array.isArray(outputDiagnostic.provider_request_ids) && outputDiagnostic.provider_request_ids.length ? outputDiagnostic.provider_request_ids.join(", ") : "not available"}</dd></div><div><dt>Response IDs</dt><dd>{Array.isArray(outputDiagnostic.provider_response_ids) && outputDiagnostic.provider_response_ids.length ? outputDiagnostic.provider_response_ids.join(", ") : "not available"}</dd></div><div><dt>Usage status</dt><dd>{humanizeMachineValue(String((outputDiagnostic.usage as Record<string, unknown> | undefined)?.usage_status ?? trace.usage.usage_status ?? "usage_unavailable"))}</dd></div><div><dt>Handler</dt><dd>{humanizeMachineValue(String(outputDiagnostic.error_handler ?? "none"))}</dd></div></dl></details>}
+                {(outputDiagnostic || isSpecificationRevision) && (
+                  <details className="admin-trace-summary">
+                    <summary>Technical audit</summary>
+                    <dl>
+                      {outputDiagnostic && <>
+                        <div><dt>Failure category</dt><dd>{humanizeMachineValue(String(outputDiagnostic.failure_classification ?? "unknown_model_behavior"))}</dd></div>
+                        <div><dt>Schema</dt><dd>{String(outputDiagnostic.output_schema_name ?? "unknown")} · {String(outputDiagnostic.output_schema_version ?? "unknown")}</dd></div>
+                      </>}
+                      <div><dt>Request IDs</dt><dd>{Array.isArray(outputDiagnostic?.provider_request_ids) && outputDiagnostic.provider_request_ids.length ? outputDiagnostic.provider_request_ids.join(", ") : textList(trace.usage.provider_request_ids).join(", ") || "not available"}</dd></div>
+                      <div><dt>Response IDs</dt><dd>{Array.isArray(outputDiagnostic?.provider_response_ids) && outputDiagnostic.provider_response_ids.length ? outputDiagnostic.provider_response_ids.join(", ") : textList(trace.usage.provider_response_ids).join(", ") || "not available"}</dd></div>
+                      <div><dt>Usage status</dt><dd>{humanizeMachineValue(String((outputDiagnostic?.usage as Record<string, unknown> | undefined)?.usage_status ?? trace.usage.usage_status ?? "usage_unavailable"))}</dd></div>
+                      {outputDiagnostic && <div><dt>Handler</dt><dd>{humanizeMachineValue(String(outputDiagnostic.error_handler ?? "none"))}</dd></div>}
+                    </dl>
+                  </details>
+                )}
                 {scientificSourceDiagnostics.length > 0 && <div className="admin-trace-summary"><h4>Scientific-source diagnostics</h4>{scientificSourceDiagnostics.map((diagnostic, index) => <SourceDiagnosticDetails diagnostic={diagnostic} key={`${diagnostic.tool_name}-${index}`} />)}</div>}
                 <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
                 <div className="admin-inline-actions">

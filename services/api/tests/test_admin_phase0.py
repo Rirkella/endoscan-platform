@@ -80,8 +80,17 @@ def test_training_dataset_draft_api_is_hint_free_and_strategy_locked(
         assert body["initial_context"]["assay_id_hint"] is None
         assert body["initial_context"]["expected_overlap_hint"] is None
         assert body["initial_context"]["allowed_tools"]
+        hints = body["initial_context"]["endpoint_request_semantic_hints"]
+        assert hints["requested_endpoint_name"] == "Example functional endpoint"
+        assert hints["core_definition_status"] == "insufficient"
         assert body["verified_source_inventory"] is None
         assert body["assembly_strategies"] is None
+        artifacts = client.get(
+            f"/admin/endpoint-builds/{build['id']}/artifacts", headers=ADMIN
+        ).json()
+        assert "endpoint_request_semantic_hints" in {
+            item["artifact_type"] for item in artifacts
+        }
         runs = client.get(f"/admin/endpoint-builds/{build['id']}/agent-runs", headers=ADMIN)
         assert runs.json() == []
 
@@ -139,6 +148,12 @@ def test_specialized_boundary_probes_are_zero_network(repo_root, monkeypatch, tm
         assert len(body["results"]) == 7
         assert all(item["network_requests"] == 0 for item in body["results"])
         assert all(item["model_call_boundary_reached"] for item in body["results"])
+        specification = next(
+            item
+            for item in body["results"]
+            if item["agent_name"] == "Dataset Specification Agent"
+        )
+        assert specification["semantic_hints_present"] is True
 
 
 def test_admin_routes_fail_closed_outside_development(repo_root, monkeypatch, tmp_path) -> None:

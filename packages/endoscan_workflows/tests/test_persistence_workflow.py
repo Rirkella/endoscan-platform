@@ -84,7 +84,11 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
     columns = {
         item["name"] for item in inspect(database.engine).get_columns("training_dataset_workflows")
     }
-    assert {"specification_draft_json", "specification_outcome_json"}.issubset(columns)
+    assert {
+        "specification_draft_json",
+        "specification_outcome_json",
+        "specification_semantic_validation_json",
+    }.issubset(columns)
     database.dispose()
 
 
@@ -108,7 +112,11 @@ def test_specification_outcome_migration_upgrades_phase1_database_in_place(tmp_p
     columns = {
         item["name"] for item in inspect(database.engine).get_columns("training_dataset_workflows")
     }
-    assert {"specification_draft_json", "specification_outcome_json"}.issubset(columns)
+    assert {
+        "specification_draft_json",
+        "specification_outcome_json",
+        "specification_semantic_validation_json",
+    }.issubset(columns)
     database.dispose()
 
 
@@ -172,6 +180,7 @@ def test_training_dataset_draft_is_hint_free_durable_and_strategy_locked(
     assert {item.artifact_type for item in store.list_artifacts(build.id)} == {
         "endpoint_definition",
         "blind_context_audit",
+        "endpoint_request_semantic_hints",
     }
     with pytest.raises(ValueError, match="specification"):
         service.validate_training_dataset_strategy_checkpoint(build.id)
@@ -248,7 +257,7 @@ def test_training_dataset_specification_approval_precedes_discovery(
     assert waiting.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL
     approval = service.list_approvals(build.id, pending_only=True)[0]
     assert approval["approval_type"] == "dataset_specification"
-    assert len(approval["request"]["artifact_hashes"]) == 3
+    assert len(approval["request"]["artifact_hashes"]) == 5
     approved = service.decide_approval(
         approval["id"],
         ApprovalDecision(
@@ -429,6 +438,83 @@ def test_invalid_specification_output_enters_revision_without_discovery_or_retry
     database.migrate()
     restored = service.get_build(build.id)
     assert restored.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION
+
+
+def test_policy_only_null_draft_is_semantic_violation_without_retry(
+    workflow_runtime,
+) -> None:
+    _database, store, providers, _harness, service = workflow_runtime
+
+    class PolicyMismatchProvider:
+        name = "fake"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs):
+            self.calls += 1
+            return ProviderTurn(
+                kind="output",
+                output={
+                    "schema_version": "1.0.0",
+                    "status": "insufficient_endpoint_definition",
+                    "specification": None,
+                    "requires_human_review": True,
+                    "decision_summary": "Construction policies remain unresolved.",
+                    "blocking_questions": ["Should activity be binary versus continuous?"],
+                    "approval_questions": [],
+                    "missing_core_elements": ["requested_modality_or_prediction_claim"],
+                    "unresolved_questions": ["Which observation grain should be used?"],
+                    "limitations": [],
+                    "failure_category": None,
+                    "safe_failure_summary": None,
+                },
+                usage=UsageReport(
+                    usage_status="usage_recorded",
+                    input_tokens=100,
+                    output_tokens=20,
+                    provider_request_ids=["req-offline-semantic-fixture"],
+                    provider_invocations=1,
+                ),
+            )
+
+    provider = PolicyMismatchProvider()
+    providers._providers["fake"] = lambda: provider
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="X receptor antagonist",
+            endpoint_slug="x-receptor-antagonist-semantic-policy",
+            biological_goal=(
+                "Construct a compound-level prediction dataset with transcriptomic responses."
+            ),
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="semantic-policy-mismatch",
+        )
+    )
+    waiting = service.start_build(
+        build.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="semantic-policy-mismatch-start",
+    )
+    assert waiting.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION
+    assert provider.calls == 1
+    assert len(service.agent_runs(build.id)) == 1
+    workflow = service.training_dataset_workflow(build.id)
+    assert workflow["specification_draft"] is None
+    assert workflow["verified_source_inventory"] is None
+    assert workflow["assembly_strategies"] is None
+    assert workflow["specification_agent_outcome"]["status"] == ("insufficient_endpoint_definition")
+    assert workflow["specification_semantic_validation"]["status"] == (
+        "semantic_contract_violation"
+    )
+    assert workflow["specification_semantic_validation"]["requires_explicit_human_rerun"]
+    artifact_types = {item.artifact_type for item in store.list_artifacts(build.id)}
+    assert "dataset_specification_semantic_validation" in artifact_types
+    assert "training_dataset_specification_draft" not in artifact_types
+    assert not service.list_approvals(build.id, pending_only=True)
 
 
 def test_specification_revision_requires_explicit_human_action(workflow_runtime) -> None:

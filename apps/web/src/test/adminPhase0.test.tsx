@@ -1077,6 +1077,109 @@ describe("Phase-1 live discovery presentation", () => {
     expect(screen.queryByText("Bounded GEO searches found no suitable candidate")).not.toBeInTheDocument();
   });
 
+  it("renders a valid historical insufficient outcome without a schema-failure claim", async () => {
+    const historicalRun: AdminAgentRun = {
+      ...run,
+      agent_name: "Dataset Specification Agent",
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "completed",
+      turns: 1,
+      duration_ms: 1234,
+      tools: [],
+      usage: {
+        usage_status: "usage_recorded",
+        input_tokens: 321,
+        output_tokens: 123,
+        cached_tokens: 45,
+        cost_cents: 0.42,
+        provider_invocations: 1,
+        provider_request_ids: ["req_historical_safe"],
+        provider_response_ids: ["resp_historical_safe"],
+      },
+      trace: { events: [] },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVISION", 2, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: null,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [historicalRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: historicalRun },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: {
+        body: {
+          schema_version: "1.0.0",
+          workflow_id: buildId,
+          workflow_kind: "training_dataset_discovery",
+          benchmark_mode: "blind_training_dataset_discovery",
+          legacy: false,
+          specification_draft: null,
+          specification_agent_outcome: {
+            status: "insufficient_endpoint_definition",
+            specification: null,
+            decision_summary: "A construction-policy choice was treated as blocking.",
+            unresolved_questions: ["Should activity be binary or continuous?"],
+            limitations: ["No source discovery was started."],
+            failure_category: null,
+          },
+        } satisfies AdminTrainingDatasetWorkflow,
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByRole("heading", { name: "Endpoint definition needs clarification" })).toBeInTheDocument();
+    expect(screen.getByText("The agent produced a valid structured response but could not create a dataset-specification draft from the endpoint definition.")).toBeInTheDocument();
+    expect(screen.getByText("A construction-policy choice was treated as blocking.")).toBeInTheDocument();
+    expect(screen.getByText("Should activity be binary or continuous?")).toBeInTheDocument();
+    expect(screen.queryByText(/schema mismatch/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unknown model behavior/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText("Technical audit"));
+    expect(screen.getByText("req_historical_safe")).toBeInTheDocument();
+    expect(screen.getByText("resp_historical_safe")).toBeInTheDocument();
+  });
+
+  it("presents semantic-policy mismatch separately from malformed output", async () => {
+    const semanticRun: AdminAgentRun = {
+      ...run,
+      agent_name: "Dataset Specification Agent",
+      status: "completed",
+      tools: [],
+      trace: { events: [] },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVISION", 2, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: null,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [semanticRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: semanticRun },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: {
+        body: {
+          schema_version: "1.0.0",
+          workflow_id: buildId,
+          workflow_kind: "training_dataset_discovery",
+          legacy: false,
+          specification_agent_outcome: {
+            status: "insufficient_endpoint_definition",
+            decision_summary: "Policy choices prevented a draft.",
+          },
+          specification_semantic_validation: {
+            status: "semantic_contract_violation",
+            violation_code: "non_blocking_policy_treated_as_core_missing",
+          },
+        } satisfies AdminTrainingDatasetWorkflow,
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByRole("heading", { name: "Dataset specification policy needs revision" })).toBeInTheDocument();
+    expect(screen.getByText("The endpoint already contains an explicit target and modality, but the agent treated non-blocking dataset-policy choices as blocking.")).toBeInTheDocument();
+    expect(screen.queryByText(/schema mismatch/i)).not.toBeInTheDocument();
+  });
+
   it("renders only allowlisted scientific-source diagnostics", async () => {
     const sourceDiagnostic = {
       tool_name: "validate_geo_accessions",

@@ -67,6 +67,7 @@ from .training_dataset import (
     TRAINING_DATASET_CONTRACT_VERSION,
     BlindBenchmarkInitialContext,
     DatasetSpecificationAgentOutcome,
+    DatasetSpecificationSemanticValidation,
     DiscoveryBeforeStrategyGuard,
     SourceCapabilityMatrix,
     TrainingDatasetAssemblyReview,
@@ -76,8 +77,10 @@ from .training_dataset import (
     TrainingDatasetSpecificationDraft,
     VerifiedSourceInventory,
     derive_component_requirements,
+    derive_endpoint_request_semantic_hints,
     materialize_training_dataset_specification,
     specialized_agent_request,
+    validate_dataset_specification_semantics,
     validate_strategy_sources,
 )
 
@@ -239,6 +242,27 @@ class WorkflowService:
             )
             if request.workflow_kind is WorkflowKind.TRAINING_DATASET_DISCOVERY:
                 initial_context = self._training_dataset_initial_context(request)
+                semantic_hints = initial_context.endpoint_request_semantic_hints
+                if semantic_hints is None:  # defensive; new contexts always contain hints
+                    semantic_hints = derive_endpoint_request_semantic_hints(
+                        request.endpoint_name,
+                        request.biological_goal,
+                    )
+                self.artifact_store._put_bytes(
+                    session,
+                    workflow_id=build.id,
+                    content=json.dumps(
+                        semantic_hints.model_dump(mode="json"),
+                        indent=2,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                    ).encode(),
+                    mime_type="application/json",
+                    artifact_type="endpoint_request_semantic_hints",
+                    logical_name="endpoint-request-semantic-hints-v1.json",
+                    producer="deterministic-orchestrator",
+                    idempotency_key=f"{request.idempotency_key}:semantic-hints",
+                )
                 self.artifact_store._put_bytes(
                     session,
                     workflow_id=build.id,
@@ -260,6 +284,7 @@ class WorkflowService:
                         ),
                         specification_draft_json=None,
                         specification_outcome_json=None,
+                        specification_semantic_validation_json=None,
                         specification_json=None,
                         component_requirements_json=None,
                         source_inventory_json=None,
@@ -311,6 +336,10 @@ class WorkflowService:
     def _training_dataset_initial_context(
         self, request: EndpointBuildCreate
     ) -> BlindBenchmarkInitialContext:
+        semantic_hints = derive_endpoint_request_semantic_hints(
+            request.endpoint_name,
+            request.biological_goal,
+        )
         return BlindBenchmarkInitialContext(
             benchmark_mode=(
                 BLIND_TRAINING_DATASET_DISCOVERY
@@ -353,6 +382,7 @@ class WorkflowService:
             planner_model=self.agent_configuration.planner_model,
             worker_provider=self.agent_configuration.worker_provider,
             worker_model=self.agent_configuration.worker_model,
+            endpoint_request_semantic_hints=semantic_hints,
             budgets={
                 "per_agent": {
                     "maximum_turns": self.agent_configuration.maximum_turns,
@@ -411,6 +441,11 @@ class WorkflowService:
                 "specification_agent_outcome": (
                     _load_training_document(row.specification_outcome_json)
                     if row.specification_outcome_json
+                    else None
+                ),
+                "specification_semantic_validation": (
+                    _load_training_document(row.specification_semantic_validation_json)
+                    if row.specification_semantic_validation_json
                     else None
                 ),
                 "component_requirements": (
@@ -1038,6 +1073,23 @@ class WorkflowService:
                 "model": self.agent_configuration.planner_model,
             },
         )
+        semantic_hints = (
+            initial_context.endpoint_request_semantic_hints
+            or derive_endpoint_request_semantic_hints(
+                initial_context.endpoint_name,
+                initial_context.biological_goal,
+            )
+        )
+        semantic_hints_artifact = self.artifact_store.put_json(
+            workflow_id=workflow_id,
+            step_id=step.id,
+            value=semantic_hints.model_dump(mode="json"),
+            artifact_type="endpoint_request_semantic_hints",
+            logical_name="endpoint-request-semantic-hints-v1.json",
+            producer="deterministic-orchestrator",
+            original_source=None,
+            idempotency_key=f"{idempotency_key}:semantic-hints",
+        )
         request = specialized_agent_request(
             definition=definition,
             workflow_id=workflow_id,
@@ -1048,9 +1100,7 @@ class WorkflowService:
                 "target_training_dataset_contract": (
                     initial_context.target_training_dataset_contract
                 ),
-                "approved_scientific_policies": (
-                    initial_context.approved_scientific_policies
-                ),
+                "approved_scientific_policies": (initial_context.approved_scientific_policies),
             },
             configuration=self.agent_configuration,
         )
@@ -1066,6 +1116,10 @@ class WorkflowService:
                 idempotency_key=idempotency_key,
             )
         outcome = DatasetSpecificationAgentOutcome.model_validate(result.output)
+        semantic_validation = validate_dataset_specification_semantics(
+            semantic_hints,
+            outcome,
+        )
         trace_artifact = self._persist_specialized_agent_trace(
             workflow_id=workflow_id,
             step=step,
@@ -1081,12 +1135,16 @@ class WorkflowService:
                 "trace_artifact_id": trace_artifact.id,
                 "output_schema": DatasetSpecificationAgentOutcome.__name__,
                 "outcome_status": outcome.status,
+                "semantic_validation_status": semantic_validation.status,
+                "semantic_violation_code": semantic_validation.violation_code,
             },
             idempotency_key=f"{idempotency_key}:step-complete",
         )
         return self.finalize_training_dataset_specification_outcome(
             workflow_id,
             outcome=outcome,
+            semantic_validation=semantic_validation,
+            semantic_hints_artifact_hash=semantic_hints_artifact.sha256,
             trace_artifact_hash=trace_artifact.sha256,
             expected_version=expected_version,
             actor=definition.agent_name,
@@ -1098,6 +1156,8 @@ class WorkflowService:
         workflow_id: str,
         *,
         outcome: DatasetSpecificationAgentOutcome,
+        semantic_validation: DatasetSpecificationSemanticValidation,
+        semantic_hints_artifact_hash: str,
         trace_artifact_hash: str,
         expected_version: int,
         actor: str,
@@ -1123,11 +1183,30 @@ class WorkflowService:
                 producer=actor,
                 idempotency_key=f"{idempotency_key}:outcome-artifact",
             )
+            semantic_validation_payload = semantic_validation.model_dump(mode="json")
+            semantic_validation_artifact = self.artifact_store._put_bytes(
+                session,
+                workflow_id=workflow_id,
+                content=canonical_json(semantic_validation_payload).encode(),
+                mime_type="application/json",
+                artifact_type="dataset_specification_semantic_validation",
+                logical_name="dataset-specification-semantic-validation-v1.json",
+                producer="deterministic-orchestrator",
+                idempotency_key=f"{idempotency_key}:semantic-validation-artifact",
+            )
             row.specification_outcome_json = canonical_json(
                 versioned_payload(document=outcome_payload)
             )
-            artifact_hashes = [trace_artifact_hash, outcome_artifact.sha256]
-            if outcome.status == "completed" and outcome.specification is not None:
+            row.specification_semantic_validation_json = canonical_json(
+                versioned_payload(document=semantic_validation_payload)
+            )
+            artifact_hashes = [
+                semantic_hints_artifact_hash,
+                trace_artifact_hash,
+                outcome_artifact.sha256,
+                semantic_validation_artifact.sha256,
+            ]
+            if outcome.specification is not None:
                 draft_payload = outcome.specification.model_dump(mode="json")
                 draft_artifact = self.artifact_store._put_bytes(
                     session,
@@ -1143,6 +1222,14 @@ class WorkflowService:
                     versioned_payload(document=draft_payload)
                 )
                 artifact_hashes.append(draft_artifact.sha256)
+            else:
+                row.specification_draft_json = None
+
+            if (
+                outcome.status == "completed"
+                and outcome.specification is not None
+                and semantic_validation.status == "valid"
+            ):
                 row.updated_at = utc_text()
                 snapshot = self._apply_transition(
                     session,
@@ -1181,7 +1268,6 @@ class WorkflowService:
                 )
                 return snapshot
 
-            row.specification_draft_json = None
             row.updated_at = utc_text()
             return self._apply_transition(
                 session,
@@ -1193,7 +1279,11 @@ class WorkflowService:
                     initiator=ActorType.ORCHESTRATOR,
                     initiator_id=actor,
                     reason=(
-                        "Dataset specification needs revision; no source discovery was started."
+                        "Dataset specification policy needs revision; no source discovery was "
+                        "started."
+                        if semantic_validation.status == "semantic_contract_violation"
+                        else "Dataset specification needs revision; no source discovery was "
+                        "started."
                     ),
                     artifact_hashes=artifact_hashes,
                 ),
@@ -1239,9 +1329,7 @@ class WorkflowService:
                     else None
                 ),
                 "output_schema_hash": (
-                    terminal_diagnostic.get("output_schema_hash")
-                    if terminal_diagnostic
-                    else None
+                    terminal_diagnostic.get("output_schema_hash") if terminal_diagnostic else None
                 ),
                 "structured_output_diagnostic": terminal_diagnostic,
                 "termination_reason": (

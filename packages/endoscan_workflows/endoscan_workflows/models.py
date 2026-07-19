@@ -234,6 +234,7 @@ class TrainingDatasetWorkflowRow(Base):
     initial_context_json: Mapped[str] = mapped_column(Text)
     specification_draft_json: Mapped[str | None] = mapped_column(Text)
     specification_outcome_json: Mapped[str | None] = mapped_column(Text)
+    specification_semantic_validation_json: Mapped[str | None] = mapped_column(Text)
     specification_json: Mapped[str | None] = mapped_column(Text)
     component_requirements_json: Mapped[str | None] = mapped_column(Text)
     source_inventory_json: Mapped[str | None] = mapped_column(Text)

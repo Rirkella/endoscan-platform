@@ -274,7 +274,10 @@ class FakeAgentProvider:
                         "processed differential signature",
                         "raw expression with matched controls",
                     ],
-                    "compound_identity_requirements": ["PubChem CID", "InChIKey"],
+                    "compound_identity_requirements": [
+                        "canonical compound identifier",
+                        "InChIKey",
+                    ],
                     "chemical_structure_requirements": ["canonical SMILES", "InChIKey"],
                     "experimental_context_requirements": [
                         "cell or tissue context",
@@ -298,6 +301,7 @@ class FakeAgentProvider:
                         "Prepared research-use scope restricted to the approved endpoint and "
                         "experimental contexts."
                     ),
+                    "explicit_exclusions": ["Modalities outside the approved endpoint"],
                     "explicit_ambiguities": ["Permitted biological contexts are unresolved."],
                     "assumptions": ["The proposed prediction grain requires human review."],
                     "human_decisions_required": [
@@ -306,7 +310,10 @@ class FakeAgentProvider:
                 },
                 "requires_human_review": True,
                 "decision_summary": "Prepared source-neutral specification draft for review.",
-                "unresolved_questions": ["Which biological contexts are permitted?"],
+                "blocking_questions": [],
+                "approval_questions": ["Which biological contexts are permitted?"],
+                "missing_core_elements": [],
+                "unresolved_questions": [],
                 "limitations": ["Prepared deterministic fixture, not a live discovery."],
                 "failure_category": None,
                 "safe_failure_summary": None,

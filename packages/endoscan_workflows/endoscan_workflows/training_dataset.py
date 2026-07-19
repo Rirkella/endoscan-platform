@@ -7,6 +7,7 @@ and the deterministic workflow orchestrator.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict, deque
 from enum import StrEnum
 from typing import Any, Literal
@@ -42,6 +43,164 @@ class ActivityRepresentation(StrEnum):
     EFFICACY = "efficacy"
     DOSE_RESPONSE = "dose_response_summary"
     AGGREGATED_EVIDENCE = "aggregated_evidence_score"
+
+
+class EndpointSemanticModality(StrEnum):
+    ANTAGONISM = "antagonism"
+    AGONISM = "agonism"
+    BINDING = "binding"
+    INHIBITION = "inhibition"
+    ACTIVATION = "activation"
+    SENSITIZATION = "sensitization"
+    CYTOTOXICITY = "cytotoxicity"
+    PATHWAY_ACTIVATION = "pathway_activation"
+
+
+class CoreEndpointDefinitionStatus(StrEnum):
+    SUFFICIENT = "sufficient"
+    INSUFFICIENT = "insufficient"
+    CONTRADICTORY = "contradictory"
+
+
+class MissingCoreEndpointElement(StrEnum):
+    BIOLOGICAL_TARGET_OR_PROCESS = "biological_target_or_process"
+    REQUESTED_MODALITY_OR_PREDICTION_CLAIM = "requested_modality_or_prediction_claim"
+    COMPOUND_LEVEL_PREDICTION_OBJECTIVE = "compound_level_prediction_objective"
+    CONTRADICTORY_CORE_DEFINITION = "contradictory_core_definition"
+
+
+class EndpointRequestSemanticHints(StrictContract):
+    """Deterministic parsing of user-authored endpoint text, never source evidence."""
+
+    requested_endpoint_name: str = Field(min_length=3, max_length=160)
+    explicit_target_terms: list[str] = Field(max_length=10)
+    explicit_modality_terms: list[EndpointSemanticModality] = Field(max_length=8)
+    explicit_prediction_scope_terms: list[
+        Literal[
+            "compound_level",
+            "prediction_or_training_objective",
+            "endpoint_relative_activity",
+            "transcriptomic_response",
+        ]
+    ] = Field(max_length=4)
+    target_present: bool
+    modality_present: bool
+    compound_level_goal_present: bool
+    core_definition_status: CoreEndpointDefinitionStatus
+    missing_core_elements: list[MissingCoreEndpointElement] = Field(max_length=4)
+
+
+_MODALITY_PATTERNS: tuple[tuple[EndpointSemanticModality, re.Pattern[str]], ...] = (
+    (EndpointSemanticModality.ANTAGONISM, re.compile(r"\bantagon(?:ist|ists|ism|istic)\b", re.I)),
+    (EndpointSemanticModality.AGONISM, re.compile(r"\bagon(?:ist|ists|ism|istic)\b", re.I)),
+    (EndpointSemanticModality.BINDING, re.compile(r"\bbind(?:ing|er|ers|s)?\b", re.I)),
+    (EndpointSemanticModality.INHIBITION, re.compile(r"\binhibit(?:or|ors|ion|ing|s)?\b", re.I)),
+    (EndpointSemanticModality.ACTIVATION, re.compile(r"\bactivat(?:or|ors|ion|ing|es?)\b", re.I)),
+    (
+        EndpointSemanticModality.SENSITIZATION,
+        re.compile(r"\bsensiti[sz](?:er|ers|ation|ing)\b", re.I),
+    ),
+    (EndpointSemanticModality.CYTOTOXICITY, re.compile(r"\bcytotoxic(?:ity)?\b", re.I)),
+    (
+        EndpointSemanticModality.PATHWAY_ACTIVATION,
+        re.compile(r"\bpathway\s+activat(?:ion|or|ing|es?)\b", re.I),
+    ),
+)
+
+_GENERIC_TARGET_WORDS = {
+    "activity",
+    "compound",
+    "compounds",
+    "effect",
+    "effects",
+    "enzyme",
+    "hormonal",
+    "modality",
+    "pathway",
+    "receptor",
+    "response",
+    "toxicity",
+}
+
+
+def derive_endpoint_request_semantic_hints(
+    endpoint_name: str,
+    biological_goal: str,
+) -> EndpointRequestSemanticHints:
+    """Extract bounded core semantics from only the two user-authored request fields."""
+
+    endpoint = " ".join(endpoint_name.strip().split())
+    combined = f"{endpoint} {biological_goal}".casefold()
+    matches: list[tuple[int, EndpointSemanticModality]] = []
+    for modality, pattern in _MODALITY_PATTERNS:
+        match = pattern.search(endpoint)
+        if match:
+            matches.append((match.start(), modality))
+    matches.sort(key=lambda item: item[0])
+    modalities = list(dict.fromkeys(modality for _position, modality in matches))
+    if EndpointSemanticModality.PATHWAY_ACTIVATION in modalities:
+        modalities = [
+            modality
+            for modality in modalities
+            if modality is not EndpointSemanticModality.ACTIVATION
+        ]
+
+    target_candidate = endpoint[: matches[0][0]] if matches else endpoint
+    target_candidate = re.sub(
+        r"\b(?:predict|prediction|compound-level|compound|chemical)\b",
+        " ",
+        target_candidate,
+        flags=re.I,
+    )
+    target_candidate = " ".join(re.findall(r"[A-Za-z0-9-]+", target_candidate)).strip()
+    target_tokens = {token.casefold() for token in target_candidate.split()}
+    target_present = bool(target_candidate) and not target_tokens.issubset(_GENERIC_TARGET_WORDS)
+    target_terms = [target_candidate] if target_present else []
+
+    scope_terms: list[str] = []
+    compound_goal = bool(re.search(r"\b(?:compound|compounds|chemical|chemicals)\b", combined))
+    if compound_goal:
+        scope_terms.append("compound_level")
+    if re.search(r"\b(?:predict|prediction|classifier|training\s+dataset|model)\b", combined):
+        scope_terms.append("prediction_or_training_objective")
+    if re.search(r"\b(?:endpoint|activity|active|inactive|potency|efficacy)\b", combined):
+        scope_terms.append("endpoint_relative_activity")
+    if re.search(r"\b(?:transcriptomic|gene[- ]expression|expression\s+response)\b", combined):
+        scope_terms.append("transcriptomic_response")
+
+    contradictory = (
+        {EndpointSemanticModality.ANTAGONISM, EndpointSemanticModality.AGONISM} <= set(modalities)
+        or {EndpointSemanticModality.INHIBITION, EndpointSemanticModality.ACTIVATION}
+        <= set(modalities)
+        or ("all modalities" in combined and bool(modalities))
+    )
+    missing: list[MissingCoreEndpointElement] = []
+    if not target_present:
+        missing.append(MissingCoreEndpointElement.BIOLOGICAL_TARGET_OR_PROCESS)
+    if not modalities:
+        missing.append(MissingCoreEndpointElement.REQUESTED_MODALITY_OR_PREDICTION_CLAIM)
+    if not compound_goal:
+        missing.append(MissingCoreEndpointElement.COMPOUND_LEVEL_PREDICTION_OBJECTIVE)
+    if contradictory:
+        missing.append(MissingCoreEndpointElement.CONTRADICTORY_CORE_DEFINITION)
+    status = (
+        CoreEndpointDefinitionStatus.CONTRADICTORY
+        if contradictory
+        else CoreEndpointDefinitionStatus.INSUFFICIENT
+        if missing
+        else CoreEndpointDefinitionStatus.SUFFICIENT
+    )
+    return EndpointRequestSemanticHints(
+        requested_endpoint_name=endpoint,
+        explicit_target_terms=target_terms,
+        explicit_modality_terms=modalities,
+        explicit_prediction_scope_terms=scope_terms,
+        target_present=target_present,
+        modality_present=bool(modalities),
+        compound_level_goal_present=compound_goal,
+        core_definition_status=status,
+        missing_core_elements=missing,
+    )
 
 
 class ComponentRole(StrEnum):
@@ -204,6 +363,7 @@ class TrainingDatasetSpecificationDraft(BaseModel):
     mandatory_target_table_fields: list[str] = Field(min_length=1, max_length=100)
     minimum_evidence_requirements: list[str] = Field(min_length=1, max_length=50)
     intended_scope_of_claim: str = Field(min_length=10, max_length=4000)
+    explicit_exclusions: list[str] = Field(min_length=1, max_length=50)
     explicit_ambiguities: list[str] = Field(max_length=50)
     assumptions: list[str] = Field(max_length=50)
     human_decisions_required: list[str] = Field(max_length=100)
@@ -234,36 +394,238 @@ class DatasetSpecificationAgentOutcome(BaseModel):
     specification: TrainingDatasetSpecificationDraft | None
     requires_human_review: bool
     decision_summary: str = Field(min_length=1, max_length=2000)
+    blocking_questions: list[str] = Field(max_length=50)
+    approval_questions: list[str] = Field(max_length=100)
+    missing_core_elements: list[MissingCoreEndpointElement] = Field(max_length=4)
     unresolved_questions: list[str] = Field(max_length=100)
     limitations: list[str] = Field(max_length=100)
-    failure_category: Literal[
-        "malformed_json",
-        "schema_validation_failed",
-        "missing_structured_output",
-        "response_incomplete",
-        "model_refusal",
-        "unexpected_tool_call",
-        "unknown_model_behavior",
-    ] | None
+    failure_category: (
+        Literal[
+            "malformed_json",
+            "schema_validation_failed",
+            "missing_structured_output",
+            "response_incomplete",
+            "model_refusal",
+            "unexpected_tool_call",
+            "unknown_model_behavior",
+        ]
+        | None
+    )
     safe_failure_summary: str | None = Field(max_length=800)
 
     @model_validator(mode="after")
     def enforce_terminal_semantics(self) -> DatasetSpecificationAgentOutcome:
         if self.status == "completed" and self.specification is None:
             raise ValueError("completed outcome requires a specification draft")
-        if self.status in {
-            "invalid_model_output",
-            "model_refused",
-            "insufficient_endpoint_definition",
-        } and self.specification is not None:
+        if (
+            self.status
+            in {
+                "invalid_model_output",
+                "model_refused",
+                "insufficient_endpoint_definition",
+            }
+            and self.specification is not None
+        ):
             raise ValueError(f"{self.status} outcome cannot contain a specification")
         if self.status == "completed" and self.failure_category is not None:
             raise ValueError("completed outcome cannot contain a failure category")
+        if self.status == "completed" and self.blocking_questions:
+            raise ValueError("completed outcome cannot contain blocking questions")
+        if self.status == "completed" and self.missing_core_elements:
+            raise ValueError("completed outcome cannot contain missing core elements")
+        if self.status == "needs_human_clarification":
+            if self.specification is None:
+                raise ValueError("clarification outcome requires a partial specification draft")
+            if not self.blocking_questions:
+                raise ValueError("clarification outcome requires blocking questions")
+        if self.status == "insufficient_endpoint_definition":
+            if not self.missing_core_elements:
+                raise ValueError("insufficient outcome must list missing core elements")
+            if not self.blocking_questions:
+                raise ValueError("insufficient outcome must list blocking questions")
+            if self.failure_category is not None:
+                raise ValueError("insufficient endpoint definition is not a model failure")
         if self.status == "model_refused" and self.failure_category != "model_refusal":
             raise ValueError("model_refused outcome requires model_refusal category")
         if not self.requires_human_review:
             raise ValueError("every specification-agent outcome requires human review")
         return self
+
+
+class DatasetSpecificationSemanticValidation(StrictContract):
+    status: Literal["valid", "not_applicable", "semantic_contract_violation"]
+    violation_code: (
+        Literal[
+            "non_blocking_policy_treated_as_core_missing",
+            "completed_outcome_contains_blocking_questions",
+            "explicit_target_not_preserved",
+            "explicit_modality_not_preserved",
+            "transcriptomic_goal_not_preserved",
+            "prohibited_specification_reference",
+        ]
+        | None
+    )
+    original_outcome_status: str
+    safe_summary: str
+    violations: list[str] = Field(max_length=20)
+    requires_explicit_human_rerun: bool
+
+
+_APPROVAL_QUESTION_PATTERNS = (
+    re.compile(r"\b(?:binary|continuous|potency|efficacy|multiclass)\b", re.I),
+    re.compile(r"\b(?:observation|prediction)\s+grain\b", re.I),
+    re.compile(r"\b(?:threshold|minimum\s+evidence|evidence\s+standard|hierarchy)\b", re.I),
+    re.compile(r"\b(?:aggregation|aggregate|missingness|class\s+size|coverage)\b", re.I),
+    re.compile(r"\b(?:cell|tissue|dose|time|condition|context)\b", re.I),
+    re.compile(r"\b(?:include|add|also)\b.*\b(?:binder|agonist|phenotype|modality)", re.I),
+    re.compile(
+        r"\b(?:assay|measurement|label)\b.*\b(?:separate|handling|policy|representation)", re.I
+    ),
+)
+
+_PROHIBITED_SPECIFICATION_REFERENCE = re.compile(
+    r"(?:https?://|doi\.org|\b10\.\d{4,9}/\S+|\bGSE\d+\b|\b(?:GEO|PubChem|PubMed|Tox21|ToxCast|LINCS)\b)",
+    re.I,
+)
+
+
+def specification_question_kind(question: str) -> Literal["blocking", "approval"]:
+    """Classify only bounded policy language; unknown questions stay blocking."""
+
+    if any(pattern.search(question) for pattern in _APPROVAL_QUESTION_PATTERNS):
+        return "approval"
+    return "blocking"
+
+
+def validate_dataset_specification_semantics(
+    hints: EndpointRequestSemanticHints,
+    outcome: DatasetSpecificationAgentOutcome,
+) -> DatasetSpecificationSemanticValidation:
+    """Validate model semantics without changing or manufacturing its outcome."""
+
+    if outcome.status in {"invalid_model_output", "model_refused"}:
+        return DatasetSpecificationSemanticValidation(
+            status="not_applicable",
+            violation_code=None,
+            original_outcome_status=outcome.status,
+            safe_summary="Semantic validation does not apply to a terminal model failure.",
+            violations=[],
+            requires_explicit_human_rerun=True,
+        )
+
+    listed_questions = [*outcome.blocking_questions, *outcome.unresolved_questions]
+    policy_only = bool(listed_questions) and all(
+        specification_question_kind(question) == "approval" for question in listed_questions
+    )
+    if (
+        hints.core_definition_status is CoreEndpointDefinitionStatus.SUFFICIENT
+        and outcome.status == "insufficient_endpoint_definition"
+        and policy_only
+    ):
+        return DatasetSpecificationSemanticValidation(
+            status="semantic_contract_violation",
+            violation_code="non_blocking_policy_treated_as_core_missing",
+            original_outcome_status=outcome.status,
+            safe_summary=(
+                "The endpoint contains an explicit target and modality, but non-blocking "
+                "dataset-policy choices were treated as core endpoint omissions."
+            ),
+            violations=[
+                "A source-neutral draft was withheld despite a sufficient core endpoint definition."
+            ],
+            requires_explicit_human_rerun=True,
+        )
+
+    draft = outcome.specification
+    if draft is None:
+        return DatasetSpecificationSemanticValidation(
+            status="valid",
+            violation_code=None,
+            original_outcome_status=outcome.status,
+            safe_summary=(
+                "The null draft is consistent with the deterministically missing core fields."
+            ),
+            violations=[],
+            requires_explicit_human_rerun=True,
+        )
+
+    if outcome.status == "completed" and outcome.blocking_questions:
+        return DatasetSpecificationSemanticValidation(
+            status="semantic_contract_violation",
+            violation_code="completed_outcome_contains_blocking_questions",
+            original_outcome_status=outcome.status,
+            safe_summary="A completed draft cannot retain unresolved blocking questions.",
+            violations=list(outcome.blocking_questions),
+            requires_explicit_human_rerun=True,
+        )
+
+    draft_text = draft.model_dump_json().casefold()
+    missing_targets = [
+        term for term in hints.explicit_target_terms if term.casefold() not in draft_text
+    ]
+    if missing_targets:
+        return DatasetSpecificationSemanticValidation(
+            status="semantic_contract_violation",
+            violation_code="explicit_target_not_preserved",
+            original_outcome_status=outcome.status,
+            safe_summary=(
+                "The draft did not preserve the explicit target from the endpoint request."
+            ),
+            violations=[f"Missing explicit target: {term}" for term in missing_targets],
+            requires_explicit_human_rerun=True,
+        )
+
+    modality_text = f"{draft.endpoint_modality} {draft.endpoint_definition}".casefold()
+    missing_modalities = [
+        modality.value
+        for modality in hints.explicit_modality_terms
+        if modality.value not in modality_text
+    ]
+    if missing_modalities:
+        return DatasetSpecificationSemanticValidation(
+            status="semantic_contract_violation",
+            violation_code="explicit_modality_not_preserved",
+            original_outcome_status=outcome.status,
+            safe_summary="The draft did not preserve the explicit requested modality.",
+            violations=[f"Missing explicit modality: {item}" for item in missing_modalities],
+            requires_explicit_human_rerun=True,
+        )
+
+    if "transcriptomic_response" in hints.explicit_prediction_scope_terms:
+        fields = " ".join(draft.mandatory_target_table_fields).casefold()
+        if "transcriptomic" not in fields or not draft.acceptable_transcriptomic_evidence_types:
+            return DatasetSpecificationSemanticValidation(
+                status="semantic_contract_violation",
+                violation_code="transcriptomic_goal_not_preserved",
+                original_outcome_status=outcome.status,
+                safe_summary="The draft dropped the mandatory transcriptomic-response objective.",
+                violations=[
+                    "Transcriptomic response is absent from mandatory target-table fields."
+                ],
+                requires_explicit_human_rerun=True,
+            )
+
+    prohibited = _PROHIBITED_SPECIFICATION_REFERENCE.search(draft.model_dump_json())
+    if prohibited:
+        return DatasetSpecificationSemanticValidation(
+            status="semantic_contract_violation",
+            violation_code="prohibited_specification_reference",
+            original_outcome_status=outcome.status,
+            safe_summary=(
+                "The specification stage introduced a prohibited concrete source reference."
+            ),
+            violations=["A source, article, accession, DOI, or URL appeared in the draft."],
+            requires_explicit_human_rerun=True,
+        )
+
+    return DatasetSpecificationSemanticValidation(
+        status="valid",
+        violation_code=None,
+        original_outcome_status=outcome.status,
+        safe_summary="The structured draft preserves the deterministic endpoint semantics.",
+        violations=[],
+        requires_explicit_human_rerun=False,
+    )
 
 
 def materialize_training_dataset_specification(
@@ -283,9 +645,7 @@ def materialize_training_dataset_specification(
         prediction_unit=draft.candidate_prediction_grain,
         explicit_prediction_grain=draft.explicit_prediction_grain,
         acceptable_activity_representations=draft.acceptable_activity_evidence_types,
-        acceptable_transcriptomic_representations=(
-            draft.acceptable_transcriptomic_evidence_types
-        ),
+        acceptable_transcriptomic_representations=(draft.acceptable_transcriptomic_evidence_types),
         compound_identity_requirements=draft.compound_identity_requirements,
         chemical_structure_requirements=draft.chemical_structure_requirements,
         experimental_context_requirements=draft.experimental_context_requirements,
@@ -296,7 +656,7 @@ def materialize_training_dataset_specification(
         minimum_coverage_requirements={},
         minimum_class_size_requirements={},
         permitted_biological_contexts=[],
-        excluded_modalities=[],
+        excluded_modalities=draft.explicit_exclusions,
         intended_scope_of_claim=draft.intended_scope_of_claim,
         assumptions_requiring_human_approval=[
             *draft.assumptions,
@@ -815,6 +1175,7 @@ class BlindBenchmarkInitialContext(StrictContract):
     worker_provider: str = Field(min_length=1, max_length=80)
     worker_model: str = Field(min_length=1, max_length=160)
     budgets: dict[str, Any]
+    endpoint_request_semantic_hints: EndpointRequestSemanticHints | None = None
     source_hints: list[str] = Field(default_factory=list, max_length=0)
     article_hint: None = None
     doi_hint: None = None
@@ -947,10 +1308,24 @@ SPECIALIZED_AGENT_SEQUENCE = [
 SPECIALIZED_AGENT_INSTRUCTIONS = {
     "Dataset Specification Agent": (
         "Return exactly one DatasetSpecificationAgentOutcome and no markdown. Do not add "
-        "fields absent from the schema; use null only where permitted. Expose ambiguity "
-        "instead of guessing. Distinguish thyroid-receptor antagonism from agonism, binding, "
-        "downstream thyroid effects, and other modalities. Do not search for sources or name "
-        "assays, datasets, papers, counts, coverage, overlap, or an assembly strategy."
+        "fields absent from the schema; use null only where permitted. Treat the deterministic "
+        "EndpointRequestSemanticHints as authoritative parsing of the user's own text, not as "
+        "scientific evidence. Core endpoint sufficiency requires a biological target or process, "
+        "a requested modality or prediction claim, and a compound-level prediction objective. "
+        "Return completed when those core elements support a coherent draft; binary versus "
+        "continuous activity, observation grain, evidence thresholds, context handling, "
+        "aggregation, class size, and missingness are approval questions and must not by "
+        "themselves force a null draft. Return needs_human_clarification only for genuinely "
+        "blocking scientific interpretations with a partial draft. Return "
+        "insufficient_endpoint_definition only when missing_core_elements makes any coherent "
+        "draft impossible or the core request is contradictory. When modality is explicit, "
+        "adding binders, agonists, or downstream phenotypes is an exclusion or alternative "
+        "endpoint proposal, not ambiguity in the requested modality. A completed outcome must "
+        "have no blocking questions; put construction-policy choices in approval_questions and "
+        "human_decisions_required. Preserve the explicit target and modality, keep a stated "
+        "transcriptomic-response objective mandatory, and list adjacent modalities outside the "
+        "claim in explicit_exclusions. Do not search for or name sources, concrete assays, "
+        "datasets, articles, identifiers, counts, overlap, or an assembly strategy."
     ),
     "Activity Evidence Discovery Agent": (
         "Discover bounded official public compound-level activity evidence for the approved "
@@ -1008,6 +1383,18 @@ def specialized_agent_request(
         provider = configuration.worker_provider
         model = configuration.worker_model
     permissions = [f"training-dataset:{tool}" for tool in definition.allowed_tools]
+    effective_artifacts = dict(validated_artifacts)
+    if definition.agent_name == "Dataset Specification Agent":
+        semantic_hints = (
+            initial_context.endpoint_request_semantic_hints
+            or derive_endpoint_request_semantic_hints(
+                initial_context.endpoint_name,
+                initial_context.biological_goal,
+            )
+        )
+        effective_artifacts["endpoint_request_semantic_hints"] = semantic_hints.model_dump(
+            mode="json"
+        )
     return AgentRunRequest(
         workflow_id=workflow_id,
         step_id=step_id,
@@ -1032,7 +1419,7 @@ def specialized_agent_request(
             "workflow_stage": workflow_stage.value,
             "run_mode": configuration.run_mode.value,
             "permission_scope": permissions,
-            "validated_artifacts": validated_artifacts,
+            "validated_artifacts": effective_artifacts,
             "source_hints": [],
         },
         budget=AgentBudget(

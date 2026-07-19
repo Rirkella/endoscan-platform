@@ -365,6 +365,9 @@ class OpenAIAgentProvider:
                 decision_summary=(
                     "The structured response requires revision before source discovery."
                 ),
+                blocking_questions=[],
+                approval_questions=[],
+                missing_core_elements=[],
                 unresolved_questions=[],
                 limitations=["No valid dataset specification was produced."],
                 failure_category=diagnostic.failure_classification,
@@ -390,6 +393,9 @@ class OpenAIAgentProvider:
                 specification=None,
                 requires_human_review=True,
                 decision_summary="The model refused the structured specification request.",
+                blocking_questions=[],
+                approval_questions=[],
+                missing_core_elements=[],
                 unresolved_questions=[],
                 limitations=["No valid dataset specification was produced."],
                 failure_category="model_refusal",

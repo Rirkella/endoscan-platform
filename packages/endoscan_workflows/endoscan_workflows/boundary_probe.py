@@ -213,6 +213,10 @@ class AdapterBoundaryProbe:
                         canonical_json(sdk_output_schema(definition.output_schema_name).json_schema())
                     ),
                     "error_handler_names": sorted(handlers),
+                    "semantic_hints_present": (
+                        "endpoint_request_semantic_hints"
+                        in request.context["validated_artifacts"]
+                    ),
                     "provider_retries": request.budget.retry_count,
                     "network_requests": 0,
                 }
