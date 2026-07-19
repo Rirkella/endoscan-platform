@@ -1312,7 +1312,7 @@ def test_cache_expiry_returns_miss(workflow_runtime) -> None:
         "geo_series_soft",
         {"accession": "GSE12345"},
         source_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
-        content_hash="0" * 64,
+        content_hash=artifact.sha256,
         parsed_output={"accession": "GSE12345"},
         raw_artifact_id=artifact.id,
         http_metadata={},

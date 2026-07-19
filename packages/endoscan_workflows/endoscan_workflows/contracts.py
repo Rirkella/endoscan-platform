@@ -374,6 +374,7 @@ class SourceToolDiagnostic(StrictContract):
     http_method: Literal["GET"] = "GET"
     http_status: int | None = Field(default=None, ge=100, le=599)
     final_approved_host: str | None = Field(default=None, max_length=253)
+    redirect_count: int = Field(default=0, ge=0, le=3)
     # ``content_type`` is always the exact upstream response MIME. Textual artifacts may
     # use a narrower normalized MIME, recorded separately below.
     content_type: str | None = Field(default=None, max_length=160)

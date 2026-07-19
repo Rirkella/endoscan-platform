@@ -11,10 +11,14 @@ from typing import Any
 from sqlalchemy import delete
 
 from .database import WorkflowDatabase
-from .models import SourceCacheRow
+from .models import ArtifactRow, SourceCacheRow
 from .repository import canonical_json, parse_utc
 
 CACHE_POLICY_VERSION = "phase1-source-policy-v2-geo-text"
+
+
+class SourceCacheIntegrityError(RuntimeError):
+    """A cache row may never outlive or invent its immutable artifact provenance."""
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,15 @@ class SourceResponseCache:
             row = session.get(SourceCacheRow, key)
             if row is None or row.policy_version != CACHE_POLICY_VERSION:
                 return None
+            artifact = session.get(ArtifactRow, row.raw_artifact_id)
+            if artifact is None:
+                raise SourceCacheIntegrityError(
+                    "Source cache provenance artifact is missing from the workflow database."
+                )
+            if artifact.sha256 != row.content_hash:
+                raise SourceCacheIntegrityError(
+                    "Source cache content hash does not match its provenance artifact."
+                )
             expires_at = parse_utc(row.expires_at)
             fresh = expires_at > datetime.now(UTC)
             if not fresh and not allow_stale:
@@ -100,6 +113,15 @@ class SourceResponseCache:
         retrieved = datetime.now(UTC)
         expires = retrieved + timedelta(seconds=self.ttl_seconds)
         with self.database.session() as session:
+            artifact = session.get(ArtifactRow, raw_artifact_id)
+            if artifact is None:
+                raise SourceCacheIntegrityError(
+                    "Source cache provenance artifact must be persisted before the cache row."
+                )
+            if artifact.sha256 != content_hash:
+                raise SourceCacheIntegrityError(
+                    "Source cache content hash must match the persisted provenance artifact."
+                )
             row = session.get(SourceCacheRow, key)
             values = {
                 "tool_name": tool_name,

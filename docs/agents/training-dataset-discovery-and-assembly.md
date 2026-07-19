@@ -94,6 +94,15 @@ and identifier types, never endpoint-specific answers. Arbitrary URLs and paths 
 production adapter must be explicitly injected and match the reviewed host definition; an
 unconfigured adapter fails closed as `unresolved`.
 
+The production registry has six universal reviewed source families: PubChem BioAssay; EPA CompTox
+/ ToxCast; general NCBI GEO studies; dedicated LINCS L1000 metadata and release manifests; PubChem
+Compound; and NCBI supporting metadata. Activity discovery can inspect PubChem/Tox21-accessible and
+EPA CompTox/ToxCast records without assuming they are identical. Transcriptomic discovery can
+inspect both general GEO chemical-perturbation studies and dedicated LINCS L1000 resources without
+assuming LINCS is the selected source. Stable identifiers, release provenance and possible
+duplicates remain source-bound until deterministic comparison. Discovery performs bounded metadata
+GETs only; it does not download bulk activity tables or expression matrices.
+
 Initial discovery inspects bounded metadata and availability. Large result tables and expression
 matrices are not downloaded. Literature may clarify terms or locate a primary identifier, but it
 cannot replace public primary records or turn prose into exact counts or labels.
@@ -103,6 +112,34 @@ licence states, references, validation, limitations, unresolved questions, and a
 source may supply several roles, and several sources may supply one role. The deterministic
 `SourceCapabilityMatrix` distinguishes verified, partial, metadata-only, requires-download,
 unavailable, and unresolved cells.
+
+### Assay modality preservation and optional aggregation
+
+Discovery preserves assay-level modalities and provenance. Binding, agonism, antagonism,
+activation, inhibition, downstream effects, counter-screens, and interference observations remain
+distinguishable in the verified inventory; discovery never unions them or selects a winning final
+modality. Original observations are immutable inputs to later planning and are not overwritten by a
+derived label.
+
+The Assembly Strategy Planner may compare modality-specific models, a scientifically justified
+functional union, a hierarchical endpoint, or separate models with an optional derived summary.
+There is no universal aggregation rule. A proposal that combines modalities must include a
+versioned `ModalityAggregationPolicy` defining its source modalities, assay roles, exclusions,
+operator, active/inactive/inconclusive/conflict/missing-assay rules, provenance requirements,
+rationale, and human-approval state. It cannot construct labels until immutable human approval is
+bound to the policy.
+
+For example, an endpoint may define functional receptor activity as agonism OR antagonism while
+retaining the two original assay records. This is a supported strategy, not a default for every
+receptor. Binding is not equivalent to functional activity: it remains a separate endpoint or
+supporting evidence unless an explicit, scientifically justified and human-approved policy includes
+it in a broader claim. Historical endpoint decisions and datasets are not rewritten by this
+contract.
+
+Before approval, deterministic joinability diagnostics report per-modality compound counts,
+transcriptomic overlaps, class distributions, conflicts and missingness, plus the corresponding
+metrics for each candidate endpoint construction. The planner therefore compares the evidence and
+intended prediction claim rather than preselecting a modality during discovery.
 
 ## Assembly graphs, diagnostics, and gaps
 
@@ -114,7 +151,8 @@ Cycles, missing target fields, stale bindings, and undiscovered sources are reje
 Each strategy binds its graph to an inventory version and records transformations, joins, identity
 and structure policies, label policy, transcriptomic condition and repeat-signature policies,
 output grain, evidence quality, risks, missing components, fallbacks, joinability, and a preparation
-plan.
+plan. A modality aggregation policy is optional and remains a proposal until the assembly/curation
+review approves its exact version and evidence binding.
 
 Deterministic tools inspect identity fields and availability, create bounded mapping manifests,
 deduplicate identifiers, compute overlap only from supplied records, and audit coverage. Exact

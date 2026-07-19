@@ -5,12 +5,14 @@ from pydantic import ValidationError
 
 from endoscan_workflows.training_dataset import (
     BLIND_TRAINING_DATASET_DISCOVERY,
+    SPECIALIZED_AGENT_SEQUENCE,
     ActivityRepresentation,
     AssemblyGap,
     AssemblyGapReport,
     AssemblyGraphEdge,
     AssemblyGraphNode,
     BlindBenchmarkInitialContext,
+    CandidateEndpointConstructionDiagnostic,
     CapabilityStatus,
     ComponentRole,
     DatasetSpecificationAgentOutcome,
@@ -22,6 +24,11 @@ from endoscan_workflows.training_dataset import (
     GraphNodeType,
     JoinabilityDiagnostic,
     JoinabilityStatus,
+    ModalityAggregationApprovalStatus,
+    ModalityAggregationOperator,
+    ModalityAggregationPolicy,
+    ModalityJoinabilityDiagnostic,
+    PossibleSourceDuplicateGroup,
     PredictionUnit,
     PreparationStepStatus,
     SourceCapability,
@@ -295,13 +302,17 @@ def test_semantic_hints_expose_exact_missing_core_elements(
     assert expected_missing in hints.missing_core_elements
 
 
-def test_semantic_hints_detect_contradictory_modalities() -> None:
+def test_semantic_hints_preserve_multiple_modalities_for_later_policy_review() -> None:
     hints = derive_endpoint_request_semantic_hints(
         "X receptor antagonist and agonist",
         "Construct a compound-level prediction training dataset.",
     )
-    assert hints.core_definition_status == "contradictory"
-    assert "contradictory_core_definition" in hints.missing_core_elements
+    assert hints.core_definition_status == "sufficient"
+    assert hints.explicit_modality_terms == [
+        EndpointSemanticModality.ANTAGONISM,
+        EndpointSemanticModality.AGONISM,
+    ]
+    assert "contradictory_core_definition" not in hints.missing_core_elements
 
 
 @pytest.mark.parametrize(
@@ -649,6 +660,127 @@ def test_joinability_exact_partial_and_requires_download_are_distinct() -> None:
     assert download.required_downloads
 
 
+def test_joinability_reports_modalities_before_candidate_union() -> None:
+    diagnostic = JoinabilityDiagnostic(
+        diagnostic_id="join-functional-options",
+        status=JoinabilityStatus.COMPUTED_EXACT,
+        source_ids=["agonist-assay", "antagonist-assay", "transcriptomics"],
+        exact_overlap_count=18,
+        modality_diagnostics=[
+            ModalityJoinabilityDiagnostic(
+                modality=EndpointSemanticModality.AGONISM,
+                activity_compound_count=30,
+                transcriptomic_overlap_count=12,
+                active_count=8,
+                inactive_count=22,
+            ),
+            ModalityJoinabilityDiagnostic(
+                modality=EndpointSemanticModality.ANTAGONISM,
+                activity_compound_count=35,
+                transcriptomic_overlap_count=14,
+                active_count=9,
+                inactive_count=26,
+                conflicting_outcome_count=2,
+            ),
+            ModalityJoinabilityDiagnostic(
+                modality=EndpointSemanticModality.BINDING,
+                activity_compound_count=40,
+                transcriptomic_overlap_count=16,
+            ),
+        ],
+        candidate_endpoint_diagnostics=[
+            CandidateEndpointConstructionDiagnostic(
+                candidate_name="functional agonism-or-antagonism",
+                source_modalities=[
+                    EndpointSemanticModality.AGONISM,
+                    EndpointSemanticModality.ANTAGONISM,
+                ],
+                activity_compound_count=51,
+                cross_modality_overlap_count=14,
+                transcriptomic_overlap_count=18,
+                active_count=15,
+                inactive_count=36,
+                conflicting_outcome_count=2,
+            )
+        ],
+        possible_duplicate_groups=[
+            PossibleSourceDuplicateGroup(
+                source_ids=["agonist-assay", "antagonist-assay"],
+                shared_identifiers=["canonical compound identifier"],
+            )
+        ],
+    )
+    assert diagnostic.modality_diagnostics[2].modality is EndpointSemanticModality.BINDING
+    assert EndpointSemanticModality.BINDING not in (
+        diagnostic.candidate_endpoint_diagnostics[0].source_modalities
+    )
+    assert diagnostic.possible_duplicate_groups[0].resolution_status == "unresolved"
+
+
+def functional_union_policy(**changes) -> ModalityAggregationPolicy:
+    values = {
+        "policy_id": "policy-functional-receptor-v1",
+        "target": "Example receptor",
+        "derived_endpoint_name": "functional receptor activity",
+        "source_modalities": ["agonism", "antagonism"],
+        "included_assay_roles": ["functional agonist assay", "functional antagonist assay"],
+        "excluded_modalities": ["binding"],
+        "aggregation_operator": "any_of",
+        "active_rule": "Active when either approved functional modality is active.",
+        "inactive_rule": "Inactive when both observed functional modalities are inactive.",
+        "inconclusive_rule": "Retain inconclusive when observed evidence is inconclusive.",
+        "conflict_rule": "Flag conflicting outcomes and retain every source assay record.",
+        "missing_assay_rule": "Do not infer a missing modality; apply the approved coverage rule.",
+        "provenance_requirements": [
+            "retain original assay identifier, modality, outcome and immutable artifact"
+        ],
+        "scientific_rationale": (
+            "Both modalities measure functional interaction while direction-specific evidence "
+            "remains independently reviewable."
+        ),
+        "human_approval_status": "proposed",
+        "policy_version": "1.0.0",
+    }
+    values.update(changes)
+    return ModalityAggregationPolicy(**values)
+
+
+def test_human_approved_functional_union_is_permitted_but_not_universal() -> None:
+    proposed = functional_union_policy()
+    assert proposed.aggregation_operator is ModalityAggregationOperator.ANY_OF
+    assert proposed.can_construct_labels is False
+    assert EndpointSemanticModality.BINDING in proposed.excluded_modalities
+
+    approved = functional_union_policy(
+        human_approval_status="approved",
+        approval_artifact_id="art-aggregation-approval",
+        approval_artifact_hash="a" * 64,
+    )
+    assert approved.human_approval_status is ModalityAggregationApprovalStatus.APPROVED
+    assert approved.can_construct_labels is True
+
+    modality_specific = functional_union_policy(
+        policy_id="policy-binding-only-v1",
+        derived_endpoint_name="receptor binding",
+        source_modalities=["binding"],
+        included_assay_roles=["receptor binding assay"],
+        excluded_modalities=["agonism", "antagonism"],
+        aggregation_operator="modality_specific",
+        active_rule="Active only under the approved binding threshold.",
+        inactive_rule="Inactive only under the approved binding threshold.",
+        scientific_rationale=(
+            "This endpoint predicts binding and makes no functional activity claim."
+        ),
+    )
+    assert modality_specific.source_modalities != proposed.source_modalities
+    assert modality_specific.can_construct_labels is False
+
+
+def test_approved_aggregation_requires_immutable_human_approval_evidence() -> None:
+    with pytest.raises(ValidationError, match="immutable approval evidence"):
+        functional_union_policy(human_approval_status="approved")
+
+
 def test_metadata_only_overlap_cannot_claim_an_exact_count() -> None:
     with pytest.raises(ValidationError, match="exact overlap"):
         JoinabilityDiagnostic(
@@ -744,6 +876,7 @@ def test_strategy_binds_inventory_graph_joinability_and_plan() -> None:
         identity_policy="Use deterministic canonical identifiers and retain conflicts.",
         chemical_standardization_policy="Flag mixtures, normalize salts, and preserve provenance.",
         label_policy="Do not create labels until reviewed activity records are ingested.",
+        modality_aggregation_policy=functional_union_policy(),
         transcriptomic_condition_policy="Keep cell, dose and time contexts separate.",
         repeated_signature_policy="Retain condition provenance before any aggregation.",
         expected_output_grain="one row per compound and context",
@@ -761,6 +894,9 @@ def test_strategy_binds_inventory_graph_joinability_and_plan() -> None:
     assert strategy.expected_coverage[0].name == "activity"
     assert strategy.expected_class_balance[0].name == "active"
     assert strategy.overlap_diagnostic.class_counts[0].label == "active"
+    assert strategy.modality_aggregation_policy is not None
+    assert strategy.modality_aggregation_policy.can_construct_labels is False
+    assert strategy.requires_human_review is True
 
 
 def test_blind_context_contains_no_endpoint_specific_hints() -> None:
@@ -781,6 +917,20 @@ def test_blind_context_contains_no_endpoint_specific_hints() -> None:
     assert context.source_hints == []
     assert context.article_hint is None
     assert context.assay_id_hint is None
+
+
+def test_discovery_agents_expose_both_reviewed_source_families() -> None:
+    agents = {item.agent_name: item for item in SPECIALIZED_AGENT_SEQUENCE}
+    assert {
+        "search_activity_sources",
+        "search_epa_assays",
+        "inspect_epa_assay_metadata",
+    }.issubset(agents["Activity Evidence Discovery Agent"].allowed_tools)
+    assert {
+        "search_transcriptomic_sources",
+        "search_lincs_resources",
+        "inspect_lincs_signature_metadata",
+    }.issubset(agents["Transcriptomic Evidence Discovery Agent"].allowed_tools)
 
 
 def test_blind_context_rejects_source_hints() -> None:
@@ -862,11 +1012,6 @@ def test_dataset_specification_compiler_handles_explicit_core_requests(
             "X receptor",
             "Construct compound-level transcriptomic training data.",
             "requested_modality_or_prediction_claim",
-        ),
-        (
-            "X receptor agonist antagonist",
-            "Construct compound-level transcriptomic training data.",
-            "contradictory_core_definition",
         ),
         (
             "X receptor antagonist",

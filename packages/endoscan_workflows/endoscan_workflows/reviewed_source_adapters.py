@@ -10,15 +10,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from collections.abc import Iterable
 from enum import StrEnum
 from typing import Any, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from pydantic import Field, field_validator, model_validator
 
 from .artifacts import LocalArtifactStore
-from .contracts import StrictContract, ToolInvocation
+from .contracts import SourceToolDiagnostic, StrictContract, ToolInvocation
 from .repository import canonical_json, deterministic_id, utc_text
 from .source_cache import SourceResponseCache
 from .source_security import (
@@ -61,6 +62,7 @@ class ReviewedSourceAdapterDefinition(StrictContract):
     source_retry_count: int = Field(ge=0, le=2)
     requests_per_second: float = Field(gt=0, le=10)
     cache_ttl_seconds: int = Field(ge=60, le=2_592_000)
+    allows_bulk_downloads_during_discovery: Literal[False] = False
     provenance_format: str = Field(min_length=3, max_length=200)
     health_probe_capable: bool
     review_status: AdapterReviewStatus
@@ -118,6 +120,46 @@ class SourceHttpRequest(StrictContract):
         if "@" in self.url or not self.url.startswith("https://"):
             raise ValueError("reviewed requests require credential-free HTTPS")
         return self
+
+
+class ReviewedSourceExecutionTelemetry(StrictContract):
+    """Safe, body-free telemetry for an isolated or production adapter execution."""
+
+    adapter_id: str
+    adapter_version: str
+    source_system: str
+    operation_name: str
+    http_method: Literal["GET"] = "GET"
+    final_allowlisted_host: str | None = None
+    http_status: int | None = None
+    redirect_count: int = Field(default=0, ge=0, le=3)
+    mime_type: str | None = None
+    response_bytes: int | None = Field(default=None, ge=0)
+    transport_duration_ms: int = Field(default=0, ge=0)
+    parse_duration_ms: int = Field(default=0, ge=0)
+    total_duration_ms: int = Field(default=0, ge=0)
+    parser_status: Literal["succeeded", "failed", "not_run"]
+    cache_write_status: Literal["written", "not_written", "failed", "not_applicable"]
+    cache_status: Literal["miss_written", "hit", "miss_not_written"]
+    cache_key: str
+    raw_artifact_id: str | None = None
+    raw_artifact_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    provenance_record_id: str | None = None
+    retry_count: int = Field(default=0, ge=0, le=2)
+    sanitized_diagnostic: SourceToolDiagnostic | None = None
+
+
+class ReviewedSourceExecutionResult(StrictContract):
+    batch: VerifiedSourceObservationBatch
+    telemetry: ReviewedSourceExecutionTelemetry
+
+
+class ReviewedSourceExecutionError(RuntimeError):
+    retryable = False
+
+    def __init__(self, safe_message: str, telemetry: ReviewedSourceExecutionTelemetry) -> None:
+        super().__init__(safe_message)
+        self.telemetry = telemetry
 
 
 def _definition(
@@ -196,6 +238,58 @@ NCBI_GEO_ADAPTER = _definition(
     parser="ncbi_geo_json_or_accession_text_v1",
 )
 
+EPA_COMPTOX_TOXCAST_ADAPTER = _definition(
+    adapter_id="epa-comptox-toxcast",
+    system="EPA CompTox / ToxCast",
+    roles=[
+        ComponentRole.ENDPOINT_ACTIVITY,
+        ComponentRole.ASSAY_METADATA,
+        ComponentRole.COUNTER_SCREEN,
+        ComponentRole.SOURCE_ID_MAPPING,
+        ComponentRole.PROVENANCE_LICENSE,
+    ],
+    operations=[
+        "search_epa_assays",
+        "inspect_epa_assay_metadata",
+        "inspect_epa_activity_availability",
+        "inspect_epa_compound_identifier_fields",
+        "inspect_epa_release_manifest",
+        "inspect_epa_related_assay_components",
+    ],
+    domains=["comptox.epa.gov"],
+    parser="epa_comptox_toxcast_assay_json_v1",
+)
+
+LINCS_L1000_ADAPTER = _definition(
+    adapter_id="lincs-l1000",
+    system="LINCS L1000",
+    roles=[
+        ComponentRole.TRANSCRIPTOMIC_MATRIX,
+        ComponentRole.TRANSCRIPTOMIC_CONDITIONS,
+        ComponentRole.SAMPLE_METADATA,
+        ComponentRole.COMPOUND_IDENTITY,
+        ComponentRole.SOURCE_ID_MAPPING,
+        ComponentRole.PROVENANCE_LICENSE,
+    ],
+    operations=[
+        "search_lincs_resources",
+        "inspect_lincs_perturbagen_catalogue",
+        "inspect_lincs_signature_metadata",
+        "inspect_lincs_feature_space",
+        "inspect_lincs_processed_signature_availability",
+        "inspect_lincs_release_manifest",
+    ],
+    domains=[
+        "eutils.ncbi.nlm.nih.gov",
+        "www.ncbi.nlm.nih.gov",
+        "ftp.ncbi.nlm.nih.gov",
+        "api.clue.io",
+        "clue.io",
+        "lincsproject.org",
+    ],
+    parser="lincs_l1000_geo_json_or_accession_text_v1",
+)
+
 PUBCHEM_COMPOUND_ADAPTER = _definition(
     adapter_id="pubchem-compound",
     system="PubChem Compound",
@@ -229,7 +323,9 @@ NCBI_SUPPORTING_METADATA_ADAPTER = _definition(
 
 REVIEWED_ADAPTER_DEFINITIONS = (
     PUBCHEM_BIOASSAY_ADAPTER,
+    EPA_COMPTOX_TOXCAST_ADAPTER,
     NCBI_GEO_ADAPTER,
+    LINCS_L1000_ADAPTER,
     PUBCHEM_COMPOUND_ADAPTER,
     NCBI_SUPPORTING_METADATA_ADAPTER,
 )
@@ -256,21 +352,66 @@ class ReviewedSourceAdapter:
         request: ReviewedSourceOperationInput,
         invocation: ToolInvocation,
     ) -> VerifiedSourceObservationBatch:
+        return self.execute_with_telemetry(operation, request, invocation).batch
+
+    def execute_with_telemetry(
+        self,
+        operation: str,
+        request: ReviewedSourceOperationInput,
+        invocation: ToolInvocation,
+    ) -> ReviewedSourceExecutionResult:
+        total_started = time.monotonic()
         if operation not in self.definition.approved_operations:
             raise ValueError("operation is not approved for this reviewed adapter")
         if invocation.workflow_id is None or invocation.step_id is None:
             raise ValueError("source tools require durable workflow and step identifiers")
         arguments = request.model_dump(mode="json")
+        cache_tool_name = f"{self.definition.adapter_id}:{operation}"
+        cache_key = self.cache.key(
+            cache_tool_name,
+            arguments,
+            source_version=self.definition.adapter_version,
+        )
         cached = self.cache.get(
-            f"{self.definition.adapter_id}:{operation}",
+            cache_tool_name,
             arguments,
             source_version=self.definition.adapter_version,
         )
         if cached is not None:
-            return VerifiedSourceObservationBatch.model_validate(cached.parsed_output).model_copy(
+            batch = VerifiedSourceObservationBatch.model_validate(cached.parsed_output).model_copy(
                 update={"cache_status": "cached", "source_request_count": 0}
             )
+            stored = cached.http_metadata.get("execution_telemetry", {})
+            telemetry = ReviewedSourceExecutionTelemetry.model_validate(
+                {
+                    "adapter_id": self.definition.adapter_id,
+                    "adapter_version": self.definition.adapter_version,
+                    "source_system": self.definition.official_source_system,
+                    "operation_name": operation,
+                    "final_allowlisted_host": stored.get("final_allowlisted_host"),
+                    "http_status": stored.get("http_status"),
+                    "redirect_count": stored.get("redirect_count", 0),
+                    "mime_type": stored.get("mime_type"),
+                    "response_bytes": stored.get("response_bytes"),
+                    "transport_duration_ms": stored.get("transport_duration_ms", 0),
+                    "parse_duration_ms": stored.get("parse_duration_ms", 0),
+                    "total_duration_ms": max(0, int((time.monotonic() - total_started) * 1000)),
+                    "parser_status": "succeeded",
+                    "cache_write_status": "not_applicable",
+                    "cache_status": "hit",
+                    "cache_key": cached.cache_key,
+                    "raw_artifact_id": cached.raw_artifact_id,
+                    "raw_artifact_sha256": cached.content_hash,
+                    "provenance_record_id": f"source-cache:{cached.cache_key}",
+                    "retry_count": self.definition.source_retry_count,
+                    "sanitized_diagnostic": stored.get("sanitized_diagnostic"),
+                }
+            )
+            return ReviewedSourceExecutionResult(batch=batch, telemetry=telemetry)
         source_request = self._build_request(operation, request)
+        request_host = (urlparse(source_request.url).hostname or "").lower().rstrip(".")
+        if request_host not in self.definition.allowlisted_domains:
+            raise ValueError("reviewed adapter request host is outside its definition allowlist")
         response = self.client.get(
             source_request.url,
             tool_name=operation,
@@ -292,15 +433,41 @@ class ReviewedSourceAdapter:
             original_source=response.url,
             idempotency_key=invocation.idempotency_key or response.sha256,
         )
-        observations = self._parse_response(
-            operation,
-            request,
-            response.content,
-            response.content_type,
-            response.url,
-            artifact.id,
-            artifact.sha256,
-        )
+        parse_started = time.monotonic()
+        try:
+            observations = self._parse_response(
+                operation,
+                request,
+                response.content,
+                response.content_type,
+                response.url,
+                artifact.id,
+                artifact.sha256,
+            )
+        except Exception as exc:
+            diagnostic = (
+                response.diagnostic.model_copy(
+                    update={"parser_outcome": "failed", "source_artifact_id": artifact.id}
+                )
+                if response.diagnostic
+                else None
+            )
+            telemetry = self._telemetry(
+                operation=operation,
+                cache_key=cache_key,
+                response=response,
+                artifact_id=artifact.id,
+                artifact_sha256=artifact.sha256,
+                parse_started=parse_started,
+                total_started=total_started,
+                parser_status="failed",
+                cache_write_status="not_written",
+                cache_status="miss_not_written",
+                diagnostic=diagnostic,
+            )
+            raise ReviewedSourceExecutionError(
+                "Reviewed source parser rejected the bounded response.", telemetry
+            ) from exc
         batch = VerifiedSourceObservationBatch(
             adapter_id=self.definition.adapter_id,
             adapter_version=self.definition.adapter_version,
@@ -310,22 +477,95 @@ class ReviewedSourceAdapter:
             source_request_artifact_ids=[artifact.id],
             source_request_count=1,
         )
-        self.cache.put(
-            f"{self.definition.adapter_id}:{operation}",
-            arguments,
-            source_url=response.url,
-            content_hash=response.sha256,
-            parsed_output=batch.model_dump(mode="json"),
-            raw_artifact_id=artifact.id,
-            http_metadata={
-                "status_code": response.status_code,
-                "content_type": response.content_type,
-                "adapter_id": self.definition.adapter_id,
-                "review_policy_version": self.definition.review_policy_version,
-            },
-            source_version=self.definition.adapter_version,
+        diagnostic = (
+            response.diagnostic.model_copy(
+                update={"parser_outcome": "succeeded", "source_artifact_id": artifact.id}
+            )
+            if response.diagnostic
+            else None
         )
-        return batch
+        telemetry = self._telemetry(
+            operation=operation,
+            cache_key=cache_key,
+            response=response,
+            artifact_id=artifact.id,
+            artifact_sha256=artifact.sha256,
+            parse_started=parse_started,
+            total_started=total_started,
+            parser_status="succeeded",
+            cache_write_status="written",
+            cache_status="miss_written",
+            diagnostic=diagnostic,
+        )
+        try:
+            self.cache.put(
+                cache_tool_name,
+                arguments,
+                source_url=response.url,
+                content_hash=response.sha256,
+                parsed_output=batch.model_dump(mode="json"),
+                raw_artifact_id=artifact.id,
+                http_metadata={
+                    "adapter_id": self.definition.adapter_id,
+                    "review_policy_version": self.definition.review_policy_version,
+                    "execution_telemetry": telemetry.model_dump(mode="json"),
+                },
+                source_version=self.definition.adapter_version,
+            )
+        except Exception as exc:
+            failed = telemetry.model_copy(
+                update={
+                    "cache_write_status": "failed",
+                    "cache_status": "miss_not_written",
+                    "provenance_record_id": None,
+                    "total_duration_ms": max(0, int((time.monotonic() - total_started) * 1000)),
+                }
+            )
+            raise ReviewedSourceExecutionError(
+                "Reviewed source cache could not persist artifact provenance.", failed
+            ) from exc
+        return ReviewedSourceExecutionResult(batch=batch, telemetry=telemetry)
+
+    def _telemetry(
+        self,
+        *,
+        operation: str,
+        cache_key: str,
+        response: Any,
+        artifact_id: str,
+        artifact_sha256: str,
+        parse_started: float,
+        total_started: float,
+        parser_status: Literal["succeeded", "failed", "not_run"],
+        cache_write_status: Literal["written", "not_written", "failed", "not_applicable"],
+        cache_status: Literal["miss_written", "hit", "miss_not_written"],
+        diagnostic: SourceToolDiagnostic | None,
+    ) -> ReviewedSourceExecutionTelemetry:
+        return ReviewedSourceExecutionTelemetry(
+            adapter_id=self.definition.adapter_id,
+            adapter_version=self.definition.adapter_version,
+            source_system=self.definition.official_source_system,
+            operation_name=operation,
+            final_allowlisted_host=(diagnostic.final_approved_host if diagnostic else None),
+            http_status=response.status_code,
+            redirect_count=(diagnostic.redirect_count if diagnostic else 0),
+            mime_type=response.content_type,
+            response_bytes=len(response.content),
+            transport_duration_ms=(diagnostic.request_duration_ms if diagnostic else 0),
+            parse_duration_ms=max(0, int((time.monotonic() - parse_started) * 1000)),
+            total_duration_ms=max(0, int((time.monotonic() - total_started) * 1000)),
+            parser_status=parser_status,
+            cache_write_status=cache_write_status,
+            cache_status=cache_status,
+            cache_key=cache_key,
+            raw_artifact_id=artifact_id,
+            raw_artifact_sha256=artifact_sha256,
+            provenance_record_id=(
+                f"source-cache:{cache_key}" if cache_write_status == "written" else None
+            ),
+            retry_count=self.definition.source_retry_count,
+            sanitized_diagnostic=diagnostic,
+        )
 
     def _build_request(
         self, operation: str, request: ReviewedSourceOperationInput
@@ -333,6 +573,42 @@ class ReviewedSourceAdapter:
         query = request.query or " ".join(
             item for item in (request.biological_target, request.endpoint_modality) if item
         )
+        if self.definition.adapter_id == "epa-comptox-toxcast":
+            search_term = query or request.stable_identifier
+            if not search_term:
+                raise ValueError("EPA assay operations require a typed query or stable identifier")
+            return SourceHttpRequest(
+                url="https://comptox.epa.gov/dashboard-api/ccdapp2/assay-endpoints/search",
+                params={
+                    "search": search_term,
+                    "page": 0,
+                    "size": request.maximum_results,
+                },
+                accepted_mime_types=["application/json"],
+            )
+        if self.definition.adapter_id == "lincs-l1000":
+            if operation == "search_lincs_resources":
+                if not query:
+                    raise ValueError("LINCS resource search requires a typed query")
+                return SourceHttpRequest(
+                    url="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                    params={
+                        "db": "gds",
+                        "term": f"LINCS L1000 {query} AND gse[ETYP]",
+                        "retmode": "json",
+                        "retmax": request.maximum_results,
+                    },
+                    accepted_mime_types=["application/json", "text/plain"],
+                )
+            stable = self._required_identifier(request).upper()
+            if not re.fullmatch(r"GSE[1-9][0-9]{1,8}", stable):
+                raise ValueError("LINCS metadata operations require a validated GSE accession")
+            return SourceHttpRequest(
+                url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
+                params={"acc": stable, "targ": "self", "view": "full", "form": "text"},
+                accepted_mime_types=["text/plain", "geo/text"],
+                allow_official_geo_text=True,
+            )
         if self.definition.adapter_id == "pubchem-bioassay":
             if operation == "search_activity_sources":
                 if not query:
@@ -467,6 +743,7 @@ class ReviewedSourceAdapter:
     ) -> list[dict[str, Any]]:
         if content_type in {"text/plain", "geo/text"} and self.definition.adapter_id in {
             "ncbi-geo-series",
+            "lincs-l1000",
             "ncbi-supporting-metadata",
         }:
             text = content.decode("utf-8", errors="replace")
@@ -484,27 +761,131 @@ class ReviewedSourceAdapter:
                         "unresolved_fields": ["licence terms"],
                     }
                 ]
-            return [{
-                "stable_identifier": accession,
-                "title": self._geo_field(text, "Series_title"),
-                "target": None,
-                "modality": "chemical perturbation transcriptomics",
-                "identifier_fields": ["compound name"],
-                "experimental_context_fields": [
-                    "cell or tissue",
-                    "dose",
-                    "exposure time",
-                    "control",
-                ],
-                "downloadable_artifacts": ["processed matrix", "raw matrix"],
-                "count_status": "metadata_only",
-                "access_status": "requires_download",
-            }]
+            if self.definition.adapter_id == "lincs-l1000":
+                return [
+                    {
+                        "stable_identifier": accession,
+                        "title": self._geo_field(text, "Series_title"),
+                        "modality": "chemical perturbation transcriptomics",
+                        "identifier_fields": [
+                            "perturbagen ID",
+                            "compound name",
+                            "available chemical identity fields",
+                            "signature ID",
+                        ],
+                        "experimental_context_fields": [
+                            "cell line",
+                            "dose",
+                            "exposure duration",
+                            "processing level",
+                            "feature space",
+                        ],
+                        "downloadable_artifacts": [
+                            "bounded metadata manifest",
+                            "processed signature manifest",
+                            "matrix manifest",
+                        ],
+                        "access_status": "requires_download",
+                        "count_status": "metadata_only",
+                        "unresolved_fields": [
+                            "bounded signature count",
+                            "bounded compound count",
+                            "release version",
+                        ],
+                    }
+                ]
+            return [
+                {
+                    "stable_identifier": accession,
+                    "title": self._geo_field(text, "Series_title"),
+                    "target": None,
+                    "modality": "chemical perturbation transcriptomics",
+                    "identifier_fields": ["compound name"],
+                    "experimental_context_fields": [
+                        "cell or tissue",
+                        "dose",
+                        "exposure time",
+                        "control",
+                    ],
+                    "downloadable_artifacts": ["processed matrix", "raw matrix"],
+                    "count_status": "metadata_only",
+                    "access_status": "requires_download",
+                }
+            ]
         payload = json.loads(content.decode("utf-8"))
+        if self.definition.adapter_id == "epa-comptox-toxcast":
+            if isinstance(payload, list):
+                source_records = payload
+            else:
+                source_records = next(
+                    (
+                        payload.get(name)
+                        for name in ("content", "results", "assayEndpoints", "records")
+                        if isinstance(payload.get(name), list)
+                    ),
+                    [],
+                )
+            return [
+                {
+                    "stable_identifier": str(
+                        item.get("assayEndpointId")
+                        or item.get("endpointId")
+                        or item.get("id")
+                        or "unresolved"
+                    ),
+                    "title": item.get("assayEndpointName")
+                    or item.get("endpointName")
+                    or item.get("name"),
+                    "target": item.get("biologicalTarget") or item.get("target"),
+                    "modality": item.get("assayModality") or item.get("modality"),
+                    "measurement_fields": [
+                        field
+                        for field in (
+                            "activity call" if item.get("activityCallAvailable") else None,
+                            (
+                                "continuous measurement"
+                                if item.get("continuousMeasurementAvailable")
+                                else None
+                            ),
+                        )
+                        if field
+                    ],
+                    "identifier_fields": [
+                        field
+                        for field in ("DTXSID", "CASRN", "PubChem CID")
+                        if field in item.get("compoundIdentifierFields", [])
+                    ],
+                    "experimental_context_fields": [
+                        field
+                        for field in (
+                            item.get("assayComponent"),
+                            item.get("assayComponentName"),
+                        )
+                        if field
+                    ],
+                    "downloadable_artifacts": (
+                        ["official downloadable artifact manifest"]
+                        if item.get("downloadManifestAvailable")
+                        else []
+                    ),
+                    "access_status": "metadata_only",
+                    "count_status": "metadata_only",
+                    "unresolved_fields": [
+                        field
+                        for field, value in (
+                            ("release version", item.get("releaseVersion")),
+                            ("related assay components", item.get("relatedAssayComponents")),
+                        )
+                        if not value
+                    ],
+                }
+                for item in source_records[: request.maximum_results]
+                if isinstance(item, dict)
+            ]
         if isinstance(payload.get("records"), list):
             return [item for item in payload["records"] if isinstance(item, dict)]
         if (
-            self.definition.adapter_id in {"pubchem-bioassay", "ncbi-geo-series"}
+            self.definition.adapter_id in {"pubchem-bioassay", "ncbi-geo-series", "lincs-l1000"}
             and "esearchresult" in payload
         ):
             activity_search = self.definition.adapter_id == "pubchem-bioassay"
@@ -513,6 +894,11 @@ class ReviewedSourceAdapter:
                 {
                     "stable_identifier": f"{prefix}{item}",
                     "title": "",
+                    "modality": (
+                        "chemical perturbation transcriptomics"
+                        if self.definition.adapter_id == "lincs-l1000"
+                        else None
+                    ),
                     "count_status": "metadata_only",
                     "validation_status": "verified" if activity_search else "unresolved",
                     "unresolved_fields": [] if activity_search else ["GSE accession"],
@@ -551,12 +937,14 @@ class ReviewedSourceAdapter:
             )
         if records:
             return records
-        return [{
-            "stable_identifier": request.stable_identifier or "linked-metadata",
-            "title": "Official linked metadata",
-            "access_status": "metadata_only",
-            "count_status": "metadata_only",
-        }]
+        return [
+            {
+                "stable_identifier": request.stable_identifier or "linked-metadata",
+                "title": "Official linked metadata",
+                "access_status": "metadata_only",
+                "count_status": "metadata_only",
+            }
+        ]
 
     @staticmethod
     def _geo_field(text: str, name: str) -> str | None:
@@ -614,11 +1002,7 @@ class ReviewedSourceAdapter:
         def safe_list(values: object, field: str) -> list[str]:
             if not isinstance(values, list):
                 return []
-            return [
-                cleaned
-                for value in values[:100]
-                if (cleaned := safe_text(value, field))
-            ]
+            return [cleaned for value in values[:100] if (cleaned := safe_text(value, field))]
 
         raw_counts = record.get("exact_counts", {})
         if not isinstance(raw_counts, dict):
@@ -773,6 +1157,29 @@ class ReviewedSourceAdapterRegistry:
             raise ValueError("operation does not resolve to exactly one approved source adapter")
         return candidates[0].execute(operation, request, invocation)
 
+    def execute_with_telemetry(
+        self,
+        operation: str,
+        request: ReviewedSourceOperationInput,
+        invocation: ToolInvocation,
+    ) -> ReviewedSourceExecutionResult:
+        candidates = [
+            item
+            for item in self.approved()
+            if operation in item.definition.approved_operations
+            and (
+                request.source_system is None
+                or request.source_system.casefold()
+                in {
+                    item.definition.adapter_id.casefold(),
+                    item.definition.official_source_system.casefold(),
+                }
+            )
+        ]
+        if len(candidates) != 1:
+            raise ValueError("operation does not resolve to exactly one approved source adapter")
+        return candidates[0].execute_with_telemetry(operation, request, invocation)
+
 
 def production_reviewed_source_registry(
     *,
@@ -787,9 +1194,7 @@ def production_reviewed_source_registry(
 
 
 def adapter_registry_fingerprint(registry: ReviewedSourceAdapterRegistry) -> str:
-    return hashlib.sha256(
-        canonical_json(registry.public_inventory()).encode()
-    ).hexdigest()
+    return hashlib.sha256(canonical_json(registry.public_inventory()).encode()).hexdigest()
 
 
 def fixture_batch(

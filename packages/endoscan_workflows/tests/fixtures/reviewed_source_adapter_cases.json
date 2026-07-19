@@ -9,6 +9,10 @@
     {"case": "fabricated assay ID", "stable_identifier": "unresolved", "validation_status": "unresolved", "access_status": "unavailable", "count_status": "not_computed"},
     {"case": "malformed response", "malformed": true}
   ],
+  "epa_activity": [
+    {"case": "EPA agonist component", "stable_identifier": "EPA:ENDPOINT:1001", "target": "example receptor", "modality": "agonism", "measurement_fields": ["activity call", "continuous measurement"], "identifier_fields": ["DTXSID", "CASRN"], "experimental_context_fields": ["assay component"], "downloadable_artifacts": ["official downloadable artifact manifest"], "access_status": "metadata_only", "count_status": "metadata_only", "unresolved_fields": ["full compound-level result table"]},
+    {"case": "EPA antagonist component", "stable_identifier": "EPA:ENDPOINT:1002", "target": "example receptor", "modality": "antagonism", "measurement_fields": ["activity call"], "identifier_fields": ["DTXSID"], "experimental_context_fields": ["related assay component"], "access_status": "metadata_only", "count_status": "metadata_only"}
+  ],
   "transcriptomics": [
     {"case": "broad chemical perturbation study", "stable_identifier": "GSE10001", "perturbation_type": "chemical", "access_status": "requires_download", "count_status": "metadata_only"},
     {"case": "chemical-exposure GEO study", "stable_identifier": "GSE10002", "perturbation_type": "chemical exposure", "experimental_context_fields": ["dose", "exposure time", "control"], "access_status": "requires_download", "count_status": "partial"},
@@ -18,6 +22,9 @@
     {"case": "raw-only study", "stable_identifier": "GSE10006", "downloadable_artifacts": ["raw matrix"], "access_status": "requires_download", "count_status": "requires_download"},
     {"case": "missing dose/time", "stable_identifier": "GSE10007", "experimental_context_fields": ["control"], "access_status": "metadata_only", "count_status": "metadata_only", "unresolved_fields": ["dose", "exposure time"]},
     {"case": "missing compound identifiers", "stable_identifier": "GSE10008", "identifier_fields": [], "access_status": "metadata_only", "count_status": "metadata_only", "unresolved_fields": ["compound identifier"]}
+  ],
+  "lincs": [
+    {"case": "LINCS bounded release metadata", "stable_identifier": "GSE40001", "modality": "chemical perturbation transcriptomics", "identifier_fields": ["perturbagen ID", "compound name", "signature ID"], "experimental_context_fields": ["cell line", "dose", "exposure duration", "processing level", "feature space"], "downloadable_artifacts": ["bounded metadata manifest", "processed signature manifest", "matrix manifest"], "access_status": "requires_download", "count_status": "metadata_only", "unresolved_fields": ["full matrix download"]}
   ],
   "identity": [
     {"case": "CID InChIKey SMILES available", "stable_identifier": "CID:2001", "identifier_fields": ["PubChem CID", "InChIKey"], "structure_fields": ["canonical SMILES", "isomeric SMILES"], "access_status": "verified_available", "count_status": "partial"},

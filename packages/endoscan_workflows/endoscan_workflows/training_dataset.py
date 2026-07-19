@@ -186,12 +186,10 @@ def derive_endpoint_request_semantic_hints(
     if re.search(r"\b(?:transcriptomic|gene[- ]expression|expression\s+response)\b", combined):
         scope_terms.append("transcriptomic_response")
 
-    contradictory = (
-        {EndpointSemanticModality.ANTAGONISM, EndpointSemanticModality.AGONISM} <= set(modalities)
-        or {EndpointSemanticModality.INHIBITION, EndpointSemanticModality.ACTIVATION}
-        <= set(modalities)
-        or ("all modalities" in combined and bool(modalities))
-    )
+    # Multiple assay modalities are not inherently contradictory. Discovery must preserve
+    # each modality and let an inventory-bound assembly strategy propose either separate
+    # endpoints or a versioned, human-approved aggregation policy.
+    contradictory = False
     missing: list[MissingCoreEndpointElement] = []
     if not target_present:
         missing.append(MissingCoreEndpointElement.BIOLOGICAL_TARGET_OR_PROCESS)
@@ -1386,6 +1384,7 @@ class VerifiedSourceRecord(StrictContract):
     source_roles: list[ComponentRole] = Field(min_length=1, max_length=30)
     source_system: str = Field(min_length=2, max_length=160)
     stable_accession: str = Field(min_length=1, max_length=300)
+    assay_modality: str | None = Field(default=None, max_length=300)
     official_source: str = Field(min_length=2, max_length=300)
     verified_public_availability: bool
     capabilities: list[SourceCapability] = Field(min_length=1, max_length=100)
@@ -1402,6 +1401,7 @@ class VerifiedSourceRecord(StrictContract):
     unresolved_questions: list[str] = Field(default_factory=list, max_length=100)
     validation_status: SourceValidationStatus
     artifact_hashes: list[str] = Field(default_factory=list, max_length=100)
+    artifact_ids: list[str] = Field(default_factory=list, max_length=100)
     exact_counts: dict[str, int] = Field(default_factory=dict, max_length=50)
     count_status: ObservationCountStatus = ObservationCountStatus.NOT_COMPUTED
     strengths: list[str] = Field(default_factory=list, max_length=100)
@@ -1483,6 +1483,7 @@ def _observation_record(
     record_payload = {
         "source_system": observation.source_system,
         "stable_source_identifier": observation.stable_source_identifier,
+        "assay_modality": observation.modality,
         "roles": sorted(role.value for role in observation.source_roles),
         "measurement_fields": sorted(observation.measurement_fields),
         "identifier_fields": sorted(observation.identifier_fields),
@@ -1499,6 +1500,7 @@ def _observation_record(
         source_roles=list(dict.fromkeys(observation.source_roles)),
         source_system=observation.source_system,
         stable_accession=observation.stable_source_identifier,
+        assay_modality=observation.modality,
         official_source=observation.source_system,
         verified_public_availability=(
             observation.public_validation_status is SourceValidationStatus.VERIFIED
@@ -1517,13 +1519,12 @@ def _observation_record(
         unresolved_questions=observation.unresolved_fields,
         validation_status=observation.public_validation_status,
         artifact_hashes=[observation.response_artifact_hash],
+        artifact_ids=[observation.response_artifact_id],
         exact_counts=observation.exact_counts,
         count_status=observation.count_status,
         strengths=observation.strengths,
         next_required_ingestion_actions=[observation.next_required_ingestion_action],
-        adapter_provenance=[
-            f"{observation.adapter_id}@{observation.adapter_version}"
-        ],
+        adapter_provenance=[f"{observation.adapter_id}@{observation.adapter_version}"],
         observation_ids=[observation.observation_id],
         model_annotations=annotations,
     )
@@ -1585,11 +1586,7 @@ def compile_verified_source_fragment(
         component_roles=list(dict.fromkeys(component_roles)),
         candidate_records=records,
         evidence_used=sorted(
-            {
-                reference
-                for item in observations
-                for reference in item.official_evidence_references
-            }
+            {reference for item in observations for reference in item.official_evidence_references}
         ),
         limitations=limitations,
         unresolved_questions=sorted(set(unresolved)),
@@ -1624,6 +1621,7 @@ def compile_verified_source_inventory(
                     "artifact_hashes": sorted(
                         set(existing.artifact_hashes + candidate.artifact_hashes)
                     ),
+                    "artifact_ids": sorted(set(existing.artifact_ids + candidate.artifact_ids)),
                     "observation_ids": sorted(
                         set(existing.observation_ids + candidate.observation_ids)
                     ),
@@ -1650,8 +1648,7 @@ def compile_verified_source_inventory(
         for role in record.source_roles
         if record.validation_status is SourceValidationStatus.VERIFIED
         and any(
-            capability.component is role
-            and capability.status is not CapabilityStatus.UNAVAILABLE
+            capability.component is role and capability.status is not CapabilityStatus.UNAVAILABLE
             for capability in record.capabilities
         )
     }
@@ -1663,11 +1660,7 @@ def compile_verified_source_inventory(
         discovery_complete_for_roles=[role for role in required_roles if role in covered],
         missing_roles=[role for role in required_roles if role not in covered],
         limitations=sorted(
-            {
-                limitation
-                for fragment in fragments
-                for limitation in fragment.limitations
-            }
+            {limitation for fragment in fragments for limitation in fragment.limitations}
         ),
     )
 
@@ -1686,9 +1679,7 @@ class SourceCapabilityMatrix(StrictContract):
     inventory_version: int = Field(ge=1)
     components: list[ComponentRole]
     cells: list[CapabilityMatrixCell] = Field(default_factory=list, max_length=10_000)
-    field_cells: list[FieldCapabilityMatrixCell] = Field(
-        default_factory=list, max_length=50_000
-    )
+    field_cells: list[FieldCapabilityMatrixCell] = Field(default_factory=list, max_length=50_000)
 
     @model_validator(mode="after")
     def unique_cells(self) -> SourceCapabilityMatrix:
@@ -1728,8 +1719,7 @@ def build_capability_matrix(
     field_definitions = {
         "endpoint_activity": lambda item: bool(item.measurement_fields),
         "assay_metadata": lambda item: ComponentRole.ASSAY_METADATA in item.source_roles,
-        "counter_screen_metadata": lambda item: ComponentRole.COUNTER_SCREEN
-        in item.source_roles,
+        "counter_screen_metadata": lambda item: ComponentRole.COUNTER_SCREEN in item.source_roles,
         "transcriptomic_matrix": lambda item: ComponentRole.TRANSCRIPTOMIC_MATRIX
         in item.source_roles,
         "transcriptomic_conditions": lambda item: bool(item.experimental_context_fields),
@@ -1753,8 +1743,7 @@ def build_capability_matrix(
         ),
         "downloadable_records": lambda item: bool(item.downloadable_artifacts),
         "public_access": lambda item: item.verified_public_availability,
-        "licence": lambda item: item.licence_status
-        is not CapabilityStatus.UNRESOLVED,
+        "licence": lambda item: item.licence_status is not CapabilityStatus.UNRESOLVED,
         "exact_counts": lambda item: item.count_status is ObservationCountStatus.EXACT,
         "exact_overlap_computable": lambda _item: False,
     }
@@ -1880,6 +1869,38 @@ class ClassCount(StrictContract):
     count: int = Field(ge=0)
 
 
+class ModalityJoinabilityDiagnostic(StrictContract):
+    modality: EndpointSemanticModality
+    activity_compound_count: int | None = Field(default=None, ge=0)
+    transcriptomic_overlap_count: int | None = Field(default=None, ge=0)
+    active_count: int | None = Field(default=None, ge=0)
+    inactive_count: int | None = Field(default=None, ge=0)
+    inconclusive_count: int | None = Field(default=None, ge=0)
+    conflicting_outcome_count: int | None = Field(default=None, ge=0)
+    missing_assay_count: int | None = Field(default=None, ge=0)
+    evidence_references: list[str] = Field(default_factory=list, max_length=100)
+
+
+class CandidateEndpointConstructionDiagnostic(StrictContract):
+    candidate_name: str = Field(min_length=3, max_length=300)
+    source_modalities: list[EndpointSemanticModality] = Field(min_length=1, max_length=20)
+    activity_compound_count: int | None = Field(default=None, ge=0)
+    cross_modality_overlap_count: int | None = Field(default=None, ge=0)
+    transcriptomic_overlap_count: int | None = Field(default=None, ge=0)
+    active_count: int | None = Field(default=None, ge=0)
+    inactive_count: int | None = Field(default=None, ge=0)
+    inconclusive_count: int | None = Field(default=None, ge=0)
+    conflicting_outcome_count: int | None = Field(default=None, ge=0)
+    missing_assay_count: int | None = Field(default=None, ge=0)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+
+
+class PossibleSourceDuplicateGroup(StrictContract):
+    source_ids: list[str] = Field(min_length=2, max_length=20)
+    shared_identifiers: list[str] = Field(min_length=1, max_length=50)
+    resolution_status: Literal["unresolved", "confirmed_distinct", "approved_merge"] = "unresolved"
+
+
 class JoinabilityDiagnostic(StrictContract):
     diagnostic_id: str = Field(min_length=3, max_length=160)
     status: JoinabilityStatus
@@ -1891,6 +1912,15 @@ class JoinabilityDiagnostic(StrictContract):
     transcriptomic_coverage: float | None = Field(default=None, ge=0, le=1)
     structure_coverage: float | None = Field(default=None, ge=0, le=1)
     class_counts: list[ClassCount] = Field(default_factory=list, max_length=100)
+    modality_diagnostics: list[ModalityJoinabilityDiagnostic] = Field(
+        default_factory=list, max_length=30
+    )
+    candidate_endpoint_diagnostics: list[CandidateEndpointConstructionDiagnostic] = Field(
+        default_factory=list, max_length=30
+    )
+    possible_duplicate_groups: list[PossibleSourceDuplicateGroup] = Field(
+        default_factory=list, max_length=100
+    )
     feature_schema_compatible: bool | None = None
     condition_compatibility: str | None = Field(default=None, max_length=2000)
     required_downloads: list[str] = Field(default_factory=list, max_length=100)
@@ -1914,6 +1944,18 @@ class JoinabilityDiagnostic(StrictContract):
             raise ValueError("exact overlap may be reported only for computed_exact diagnostics")
         if self.status is JoinabilityStatus.COMPUTED_EXACT and self.exact_overlap_count is None:
             raise ValueError("computed_exact diagnostics require exact_overlap_count")
+        modalities = [item.modality for item in self.modality_diagnostics]
+        if len(modalities) != len(set(modalities)):
+            raise ValueError("modality joinability diagnostics must be unique")
+        known_modalities = set(modalities)
+        for candidate in self.candidate_endpoint_diagnostics:
+            if not set(candidate.source_modalities).issubset(known_modalities):
+                raise ValueError(
+                    "candidate endpoint diagnostics require modality-specific diagnostics"
+                )
+        for group in self.possible_duplicate_groups:
+            if not set(group.source_ids).issubset(self.source_ids):
+                raise ValueError("possible duplicate groups must reference diagnostic sources")
         return self
 
 
@@ -1952,6 +1994,60 @@ class NamedMetric(StrictContract):
     value: float | int | str
 
 
+class ModalityAggregationOperator(StrEnum):
+    MODALITY_SPECIFIC = "modality_specific"
+    ANY_OF = "any_of"
+    ALL_OF = "all_of"
+    HIERARCHICAL = "hierarchical"
+    SEPARATE_MODELS_WITH_DERIVED_SUMMARY = "separate_models_with_derived_summary"
+    CUSTOM_APPROVED = "custom_approved"
+
+
+class ModalityAggregationApprovalStatus(StrEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class ModalityAggregationPolicy(StrictContract):
+    """Versioned label-construction proposal; raw assay observations remain immutable."""
+
+    policy_id: str = Field(min_length=3, max_length=160)
+    target: str = Field(min_length=2, max_length=500)
+    derived_endpoint_name: str = Field(min_length=3, max_length=300)
+    source_modalities: list[EndpointSemanticModality] = Field(min_length=1, max_length=20)
+    included_assay_roles: list[str] = Field(min_length=1, max_length=50)
+    excluded_modalities: list[EndpointSemanticModality] = Field(default_factory=list, max_length=20)
+    aggregation_operator: ModalityAggregationOperator
+    active_rule: str = Field(min_length=3, max_length=2000)
+    inactive_rule: str = Field(min_length=3, max_length=2000)
+    inconclusive_rule: str = Field(min_length=3, max_length=2000)
+    conflict_rule: str = Field(min_length=3, max_length=2000)
+    missing_assay_rule: str = Field(min_length=3, max_length=2000)
+    provenance_requirements: list[str] = Field(min_length=1, max_length=100)
+    scientific_rationale: str = Field(min_length=10, max_length=4000)
+    human_approval_status: ModalityAggregationApprovalStatus
+    policy_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
+    approval_artifact_id: str | None = Field(default=None, max_length=160)
+    approval_artifact_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> ModalityAggregationPolicy:
+        if len(self.source_modalities) != len(set(self.source_modalities)):
+            raise ValueError("source modalities must be unique")
+        if set(self.source_modalities) & set(self.excluded_modalities):
+            raise ValueError("included and excluded modalities must not overlap")
+        if self.human_approval_status is ModalityAggregationApprovalStatus.APPROVED and (
+            not self.approval_artifact_id or not self.approval_artifact_hash
+        ):
+            raise ValueError("approved modality aggregation requires immutable approval evidence")
+        return self
+
+    @property
+    def can_construct_labels(self) -> bool:
+        return self.human_approval_status is ModalityAggregationApprovalStatus.APPROVED
+
+
 class TrainingDatasetAssemblyStrategy(StrictContract):
     contract_version: Literal["1.0.0"] = TRAINING_DATASET_CONTRACT_VERSION
     strategy_id: str = Field(min_length=3, max_length=160)
@@ -1965,6 +2061,7 @@ class TrainingDatasetAssemblyStrategy(StrictContract):
     identity_policy: str = Field(min_length=3, max_length=4000)
     chemical_standardization_policy: str = Field(min_length=3, max_length=4000)
     label_policy: str = Field(min_length=3, max_length=4000)
+    modality_aggregation_policy: ModalityAggregationPolicy | None = None
     transcriptomic_condition_policy: str = Field(min_length=3, max_length=4000)
     repeated_signature_policy: str = Field(min_length=3, max_length=4000)
     expected_output_grain: str = Field(min_length=3, max_length=1000)
@@ -1984,6 +2081,12 @@ class TrainingDatasetAssemblyStrategy(StrictContract):
     preparation_plan: TrainingDatasetPreparationPlan
     status: StrategyStatus
     requires_human_review: bool = True
+
+    @model_validator(mode="after")
+    def aggregation_remains_human_gated(self) -> TrainingDatasetAssemblyStrategy:
+        if self.modality_aggregation_policy is not None and not self.requires_human_review:
+            raise ValueError("modality aggregation strategies require human review")
+        return self
 
     @field_validator("source_roles", mode="before")
     @classmethod
@@ -2098,8 +2201,7 @@ def build_source_assembly_gap_report(
                 )
             )
     if inventory.sources and not any(
-        {"PubChem CID", "InChIKey"} & set(item.identifier_fields)
-        for item in inventory.sources
+        {"PubChem CID", "InChIKey"} & set(item.identifier_fields) for item in inventory.sources
     ):
         gaps.append(
             AssemblyGap(
@@ -2217,6 +2319,12 @@ SPECIALIZED_AGENT_SEQUENCE = [
             "inspect_activity_identifier_fields",
             "summarize_activity_outcomes",
             "inspect_counter_screen_relationships",
+            "search_epa_assays",
+            "inspect_epa_assay_metadata",
+            "inspect_epa_activity_availability",
+            "inspect_epa_compound_identifier_fields",
+            "inspect_epa_release_manifest",
+            "inspect_epa_related_assay_components",
         ],
         receives_artifacts=["training_dataset_specification", "component_requirements"],
         produces_artifact="activity_source_inventory_fragment",
@@ -2235,6 +2343,12 @@ SPECIALIZED_AGENT_SEQUENCE = [
             "inspect_processed_matrix_availability",
             "inspect_raw_matrix_availability",
             "inspect_feature_schema",
+            "search_lincs_resources",
+            "inspect_lincs_perturbagen_catalogue",
+            "inspect_lincs_signature_metadata",
+            "inspect_lincs_feature_space",
+            "inspect_lincs_processed_signature_availability",
+            "inspect_lincs_release_manifest",
         ],
         receives_artifacts=["training_dataset_specification", "component_requirements"],
         produces_artifact="transcriptomic_source_inventory_fragment",
@@ -2312,8 +2426,10 @@ SPECIALIZED_AGENT_INSTRUCTIONS = {
     "Activity Evidence Discovery Agent": (
         "Discover bounded official public compound-level activity evidence for the approved "
         "endpoint specification. Use only exposed tools. Distinguish antagonism, agonism, "
-        "binding, downstream effects, cytotoxicity, and assay interference. Return only source "
-        "review annotations for persisted observation IDs only; an empty review is valid."
+        "binding, downstream effects, cytotoxicity, and assay interference. For broad receptor "
+        "discovery, retain binding, agonism, and antagonism separately without preselecting a "
+        "winning modality or aggregating labels. Return only source review annotations for "
+        "persisted observation IDs only; an empty review is valid."
     ),
     "Transcriptomic Evidence Discovery Agent": (
         "Discover bounded official public chemical-perturbation transcriptomic sources using "
@@ -2336,14 +2452,23 @@ SPECIALIZED_AGENT_INSTRUCTIONS = {
     "Training Dataset Assembly Strategy Planner": (
         "Propose source-neutral assembly strategies only from the verified source inventory and "
         "capability matrix supplied by the orchestrator. Never reference an undiscovered source. "
-        "Use deterministic joinability diagnostics and mark unavailable exact values as requiring "
+        "Preserve binding, agonism, antagonism, activation, inhibition, and other discovered assay "
+        "modalities separately. Compare modality-specific endpoints, scientifically justified "
+        "functional unions, hierarchical endpoints, and separate models with an optional derived "
+        "summary when the evidence supports them. Any aggregation must be a versioned "
+        "ModalityAggregationPolicy requiring human approval; binding is never silently promoted "
+        "to functional activity. Use modality-specific deterministic counts, conflicts, "
+        "missingness, class balance, and transcriptomic overlap. Mark unavailable exact values as "
+        "requiring "
         "download or computation. A no-feasible-strategy result is valid."
     ),
     "Assembly Strategy Evaluation Agent": (
         "Compare only the validated strategies and deterministic diagnostics supplied by the "
         "orchestrator. Evaluate scientific alignment, identity coverage, context compatibility, "
-        "leakage risk, access, provenance, and preparation effort. Do not create new sources or "
-        "invent exact overlap. A no-feasible-strategy result is valid."
+        "leakage risk, access, provenance, and preparation effort. Compare the intended prediction "
+        "claim and modality-specific diagnostics before recommending an aggregation policy. Do not "
+        "create new sources, invent exact overlap, or approve label aggregation. A "
+        "no-feasible-strategy result is valid."
     ),
 }
 

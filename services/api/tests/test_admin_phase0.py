@@ -44,6 +44,21 @@ def create(client, key="api-phase0-create"):
     return response.json()
 
 
+def test_production_reviewed_source_persistence_uses_one_database(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+    with TestClient(create_app(repo_root)) as client:
+        database = client.app.state.workflow_database
+        assert client.app.state.artifact_store.database is database
+        assert client.app.state.source_cache.database is database
+        assert all(
+            adapter.artifacts.database is adapter.cache.database is database
+            for adapter in client.app.state.reviewed_source_adapters.approved()
+        )
+        assert client.app.state.reviewed_source_adapters.readiness()["approved_adapter_count"] == 6
+
+
 def test_training_dataset_draft_api_is_hint_free_and_strategy_locked(
     repo_root, monkeypatch, tmp_path
 ) -> None:
@@ -145,9 +160,10 @@ def test_source_discovery_authorization_api_is_utf8_versioned_and_fail_closed(
         )
         assert stale.status_code == 409
         assert stale.json()["error"] == "stale_workflow_version"
-        assert client.get(
-            f"/admin/endpoint-builds/{created['id']}/agent-runs", headers=ADMIN
-        ).json() == []
+        assert (
+            client.get(f"/admin/endpoint-builds/{created['id']}/agent-runs", headers=ADMIN).json()
+            == []
+        )
 
 
 def test_training_dataset_start_compiles_specification_and_persists_approval(

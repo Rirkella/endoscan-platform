@@ -19,6 +19,11 @@ from .contracts import SourceToolDiagnostic
 APPROVED_SOURCE_HOSTS = frozenset(
     {
         "eutils.ncbi.nlm.nih.gov",
+        "comptox.epa.gov",
+        "ftp.ncbi.nlm.nih.gov",
+        "api.clue.io",
+        "clue.io",
+        "lincsproject.org",
         "pubchem.ncbi.nlm.nih.gov",
         "www.ncbi.nlm.nih.gov",
     }
@@ -186,7 +191,7 @@ class ScientificSourceClient:
             self._rate_limit()
             started = time.monotonic()
             try:
-                response = self._get_with_approved_redirects(
+                response, redirect_count = self._get_with_approved_redirects(
                     url,
                     params=params,
                     tool_name=tool_name,
@@ -230,6 +235,7 @@ class ScientificSourceClient:
                     url=str(response.url),
                     http_status=response.status_code,
                     final_host=final_host,
+                    redirect_count=redirect_count,
                     content_type=content_type or None,
                     response_byte_count=response_bytes,
                     attempt_number=attempt_number,
@@ -370,13 +376,13 @@ class ScientificSourceClient:
         tool_name: str,
         attempt_number: int,
         started: float,
-    ) -> httpx.Response:
+    ) -> tuple[httpx.Response, int]:
         current_url = url
         current_params = params
-        for _redirect_number in range(self.maximum_redirects + 1):
+        for redirect_count in range(self.maximum_redirects + 1):
             response = self.client.get(current_url, params=current_params)
             if not response.is_redirect:
-                return response
+                return response, redirect_count
             location = response.headers.get("location", "")
             if not location:
                 raise SourcePolicyError(
@@ -458,6 +464,7 @@ class ScientificSourceClient:
         duration_ms: int = 0,
         http_status: int | None = None,
         final_host: str | None = None,
+        redirect_count: int = 0,
         content_type: str | None = None,
         response_byte_count: int | None = None,
         exception_class: str | None = None,
@@ -470,6 +477,7 @@ class ScientificSourceClient:
             safe_url_path=parsed.path or "/",
             http_status=http_status,
             final_approved_host=final_host,
+            redirect_count=redirect_count,
             content_type=content_type,
             response_byte_count=response_byte_count,
             exception_class=exception_class,

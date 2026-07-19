@@ -9,6 +9,8 @@ from pydantic import ValidationError
 
 from endoscan_workflows.contracts import EndpointBuildCreate, ToolInvocation, WorkflowState
 from endoscan_workflows.reviewed_source_adapters import (
+    EPA_COMPTOX_TOXCAST_ADAPTER,
+    LINCS_L1000_ADAPTER,
     NCBI_GEO_ADAPTER,
     NCBI_SUPPORTING_METADATA_ADAPTER,
     PUBCHEM_BIOASSAY_ADAPTER,
@@ -92,7 +94,19 @@ def test_registry_exposes_only_reviewed_adapters_and_covers_mandatory_roles() ->
     readiness = registry.readiness()
     assert readiness["ready"] is True
     assert readiness["source_retries"] == 0
-    assert readiness["approved_adapter_count"] == 4
+    assert readiness["approved_adapter_count"] == 6
+    assert all(
+        item.allows_bulk_downloads_during_discovery is False
+        for item in REVIEWED_ADAPTER_DEFINITIONS
+    )
+    assert set(readiness["approved_adapter_ids"]) == {
+        "pubchem-bioassay",
+        "epa-comptox-toxcast",
+        "ncbi-geo-series",
+        "lincs-l1000",
+        "pubchem-compound",
+        "ncbi-supporting-metadata",
+    }
     assert adapter_registry_fingerprint(registry) == adapter_registry_fingerprint(registry)
 
     pending = PUBCHEM_COMPOUND_ADAPTER.model_copy(
@@ -226,7 +240,9 @@ def test_source_security_rejects_domain_redirect_mime_size_timeout_and_http_erro
     ("fixture_group", "definition", "operation"),
     [
         ("activity", PUBCHEM_BIOASSAY_ADAPTER, "search_activity_sources"),
+        ("epa_activity", EPA_COMPTOX_TOXCAST_ADAPTER, "search_epa_assays"),
         ("transcriptomics", NCBI_GEO_ADAPTER, "search_transcriptomic_sources"),
+        ("lincs", LINCS_L1000_ADAPTER, "search_lincs_resources"),
         ("identity", PUBCHEM_COMPOUND_ADAPTER, "resolve_compound_identity_sample"),
         ("supporting", NCBI_SUPPORTING_METADATA_ADAPTER, "inspect_supporting_metadata"),
     ],
@@ -250,6 +266,72 @@ def test_source_neutral_adapter_fixtures_are_typed(
     assert {item.count_status for item in batch.observations} <= set(ObservationCountStatus)
 
 
+def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None:
+    epa_request = _adapter(EPA_COMPTOX_TOXCAST_ADAPTER)._build_request(
+        "search_epa_assays",
+        ReviewedSourceOperationInput(
+            biological_target="example receptor",
+            endpoint_modality="functional activity",
+            maximum_results=4,
+        ),
+    )
+    assert epa_request.url == (
+        "https://comptox.epa.gov/dashboard-api/ccdapp2/assay-endpoints/search"
+    )
+    assert epa_request.params["size"] == 4
+    assert EPA_COMPTOX_TOXCAST_ADAPTER.source_retry_count == 0
+    assert EPA_COMPTOX_TOXCAST_ADAPTER.maximum_response_bytes == 500_000
+
+    lincs_search = _adapter(LINCS_L1000_ADAPTER)._build_request(
+        "search_lincs_resources",
+        ReviewedSourceOperationInput(query="chemical perturbation", maximum_results=5),
+    )
+    assert lincs_search.url == ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi")
+    assert "LINCS L1000" in str(lincs_search.params["term"])
+    lincs_metadata = _adapter(LINCS_L1000_ADAPTER)._build_request(
+        "inspect_lincs_signature_metadata",
+        ReviewedSourceOperationInput(stable_identifier="GSE12345"),
+    )
+    assert lincs_metadata.url == "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
+    assert lincs_metadata.params["acc"] == "GSE12345"
+    assert LINCS_L1000_ADAPTER.source_retry_count == 0
+
+
+def test_epa_parser_preserves_assay_component_modality_and_release_gaps() -> None:
+    adapter = _adapter(EPA_COMPTOX_TOXCAST_ADAPTER)
+    records = adapter._normalized_records(
+        "search_epa_assays",
+        ReviewedSourceOperationInput(query="example receptor"),
+        json.dumps(
+            {
+                "content": [
+                    {
+                        "assayEndpointId": "EPA:1001",
+                        "assayEndpointName": "Example functional component",
+                        "biologicalTarget": "example receptor",
+                        "assayModality": "agonism",
+                        "assayComponentName": "reporter component",
+                        "activityCallAvailable": True,
+                        "continuousMeasurementAvailable": True,
+                        "compoundIdentifierFields": ["DTXSID", "CASRN"],
+                        "downloadManifestAvailable": True,
+                        "releaseVersion": "synthetic-v1",
+                    }
+                ]
+            }
+        ).encode(),
+        "application/json",
+    )
+    assert records[0]["modality"] == "agonism"
+    assert records[0]["experimental_context_fields"] == ["reporter component"]
+    assert records[0]["measurement_fields"] == [
+        "activity call",
+        "continuous measurement",
+    ]
+    assert records[0]["identifier_fields"] == ["DTXSID", "CASRN"]
+    assert records[0]["downloadable_artifacts"] == ["official downloadable artifact manifest"]
+
+
 def test_malformed_fixture_payload_is_rejected_by_typed_parser() -> None:
     adapter = object.__new__(ReviewedSourceAdapter)
     adapter.definition = PUBCHEM_BIOASSAY_ADAPTER
@@ -260,6 +342,33 @@ def test_malformed_fixture_payload_is_rejected_by_typed_parser() -> None:
             b"{not-json",
             "application/json",
         )
+
+
+def test_discovery_and_inventory_preserve_assay_modalities_and_provenance() -> None:
+    batch = fixture_batch(
+        PUBCHEM_BIOASSAY_ADAPTER,
+        "search_activity_sources",
+        _fixtures()["activity"][:3],
+    )
+    assert [item.modality for item in batch.observations] == [
+        "antagonism",
+        "binding",
+        "agonism",
+    ]
+    fragment = compile_verified_source_fragment(
+        fragment_id="fragment-modality-preservation",
+        component_roles=[ComponentRole.ENDPOINT_ACTIVITY],
+        observations=batch.observations,
+        review=None,
+    )
+    assert [item.assay_modality for item in fragment.candidate_records] == [
+        "antagonism",
+        "binding",
+        "agonism",
+    ]
+    assert all(item.artifact_ids for item in fragment.candidate_records)
+    assert all(item.artifact_hashes for item in fragment.candidate_records)
+    assert len({item.source_id for item in fragment.candidate_records}) == 3
 
 
 def test_adapter_cache_reuses_content_addressed_observations_without_second_request(
