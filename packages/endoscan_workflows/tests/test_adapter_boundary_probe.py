@@ -75,6 +75,26 @@ def test_exact_production_adapter_reaches_model_boundary_without_network(monkeyp
     assert result.developer_message is None
 
 
+def test_every_specialized_agent_reaches_its_schema_boundary_without_network(
+    monkeypatch,
+) -> None:
+    def external_client_forbidden(*args, **kwargs):
+        raise AssertionError("Specialized probes must not construct an external client")
+
+    monkeypatch.setattr("endoscan_workflows.openai_provider.AsyncOpenAI", external_client_forbidden)
+    results = AdapterBoundaryProbe(AgentConfiguration(), registry()).check_specialized_agents()
+    assert len(results) == 7
+    assert {item["role"] for item in results} == {"planner", "worker"}
+    assert all(item["local_sdk_configuration_valid"] for item in results)
+    assert all(item["model_call_boundary_reached"] for item in results)
+    assert all(item["network_requests"] == 0 for item in results)
+    assert {item["output_schema_name"] for item in results} == {
+        "TrainingDatasetSpecification",
+        "VerifiedSourceInventoryFragment",
+        "TrainingDatasetAssemblyReview",
+    }
+
+
 def test_production_agent_tools_and_output_schema_are_strict_sdk_inputs() -> None:
     tools = registry()
     configuration = AgentConfiguration(

@@ -44,6 +44,65 @@ def create(client, key="api-phase0-create"):
     return response.json()
 
 
+def test_training_dataset_draft_api_is_hint_free_and_strategy_locked(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+    with TestClient(create_app(repo_root)) as client:
+        response = post(
+            client,
+            "/admin/endpoint-builds",
+            {
+                "endpoint_name": "Example functional endpoint",
+                "endpoint_slug": "example-functional-endpoint",
+                "biological_goal": (
+                    "Construct public training data linking compounds, structures, "
+                    "transcriptomic responses and endpoint activity."
+                ),
+                "created_by": "local-admin",
+                "workflow_kind": "training_dataset_discovery",
+                "benchmark_mode": "blind_training_dataset_discovery",
+            },
+            "api-training-draft",
+        )
+        assert response.status_code == 200, response.text
+        build = response.json()
+        assert build["current_stage"] == "DRAFT"
+        assert build["workflow_kind"] == "training_dataset_discovery"
+        workflow = client.get(
+            f"/admin/endpoint-builds/{build['id']}/training-dataset-workflow",
+            headers=ADMIN,
+        )
+        assert workflow.status_code == 200, workflow.text
+        body = workflow.json()
+        assert body["initial_context"]["source_hints"] == []
+        assert body["initial_context"]["article_hint"] is None
+        assert body["initial_context"]["assay_id_hint"] is None
+        assert body["initial_context"]["expected_overlap_hint"] is None
+        assert body["initial_context"]["allowed_tools"]
+        assert body["verified_source_inventory"] is None
+        assert body["assembly_strategies"] is None
+        runs = client.get(f"/admin/endpoint-builds/{build['id']}/agent-runs", headers=ADMIN)
+        assert runs.json() == []
+
+
+def test_specialized_boundary_probes_are_zero_network(repo_root, monkeypatch, tmp_path) -> None:
+    configure(monkeypatch, tmp_path)
+    with TestClient(create_app(repo_root)) as client:
+        response = post(
+            client,
+            "/admin/agent-provider/specialized-boundary-probes",
+            {},
+            "specialized-boundary-probes",
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["network_requests"] == 0
+        assert len(body["results"]) == 7
+        assert all(item["network_requests"] == 0 for item in body["results"])
+        assert all(item["model_call_boundary_reached"] for item in body["results"])
+
+
 def test_admin_routes_fail_closed_outside_development(repo_root, monkeypatch, tmp_path) -> None:
     configure(monkeypatch, tmp_path, enabled=False)
     with TestClient(create_app(repo_root)) as client:

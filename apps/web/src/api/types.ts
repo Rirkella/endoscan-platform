@@ -19,6 +19,8 @@ export interface AdminBuild {
   endpoint_name: string;
   endpoint_slug: string;
   biological_goal: string;
+  workflow_kind?: "legacy_single_source_discovery" | "training_dataset_discovery";
+  benchmark_mode?: string;
   state: string;
   status: string;
   current_stage: string;
@@ -33,6 +35,27 @@ export interface AdminBuild {
   paused_at: string | null;
   cancelled_at: string | null;
   completed_at: string | null;
+}
+
+export interface AdminTrainingDatasetWorkflow {
+  schema_version: "1.0.0";
+  contract_version?: string;
+  workflow_id: string;
+  workflow_kind: string;
+  benchmark_mode?: string;
+  legacy: boolean;
+  label?: string;
+  initial_context?: Record<string, unknown>;
+  target_specification?: Record<string, unknown> | null;
+  component_requirements?: Record<string, unknown> | null;
+  verified_source_inventory?: Record<string, unknown> | null;
+  capability_matrix?: Record<string, unknown> | null;
+  assembly_strategies?: Record<string, unknown> | null;
+  joinability_diagnostics?: Record<string, unknown> | null;
+  gap_report?: Record<string, unknown> | null;
+  preparation_plan?: Record<string, unknown> | null;
+  assembly_review?: Record<string, unknown> | null;
+  discovery_round?: number;
 }
 
 export interface AdminArtifact {

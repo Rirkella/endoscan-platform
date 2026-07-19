@@ -1,5 +1,10 @@
 # Phase 1: bounded live dataset discovery
 
+> This document describes the retained legacy single-source path. New endpoint builds may use the
+> source-neutral discovery-before-strategy workflow in
+> `training-dataset-discovery-and-assembly.md`. Existing builds, artifacts, and approvals are not
+> rewritten.
+
 Phase 1 adds one real provider adapter and one specialized Dataset Discovery and Evaluation Agent
 for the oxidative-stress endpoint. A recommendation ends at `AWAITING_DATASET_APPROVAL`; an honest
 no-candidate result ends at `AWAITING_SEARCH_REVIEW`. Dataset download,

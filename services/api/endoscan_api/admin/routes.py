@@ -53,6 +53,17 @@ def adapter_boundary_probe(request: Request):
     return request.app.state.adapter_boundary_probe.check()
 
 
+@router.post(
+    "/agent-provider/specialized-boundary-probes",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def specialized_adapter_boundary_probes(request: Request):
+    return {
+        "network_requests": 0,
+        "results": request.app.state.adapter_boundary_probe.check_specialized_agents(),
+    }
+
+
 @router.post("/source-tools/geo-validation-probe", dependencies=[Depends(require_mutation_budget)])
 def geo_validation_probe(body: GeoValidationProbeBody, request: Request):
     return request.app.state.geo_validation_probe.run(body.accessions)
@@ -77,6 +88,13 @@ def list_builds(request: Request):
 @router.get("/endpoint-builds/{build_id}")
 def get_build(build_id: str, request: Request):
     return _service(request).get_build(validate_resource_id(build_id, "Endpoint build"))
+
+
+@router.get("/endpoint-builds/{build_id}/training-dataset-workflow")
+def training_dataset_workflow(build_id: str, request: Request):
+    return _service(request).training_dataset_workflow(
+        validate_resource_id(build_id, "Endpoint build")
+    )
 
 
 def _command(action: str, build_id: str, body: WorkflowCommandBody, request: Request, key: str):

@@ -8,9 +8,18 @@ from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
-from agents import Agent, FunctionTool, ModelSettings, OpenAIProvider, RunConfig, Runner
+from agents import (
+    Agent,
+    AgentOutputSchema,
+    FunctionTool,
+    ModelSettings,
+    OpenAIProvider,
+    RunConfig,
+    Runner,
+)
 from agents.exceptions import AgentsException, MaxTurnsExceeded, ModelBehaviorError, UserError
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
+from pydantic import BaseModel
 
 from .config import AgentConfiguration
 from .contracts import (
@@ -24,8 +33,34 @@ from .discovery import DiscoveryOutput
 from .providers import ProviderFailure, ProviderTimeout
 from .repository import canonical_json
 from .tools import ToolRegistry
+from .training_dataset import (
+    TrainingDatasetAssemblyReview,
+    TrainingDatasetSpecification,
+    VerifiedSourceInventoryFragment,
+)
 
 TOOL_ENVELOPE = "__endoscan_tool_request__"
+
+OUTPUT_SCHEMAS: dict[str, type[BaseModel]] = {
+    DiscoveryOutput.__name__: DiscoveryOutput,
+    TrainingDatasetSpecification.__name__: TrainingDatasetSpecification,
+    VerifiedSourceInventoryFragment.__name__: VerifiedSourceInventoryFragment,
+    TrainingDatasetAssemblyReview.__name__: TrainingDatasetAssemblyReview,
+}
+
+
+def resolve_output_schema(name: str) -> type[BaseModel]:
+    try:
+        return OUTPUT_SCHEMAS[name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported structured output schema: {name}") from exc
+
+
+def sdk_output_schema(name: str):
+    schema = resolve_output_schema(name)
+    if schema is DiscoveryOutput:
+        return schema
+    return AgentOutputSchema(schema, strict_json_schema=False)
 
 
 class OpenAIAgentProvider:
@@ -230,7 +265,7 @@ class OpenAIAgentProvider:
                 verbosity="low",
             ),
             tools=[self._proxy_tool(name) for name in request.available_tools],
-            output_type=DiscoveryOutput,
+            output_type=sdk_output_schema(request.output_schema_name),
             tool_use_behavior="stop_on_first_tool",
         )
 
@@ -272,7 +307,9 @@ class OpenAIAgentProvider:
             description=registered.definition.description,
             params_json_schema=registered.input_model.model_json_schema(),
             on_invoke_tool=request_only,
-            strict_json_schema=True,
+            strict_json_schema=not registered.definition.implementation_version.startswith(
+                "training-dataset"
+            ),
             timeout_seconds=registered.definition.timeout_seconds,
             timeout_behavior="raise_exception",
         )
@@ -280,7 +317,10 @@ class OpenAIAgentProvider:
     @staticmethod
     def _turn_input(request: AgentRunRequest, history: list[dict]) -> str:
         payload = {
-            "objective": "Return the next bounded action or final DiscoveryOutput.",
+            "objective": (
+                "Return the next bounded tool request or final structured output matching "
+                f"{request.output_schema_name}."
+            ),
             "endpoint_definition": {
                 "endpoint_name": request.context.get("endpoint_name"),
                 "biological_goal": request.context.get("biological_goal"),
@@ -497,7 +537,9 @@ class OpenAIAgentProvider:
                 }
             ),
             "tool_results": estimate(state_summary),
-            "structured_output_schema": estimate(DiscoveryOutput.model_json_schema()),
+            "structured_output_schema": estimate(
+                resolve_output_schema(request.output_schema_name).model_json_schema()
+            ),
         }
 
     def _usage(self, result: Any) -> UsageReport:

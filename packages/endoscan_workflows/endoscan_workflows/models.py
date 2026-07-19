@@ -17,6 +17,10 @@ class EndpointBuildRow(Base):
     endpoint_name: Mapped[str] = mapped_column(String(120))
     endpoint_slug: Mapped[str] = mapped_column(String(80), index=True)
     biological_goal: Mapped[str] = mapped_column(Text)
+    workflow_kind: Mapped[str] = mapped_column(
+        String(80), default="legacy_single_source_discovery", index=True
+    )
+    benchmark_mode: Mapped[str] = mapped_column(String(120), default="none", index=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     current_stage: Mapped[str] = mapped_column(String(64), index=True)
     paused_from_state: Mapped[str | None] = mapped_column(String(64))
@@ -215,6 +219,31 @@ class SourceCacheRow(Base):
     raw_artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"), index=True)
     retrieved_at: Mapped[str] = mapped_column(String(40))
     expires_at: Mapped[str] = mapped_column(String(40), index=True)
+
+
+class TrainingDatasetWorkflowRow(Base):
+    """Mutable latest-document pointers; every durable decision remains an artifact/event."""
+
+    __tablename__ = "training_dataset_workflows"
+
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), primary_key=True
+    )
+    contract_version: Mapped[str] = mapped_column(String(40), default="1.0.0")
+    benchmark_mode: Mapped[str] = mapped_column(String(120), index=True)
+    initial_context_json: Mapped[str] = mapped_column(Text)
+    specification_json: Mapped[str | None] = mapped_column(Text)
+    component_requirements_json: Mapped[str | None] = mapped_column(Text)
+    source_inventory_json: Mapped[str | None] = mapped_column(Text)
+    capability_matrix_json: Mapped[str | None] = mapped_column(Text)
+    assembly_strategies_json: Mapped[str | None] = mapped_column(Text)
+    joinability_diagnostics_json: Mapped[str | None] = mapped_column(Text)
+    gap_report_json: Mapped[str | None] = mapped_column(Text)
+    preparation_plan_json: Mapped[str | None] = mapped_column(Text)
+    assembly_review_json: Mapped[str | None] = mapped_column(Text)
+    discovery_round: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = mapped_column(String(40))
+    updated_at: Mapped[str] = mapped_column(String(40))
 
 
 Index("ix_build_status_updated", EndpointBuildRow.status, EndpointBuildRow.updated_at)

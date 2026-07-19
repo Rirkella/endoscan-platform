@@ -25,6 +25,21 @@ class StrictContract(BaseModel):
 
 class WorkflowState(str, Enum):
     DRAFT = "DRAFT"
+    SPECIFYING_TARGET_DATASET = "SPECIFYING_TARGET_DATASET"
+    AWAITING_DATASET_SPECIFICATION_APPROVAL = "AWAITING_DATASET_SPECIFICATION_APPROVAL"
+    DERIVING_COMPONENT_REQUIREMENTS = "DERIVING_COMPONENT_REQUIREMENTS"
+    DISCOVERING_ACTIVITY_EVIDENCE = "DISCOVERING_ACTIVITY_EVIDENCE"
+    DISCOVERING_TRANSCRIPTOMIC_EVIDENCE = "DISCOVERING_TRANSCRIPTOMIC_EVIDENCE"
+    DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES = "DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES"
+    DISCOVERING_SUPPORTING_METADATA = "DISCOVERING_SUPPORTING_METADATA"
+    VALIDATING_DISCOVERED_SOURCES = "VALIDATING_DISCOVERED_SOURCES"
+    BUILDING_SOURCE_INVENTORY = "BUILDING_SOURCE_INVENTORY"
+    PLANNING_ASSEMBLY_STRATEGIES = "PLANNING_ASSEMBLY_STRATEGIES"
+    EVALUATING_JOINABILITY = "EVALUATING_JOINABILITY"
+    IDENTIFYING_ASSEMBLY_GAPS = "IDENTIFYING_ASSEMBLY_GAPS"
+    GAP_DIRECTED_DISCOVERY = "GAP_DIRECTED_DISCOVERY"
+    COMPARING_ASSEMBLY_STRATEGIES = "COMPARING_ASSEMBLY_STRATEGIES"
+    AWAITING_ASSEMBLY_STRATEGY_APPROVAL = "AWAITING_ASSEMBLY_STRATEGY_APPROVAL"
     DISCOVERING_DATA = "DISCOVERING_DATA"
     AWAITING_DATASET_APPROVAL = "AWAITING_DATASET_APPROVAL"
     AWAITING_SEARCH_REVIEW = "AWAITING_SEARCH_REVIEW"
@@ -74,6 +89,7 @@ class ActorType(str, Enum):
 
 class ApprovalType(str, Enum):
     ENDPOINT_DEFINITION = "endpoint_definition"
+    DATASET_SPECIFICATION = "dataset_specification"
     DATASET_SELECTION = "dataset_selection"
     SEARCH_REVISION = "search_revision"
     LABEL_RULES = "label_rules"
@@ -81,6 +97,12 @@ class ApprovalType(str, Enum):
     TRAINING_AUTHORIZATION = "training_authorization"
     MODEL_ACCEPTANCE = "model_acceptance"
     REGISTRY_PUBLICATION = "registry_publication"
+    TRAINING_DATASET_ASSEMBLY_STRATEGY = "training_dataset_assembly_strategy"
+
+
+class WorkflowKind(str, Enum):
+    LEGACY_SINGLE_SOURCE_DISCOVERY = "legacy_single_source_discovery"
+    TRAINING_DATASET_DISCOVERY = "training_dataset_discovery"
 
 
 class ApprovalStatus(str, Enum):
@@ -123,6 +145,8 @@ class EndpointBuildCreate(StrictContract):
     biological_goal: str = Field(min_length=10, max_length=4000)
     created_by: str = Field(min_length=2, max_length=120)
     idempotency_key: str = Field(min_length=8, max_length=160)
+    workflow_kind: WorkflowKind = WorkflowKind.LEGACY_SINGLE_SOURCE_DISCOVERY
+    benchmark_mode: str = Field(default="none", min_length=1, max_length=120)
 
     @field_validator("endpoint_slug")
     @classmethod
@@ -137,6 +161,8 @@ class WorkflowSnapshot(StrictContract):
     endpoint_name: str
     endpoint_slug: str
     biological_goal: str
+    workflow_kind: WorkflowKind = WorkflowKind.LEGACY_SINGLE_SOURCE_DISCOVERY
+    benchmark_mode: str = "none"
     state: WorkflowState
     status: WorkflowStatus
     current_stage: WorkflowState

@@ -137,6 +137,26 @@ def test_configuration_honors_bounded_live_settings(monkeypatch) -> None:
     assert "unit-test-key-never-display" not in json.dumps(configuration.public_status())
 
 
+def test_configuration_separates_planner_worker_and_global_budgets(monkeypatch) -> None:
+    monkeypatch.setenv("ENDOSCAN_PLANNER_PROVIDER", "openai")
+    monkeypatch.setenv("ENDOSCAN_PLANNER_MODEL", "planner-test-model")
+    monkeypatch.setenv("ENDOSCAN_WORKER_PROVIDER", "fake")
+    monkeypatch.setenv("ENDOSCAN_WORKER_MODEL", "worker-test-model")
+    monkeypatch.setenv("ENDOSCAN_BENCHMARK_MODE", "blind_training_dataset_discovery")
+    monkeypatch.setenv("ENDOSCAN_WORKFLOW_MAX_TOOL_CALLS", "31")
+    monkeypatch.setenv("ENDOSCAN_MAX_GAP_DISCOVERY_ROUNDS", "1")
+    configuration = AgentConfiguration.from_env()
+    public = configuration.public_status()
+    assert configuration.planner_provider == "openai"
+    assert configuration.planner_model == "planner-test-model"
+    assert configuration.worker_provider == "fake"
+    assert configuration.worker_model == "worker-test-model"
+    assert public["benchmark_mode"] == "blind_training_dataset_discovery"
+    assert public["global_workflow_budget"]["maximum_tool_calls"] == 31
+    assert public["global_workflow_budget"]["maximum_gap_discovery_rounds"] == 1
+    assert public["global_workflow_budget"]["provider_retries"] == 0
+
+
 def test_latest_live_precheck_projection_is_allowed_under_new_input_budget() -> None:
     configuration = AgentConfiguration(
         provider="openai",
@@ -219,9 +239,7 @@ def test_all_zero_searches_have_a_valid_no_candidate_contract() -> None:
                 "strategy_reason": "Focused human sequencing search.",
                 "scientific_terms": ["oxidative stress"],
                 "organism_alternatives": ["Homo sapiens"],
-                "study_type_alternatives": [
-                    "Expression profiling by high throughput sequencing"
-                ],
+                "study_type_alternatives": ["Expression profiling by high throughput sequencing"],
                 "rendered_query": "query-one",
                 "result_count": 0,
             },

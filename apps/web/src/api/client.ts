@@ -12,6 +12,7 @@ import type {
   AdminBuild,
   AdminProviderPreflight,
   AdminTimelineEvent,
+  AdminTrainingDatasetWorkflow,
   AdminWorkflowError,
   ApiError,
   BiologicalResponse,
@@ -225,11 +226,17 @@ export const api = {
     adminPost<AdminProviderPreflight>("/admin/agent-provider/preflight", {}, "provider-preflight"),
   adminGetBuild: (id: string) =>
     adminGet<AdminBuild>(`/admin/endpoint-builds/${encodeURIComponent(id)}`),
+  adminTrainingDatasetWorkflow: (id: string) =>
+    adminGet<AdminTrainingDatasetWorkflow>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/training-dataset-workflow`,
+    ),
   adminCreateBuild: (payload: {
     endpoint_name: string;
     endpoint_slug: string;
     biological_goal: string;
     created_by: string;
+    workflow_kind?: "legacy_single_source_discovery" | "training_dataset_discovery";
+    benchmark_mode?: string;
   }) => adminPost<AdminBuild>("/admin/endpoint-builds", payload, "create-build"),
   adminCommand: (
     id: string,

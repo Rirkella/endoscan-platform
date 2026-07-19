@@ -1,5 +1,11 @@
 # Admin console specification
 
+New `training_dataset_discovery` builds use a target-schema-first workspace: target training data,
+component requirements, verified source inventory, capability matrix, arbitrary assembly graphs,
+strategy comparison, gap report, preparation plan, and multi-agent trace. The human action is
+**Approve assembly strategy**, not **Approve dataset**. Legacy builds retain the original candidate
+comparison and `dataset_selection` wording.
+
 The primary interaction is workflow control and scientific review, not chat. All mutations require an authenticated administrator and optimistic-lock version.
 
 ## `/admin/endpoints`

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from sqlalchemy import func, select, update
@@ -21,6 +22,7 @@ from .contracts import (
     EndpointBuildCreate,
     StepStatus,
     TransitionRequest,
+    WorkflowKind,
     WorkflowSnapshot,
     WorkflowState,
     WorkflowStatus,
@@ -42,6 +44,7 @@ from .models import (
     EndpointBuildRow,
     HumanDecisionRow,
     ToolCallRow,
+    TrainingDatasetWorkflowRow,
     WorkflowErrorRow,
     WorkflowEventRow,
     WorkflowStepRow,
@@ -57,9 +60,39 @@ from .repository import (
     versioned_payload,
 )
 from .state_machine import TransitionSpec, WorkflowGraph
+from .training_dataset import (
+    BLIND_TRAINING_DATASET_DISCOVERY,
+    SPECIALIZED_AGENT_SEQUENCE,
+    TRAINING_DATASET_CONTRACT_VERSION,
+    BlindBenchmarkInitialContext,
+    DiscoveryBeforeStrategyGuard,
+    SourceCapabilityMatrix,
+    TrainingDatasetAssemblyReview,
+    TrainingDatasetComponentRequirements,
+    TrainingDatasetPreparationPlan,
+    TrainingDatasetSpecification,
+    VerifiedSourceInventory,
+    derive_component_requirements,
+    validate_strategy_sources,
+)
 
 STATE_PROGRESS = {
     WorkflowState.DRAFT: 0,
+    WorkflowState.SPECIFYING_TARGET_DATASET: 3,
+    WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL: 8,
+    WorkflowState.DERIVING_COMPONENT_REQUIREMENTS: 11,
+    WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE: 16,
+    WorkflowState.DISCOVERING_TRANSCRIPTOMIC_EVIDENCE: 23,
+    WorkflowState.DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES: 30,
+    WorkflowState.DISCOVERING_SUPPORTING_METADATA: 36,
+    WorkflowState.VALIDATING_DISCOVERED_SOURCES: 42,
+    WorkflowState.BUILDING_SOURCE_INVENTORY: 49,
+    WorkflowState.PLANNING_ASSEMBLY_STRATEGIES: 58,
+    WorkflowState.EVALUATING_JOINABILITY: 66,
+    WorkflowState.IDENTIFYING_ASSEMBLY_GAPS: 73,
+    WorkflowState.GAP_DIRECTED_DISCOVERY: 77,
+    WorkflowState.COMPARING_ASSEMBLY_STRATEGIES: 85,
+    WorkflowState.AWAITING_ASSEMBLY_STRATEGY_APPROVAL: 94,
     WorkflowState.DISCOVERING_DATA: 8,
     WorkflowState.AWAITING_DATASET_APPROVAL: 15,
     WorkflowState.AWAITING_SEARCH_REVIEW: 15,
@@ -80,13 +113,26 @@ STATE_PROGRESS = {
 }
 
 APPROVAL_ARTIFACT_TYPES = {
+    "dataset_specification_approval": ApprovalType.DATASET_SPECIFICATION,
     "dataset_selection_approval": ApprovalType.DATASET_SELECTION,
     "label_rules_approval": ApprovalType.LABEL_RULES,
     "training_approval": ApprovalType.TRAINING_AUTHORIZATION,
     "model_acceptance_approval": ApprovalType.MODEL_ACCEPTANCE,
     "registration_approval": ApprovalType.REGISTRY_PUBLICATION,
     "identity_conflict_decisions": ApprovalType.IDENTITY_CONFLICT,
+    "training_dataset_assembly_strategy_approval": (
+        ApprovalType.TRAINING_DATASET_ASSEMBLY_STRATEGY
+    ),
 }
+
+
+def _load_training_document(raw: str) -> dict:
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise WorkflowConflict("Persisted training-dataset document is not an object.")
+    if value.get("schema_version") == SCHEMA_VERSION and isinstance(value.get("document"), dict):
+        return value["document"]
+    return value
 
 
 class WorkflowService:
@@ -129,6 +175,8 @@ class WorkflowService:
                 endpoint_name=request.endpoint_name,
                 endpoint_slug=request.endpoint_slug,
                 biological_goal=request.biological_goal,
+                workflow_kind=request.workflow_kind.value,
+                benchmark_mode=request.benchmark_mode,
                 status=WorkflowStatus.DRAFT.value,
                 current_stage=WorkflowState.DRAFT.value,
                 paused_from_state=None,
@@ -155,6 +203,8 @@ class WorkflowService:
                     "endpoint_name": request.endpoint_name,
                     "endpoint_slug": request.endpoint_slug,
                     "biological_goal": request.biological_goal,
+                    "workflow_kind": request.workflow_kind.value,
+                    "benchmark_mode": request.benchmark_mode,
                 },
                 to_state=WorkflowState.DRAFT.value,
             )
@@ -166,6 +216,8 @@ class WorkflowService:
                         endpoint_name=request.endpoint_name,
                         endpoint_slug=request.endpoint_slug,
                         biological_goal=request.biological_goal,
+                        workflow_kind=request.workflow_kind.value,
+                        benchmark_mode=request.benchmark_mode,
                         limitations=[
                             "Phase 0 defines workflow scope only; it does not create a "
                             "scientific model.",
@@ -179,6 +231,41 @@ class WorkflowService:
                 producer="admin",
                 idempotency_key=f"{request.idempotency_key}:definition",
             )
+            if request.workflow_kind is WorkflowKind.TRAINING_DATASET_DISCOVERY:
+                initial_context = self._training_dataset_initial_context(request)
+                self.artifact_store._put_bytes(
+                    session,
+                    workflow_id=build.id,
+                    content=canonical_json(initial_context.model_dump(mode="json")).encode(),
+                    mime_type="application/json",
+                    artifact_type="blind_context_audit",
+                    logical_name="blind-training-dataset-context-v1.json",
+                    producer="deterministic-orchestrator",
+                    idempotency_key=f"{request.idempotency_key}:blind-context",
+                )
+                now = utc_text()
+                session.add(
+                    TrainingDatasetWorkflowRow(
+                        workflow_id=build.id,
+                        contract_version=TRAINING_DATASET_CONTRACT_VERSION,
+                        benchmark_mode=request.benchmark_mode,
+                        initial_context_json=canonical_json(
+                            versioned_payload(document=initial_context.model_dump(mode="json"))
+                        ),
+                        specification_json=None,
+                        component_requirements_json=None,
+                        source_inventory_json=None,
+                        capability_matrix_json=None,
+                        assembly_strategies_json=None,
+                        joinability_diagnostics_json=None,
+                        gap_report_json=None,
+                        preparation_plan_json=None,
+                        assembly_review_json=None,
+                        discovery_round=0,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
             approval_request = ApprovalRequest(
                 workflow_id=build.id,
                 stage=WorkflowState.DRAFT,
@@ -190,7 +277,11 @@ class WorkflowService:
                 ],
                 artifact_hashes=[definition.sha256],
                 agent_recommendation="No agent recommendation; administrator-authored definition.",
-                requested_action="Start bounded prepared discovery simulation.",
+                requested_action=(
+                    "Start target training-dataset specification."
+                    if request.workflow_kind is WorkflowKind.TRAINING_DATASET_DISCOVERY
+                    else "Start bounded prepared discovery simulation."
+                ),
             )
             approval = self._create_approval(
                 session,
@@ -209,1420 +300,57 @@ class WorkflowService:
             self._record_decision(session, build, approval, decision, advance=False)
             return self._snapshot(session, build)
 
-    def list_builds(self) -> list[WorkflowSnapshot]:
-        with self.database.session() as session:
-            rows = session.scalars(
-                select(EndpointBuildRow).order_by(
-                    EndpointBuildRow.updated_at.desc(), EndpointBuildRow.id
-                )
-            ).all()
-            return [self._snapshot(session, row) for row in rows]
-
-    def get_build(self, workflow_id: str) -> WorkflowSnapshot:
-        with self.database.session() as session:
-            return self._snapshot(session, require_build(session, workflow_id))
-
-    def start_build(
-        self,
-        workflow_id: str,
-        *,
-        expected_version: int,
-        actor: str,
-        idempotency_key: str,
-    ) -> WorkflowSnapshot:
-        if self.harness is None:
-            raise WorkflowConflict("No Phase-0 agent harness is configured.")
-        artifacts = self.artifact_store.list_artifacts(workflow_id)
-        definition = next(
-            (item for item in artifacts if item.artifact_type == "endpoint_definition"), None
-        )
-        if definition is None:
-            raise GuardNotSatisfied("Endpoint definition artifact is missing.")
-        snapshot = self.transition(
-            workflow_id,
-            TransitionRequest(
-                target_state=WorkflowState.DISCOVERING_DATA,
-                expected_version=expected_version,
-                idempotency_key=f"{idempotency_key}:discovering",
-                initiator=ActorType.HUMAN,
-                initiator_id=actor,
-                reason=(
-                    "Administrator started "
-                    f"{self.agent_configuration.run_mode.value} dataset discovery."
-                ),
-                artifact_hashes=[definition.sha256],
+    def _training_dataset_initial_context(
+        self, request: EndpointBuildCreate
+    ) -> BlindBenchmarkInitialContext:
+        return BlindBenchmarkInitialContext(
+            benchmark_mode=(
+                BLIND_TRAINING_DATASET_DISCOVERY
+                if request.benchmark_mode == BLIND_TRAINING_DATASET_DISCOVERY
+                else request.benchmark_mode
             ),
-        )
-        if snapshot.current_stage is WorkflowState.AWAITING_DATASET_APPROVAL:
-            return snapshot
-        return self.run_discovery(
-            workflow_id,
-            expected_version=snapshot.version,
-            actor=actor,
-            idempotency_key=idempotency_key,
-        )
-
-    def run_discovery(
-        self,
-        workflow_id: str,
-        *,
-        expected_version: int,
-        actor: str,
-        idempotency_key: str,
-        refresh_source_metadata: bool = False,
-    ) -> WorkflowSnapshot:
-        if self.harness is None:
-            raise WorkflowConflict("No Phase-0 agent harness is configured.")
-        snapshot = self.get_build(workflow_id)
-        if snapshot.current_stage is not WorkflowState.DISCOVERING_DATA:
-            raise InvalidTransition("Discovery can run only in DISCOVERING_DATA.")
-        if snapshot.version != expected_version:
-            raise StaleWorkflowVersion(
-                "Workflow version is stale.", detail={"current_version": snapshot.version}
-            )
-        step = self.create_step(
-            workflow_id,
-            WorkflowState.DISCOVERING_DATA,
-            idempotency_key=f"{idempotency_key}:step",
-            input_payload={
-                "run_mode": self.agent_configuration.run_mode.value,
-                "provider": self.agent_configuration.provider,
-                "model": self.agent_configuration.model,
-            },
-        )
-        request = discovery_request(
-            workflow_id=workflow_id,
-            step_id=step.id,
-            endpoint_name=snapshot.endpoint_name,
-            biological_goal=snapshot.biological_goal,
-            configuration=self.agent_configuration,
-            refresh_source_metadata=refresh_source_metadata,
-        )
-        run_id, result = self.harness.run(request, DiscoveryOutput)
-        if result.status.value != "completed" or result.output is None:
-            trace_artifact = self._persist_terminal_trace_artifact(
-                workflow_id=workflow_id,
-                step=step,
-                run_id=run_id,
-                request=request,
-                result=result,
-                idempotency_key=f"{idempotency_key}:trace-artifact",
-            )
-            with self.database.session() as session:
-                stored_step = session.get(WorkflowStepRow, step.id)
-                if stored_step and stored_step.status == StepStatus.RUNNING.value:
-                    retryable = bool(result.error and result.error.retryable)
-                    stored_step.status = (
-                        StepStatus.FAILED_RETRYABLE.value if retryable else StepStatus.FAILED.value
-                    )
-                    if result.error:
-                        stored_step.error_id = deterministic_id("err", run_id, result.error.code)
-                    stored_step.output_json = canonical_json(
-                        versioned_payload(trace_artifact_id=trace_artifact.id)
-                    )
-                    stored_step.completed_at = utc_text()
-            return self.transition(
-                workflow_id,
-                TransitionRequest(
-                    target_state=WorkflowState.FAILED,
-                    expected_version=expected_version,
-                    idempotency_key=f"{idempotency_key}:failed",
-                    initiator=ActorType.ORCHESTRATOR,
-                    initiator_id="agent-harness",
-                    reason=result.error.safe_message
-                    if result.error
-                    else "Discovery failed safely.",
-                    artifact_hashes=[trace_artifact.sha256],
-                ),
-            )
-        revision = step.attempt
-        available_artifact_ids = {
-            item.id for item in self.artifact_store.list_artifacts(workflow_id)
-        }
-        output = validate_evidence_references(
-            DiscoveryOutput.model_validate(result.output), available_artifact_ids
-        )
-        output_payload = output.model_dump(mode="json")
-        run_mode = output.run_mode
-        candidate_artifact = self.artifact_store.put_json(
-            workflow_id=workflow_id,
-            step_id=step.id,
-            value={**output_payload, "proposal_revision": revision, "agent_run_id": run_id},
-            artifact_type="dataset_candidates",
-            logical_name=f"dataset-candidates-{run_mode}-v{revision}.json",
-            producer="Dataset Discovery and Evaluation Agent",
-            original_source=(
-                "phase1://validated-replay"
-                if run_mode == "replay"
-                else "https://www.ncbi.nlm.nih.gov/geo/"
-            ),
-            idempotency_key=f"{idempotency_key}:candidate-artifact",
-        )
-        strategy_artifact = self.artifact_store.put_json(
-            workflow_id=workflow_id,
-            step_id=step.id,
-            value={
-                "run_mode": run_mode,
-                "search_strategy": output.search_strategy,
-                "queries_executed": output.queries_executed,
-                "search_strategy_steps": [
-                    item.model_dump(mode="json") for item in output.search_strategy_steps
+            endpoint_name=request.endpoint_name,
+            biological_goal=request.biological_goal,
+            target_training_dataset_contract={
+                "required_relationship": [
+                    "canonical chemical compound",
+                    "chemical structure and identifiers",
+                    "compound-induced transcriptomic response",
+                    "transcriptomic experimental context",
+                    "endpoint activity measurement or label",
+                    "activity assay context",
+                    "provenance and quality flags",
                 ],
-                "limitations": output.limitations,
-            },
-            artifact_type="search_strategy",
-            logical_name=f"search-strategy-{run_mode}-v{revision}.json",
-            producer="Dataset Discovery and Evaluation Agent",
-            original_source="endoscan://agent-output",
-            idempotency_key=f"{idempotency_key}:strategy-artifact",
-        )
-        recommendation_artifact = self.artifact_store.put_json(
-            workflow_id=workflow_id,
-            step_id=step.id,
-            value={
-                "run_mode": run_mode,
-                "recommended_candidate_id": output.recommended_candidate_id,
-                "recommendation": output.recommendation,
-                "decision_summary": output.decision_summary,
-                "unresolved_questions": output.unresolved_questions,
-                "requires_human_review": output.requires_human_review,
-                "confidence_category": output.confidence_category,
-                "evidence_references": [
-                    item.model_dump(mode="json") for item in output.evidence_references
+                "strategy_generation_allowed": False,
+                "strategy_unlock_artifacts": [
+                    "verified_source_inventory",
+                    "source_capability_matrix",
                 ],
             },
-            artifact_type="agent_recommendation",
-            logical_name=f"agent-recommendation-{run_mode}-v{revision}.json",
-            producer="Dataset Discovery and Evaluation Agent",
-            original_source="endoscan://agent-output",
-            idempotency_key=f"{idempotency_key}:recommendation-artifact",
-        )
-        trace_artifact = self.artifact_store.put_json(
-            workflow_id=workflow_id,
-            step_id=step.id,
-            value={
-                "run_mode": run_mode,
-                "provider": request.model.provider,
-                "model": request.model.model_identifier,
-                "agent_run_id": run_id,
-                "events": [event.model_dump(mode="json") for event in result.trace],
-            },
-            artifact_type="search_trace",
-            logical_name=f"internal-agent-trace-{run_mode}-v{revision}.json",
-            producer="agent-harness",
-            original_source="endoscan://immutable-trace",
-            idempotency_key=f"{idempotency_key}:trace-artifact",
-        )
-        self.complete_step(
-            step.id,
-            output_payload={
-                "agent_run_id": run_id,
-                "candidate_artifact_id": candidate_artifact.id,
-                "strategy_artifact_id": strategy_artifact.id,
-                "recommendation_artifact_id": recommendation_artifact.id,
-                "trace_artifact_id": trace_artifact.id,
-            },
-            idempotency_key=f"{idempotency_key}:step-complete",
-        )
-        artifact_hashes = [
-            candidate_artifact.sha256,
-            strategy_artifact.sha256,
-            recommendation_artifact.sha256,
-            trace_artifact.sha256,
-        ]
-        if output.recommended_candidate_id is None:
-            self.transition(
-                workflow_id,
-                TransitionRequest(
-                    target_state=WorkflowState.AWAITING_SEARCH_REVIEW,
-                    expected_version=expected_version,
-                    idempotency_key=f"{idempotency_key}:no-valid-candidate",
-                    initiator=ActorType.ORCHESTRATOR,
-                    initiator_id="workflow-service",
-                    reason=(
-                        "Discovery completed without a scientifically suitable dataset "
-                        "recommendation and requires human search review."
-                    ),
-                    artifact_hashes=artifact_hashes,
-                ),
-            )
-            search_review = ApprovalRequest(
-                workflow_id=workflow_id,
-                stage=WorkflowState.AWAITING_SEARCH_REVIEW,
-                approval_type=ApprovalType.SEARCH_REVISION,
-                proposed_decision=f"Review bounded {run_mode} discovery revision {revision}.",
-                evidence_summary=output.decision_summary,
-                source_references=[candidate.source for candidate in output.candidates],
-                limitations=output.limitations,
-                artifact_hashes=[
-                    candidate_artifact.sha256,
-                    strategy_artifact.sha256,
-                    recommendation_artifact.sha256,
-                ],
-                agent_recommendation=(
-                    output.proposed_next_search_strategy
-                    or "Revise one bounded search dimension before another discovery attempt."
-                ),
-                requested_action="Request a revised search or cancel the workflow.",
-            )
-            self.create_approval(
-                search_review,
-                idempotency_key=f"{idempotency_key}:search-review-v{revision}",
-            )
-            return self.get_build(workflow_id)
-        self.transition(
-            workflow_id,
-            TransitionRequest(
-                target_state=WorkflowState.AWAITING_DATASET_APPROVAL,
-                expected_version=expected_version,
-                idempotency_key=f"{idempotency_key}:awaiting-approval",
-                initiator=ActorType.ORCHESTRATOR,
-                initiator_id="workflow-service",
-                reason=f"{run_mode.title()} candidates are ready for human dataset review.",
-                artifact_hashes=artifact_hashes,
-            ),
-        )
-        approval = ApprovalRequest(
-            workflow_id=workflow_id,
-            stage=WorkflowState.AWAITING_DATASET_APPROVAL,
-            approval_type=ApprovalType.DATASET_SELECTION,
-            proposed_decision=f"Select one {run_mode} candidate from proposal revision {revision}.",
-            evidence_summary=output.decision_summary,
-            source_references=[candidate.source for candidate in output.candidates],
-            limitations=output.limitations,
-            artifact_hashes=[
-                candidate_artifact.sha256,
-                strategy_artifact.sha256,
-                recommendation_artifact.sha256,
+            source_adapter_capabilities=[
+                "official activity-source metadata adapters",
+                "official perturbational-transcriptomic metadata adapters",
+                "official chemical identity and structure metadata adapters",
             ],
-            agent_recommendation=output.recommendation,
-            requested_action="Approve, reject, request revision, or choose an alternative.",
-        )
-        self.create_approval(
-            approval, idempotency_key=f"{idempotency_key}:dataset-approval-v{revision}"
-        )
-        return self.get_build(workflow_id)
-
-    def _persist_terminal_trace_artifact(
-        self,
-        *,
-        workflow_id: str,
-        step,
-        run_id: str,
-        request,
-        result,
-        idempotency_key: str,
-    ):
-        stored_run = self.agent_run(run_id)
-        tool_summaries = []
-        for call in stored_run.get("tool_calls", []):
-            result_payload = call.get("result") or {}
-            output = result_payload.get("output") or {}
-            bounded_output: dict = {}
-            if call.get("tool_name") == "search_geo_series":
-                bounded_output = {
-                    "rendered_query": output.get("rendered_query"),
-                    "result_count": output.get("result_count"),
-                    "accessions": [
-                        item.get("accession")
-                        for item in output.get("results", [])
-                        if isinstance(item, dict) and item.get("accession")
-                    ][:10],
-                    "source_artifact_id": output.get("source_artifact_id"),
-                    "cache_status": output.get("cache_status"),
-                }
-            elif call.get("tool_name") in {
-                "validate_geo_accession",
-                "validate_geo_accessions",
-            }:
-                validation_results = output.get("results") if isinstance(output, dict) else None
-                if not isinstance(validation_results, list):
-                    validation_results = [output] if isinstance(output, dict) else []
-                bounded_output = {
-                    "results": [
-                        {
-                            key: item.get(key)
-                            for key in (
-                                "accession",
-                                "status",
-                                "source_artifact_id",
-                                "source_artifact_sha256",
-                                "cache_status",
-                                "safe_warning_or_error_category",
-                                "retryable",
-                            )
-                        }
-                        for item in validation_results[:5]
-                        if isinstance(item, dict)
-                    ]
-                }
-            tool_summaries.append(
-                {
-                    "id": call.get("id"),
-                    "tool_name": call.get("tool_name"),
-                    "status": call.get("status"),
-                    "duration_ms": call.get("duration_ms"),
-                    "original_arguments": result_payload.get("original_arguments"),
-                    "normalized_arguments": result_payload.get("normalized_arguments"),
-                    "normalization_warnings": result_payload.get("normalization_warnings", []),
-                    "source_diagnostic": result_payload.get("source_diagnostic"),
-                    "error": result_payload.get("error"),
-                    "bounded_output": bounded_output,
-                }
-            )
-        artifact_references = [
-            {
-                "id": item.id,
-                "sha256": item.sha256,
-                "artifact_type": item.artifact_type,
-                "logical_name": item.logical_name,
-            }
-            for item in self.artifact_store.list_artifacts(workflow_id)
-        ]
-        return self.artifact_store.put_json(
-            workflow_id=workflow_id,
-            step_id=step.id,
-            value={
-                "run_mode": request.context.get("run_mode", "replay"),
-                "provider": request.model.provider,
-                "model": request.model.model_identifier,
-                "agent_run_id": run_id,
-                "status": result.status.value,
-                "turns": result.turns,
-                "usage": result.usage.model_dump(mode="json"),
-                "termination_reason": (
-                    result.error.model_dump(mode="json") if result.error else None
-                ),
-                "events": [event.model_dump(mode="json") for event in result.trace],
-                "tool_calls": tool_summaries,
-                "artifact_references": artifact_references,
-            },
-            artifact_type="search_trace",
-            logical_name=(
-                f"internal-agent-trace-{request.context.get('run_mode', 'replay')}-"
-                f"v{step.attempt}.json"
-            ),
-            producer="agent-harness",
-            original_source="endoscan://immutable-trace",
-            idempotency_key=idempotency_key,
-        )
-
-    def transition(self, workflow_id: str, request: TransitionRequest) -> WorkflowSnapshot:
-        with self.database.session() as session:
-            build = require_build(session, workflow_id)
-            return self._apply_transition(session, build, request)
-
-    def pause(
-        self, workflow_id: str, *, expected_version: int, actor: str, idempotency_key: str
-    ) -> WorkflowSnapshot:
-        return self.transition(
-            workflow_id,
-            TransitionRequest(
-                target_state=WorkflowState.PAUSED,
-                expected_version=expected_version,
-                idempotency_key=idempotency_key,
-                initiator=ActorType.HUMAN,
-                initiator_id=actor,
-                reason="Administrator paused workflow.",
-            ),
-        )
-
-    def resume(
-        self, workflow_id: str, *, expected_version: int, actor: str, idempotency_key: str
-    ) -> WorkflowSnapshot:
-        with self.database.session() as session:
-            build = require_build(session, workflow_id)
-            if build.current_stage != WorkflowState.PAUSED.value or not build.paused_from_state:
-                raise InvalidTransition("Only a paused workflow can be resumed.")
-            return self._apply_transition(
-                session,
-                build,
-                TransitionRequest(
-                    target_state=WorkflowState(build.paused_from_state),
-                    expected_version=expected_version,
-                    idempotency_key=idempotency_key,
-                    initiator=ActorType.HUMAN,
-                    initiator_id=actor,
-                    reason="Administrator resumed preserved workflow stage.",
-                ),
-                resume=True,
-            )
-
-    def cancel(
-        self, workflow_id: str, *, expected_version: int, actor: str, idempotency_key: str
-    ) -> WorkflowSnapshot:
-        return self.transition(
-            workflow_id,
-            TransitionRequest(
-                target_state=WorkflowState.CANCELLED,
-                expected_version=expected_version,
-                idempotency_key=idempotency_key,
-                initiator=ActorType.HUMAN,
-                initiator_id=actor,
-                reason="Administrator cancelled workflow; audit history is retained.",
-            ),
-        )
-
-    def create_step(
-        self,
-        workflow_id: str,
-        stage: WorkflowState,
-        *,
-        idempotency_key: str,
-        input_payload: dict,
-    ) -> WorkflowStepRow:
-        with self.database.session() as session:
-            build = require_build(session, workflow_id)
-            existing = session.scalar(
-                select(WorkflowStepRow).where(
-                    WorkflowStepRow.workflow_id == workflow_id,
-                    WorkflowStepRow.idempotency_key == idempotency_key,
-                )
-            )
-            if existing is not None:
-                return existing
-            return self._create_step_in_session(
-                session,
-                build,
-                stage,
-                idempotency_key=idempotency_key,
-                input_payload=input_payload,
-            )
-
-    def complete_step(self, step_id: str, *, output_payload: dict, idempotency_key: str) -> None:
-        with self.database.session() as session:
-            step = session.get(WorkflowStepRow, step_id)
-            if step is None:
-                raise WorkflowNotFound("Workflow step was not found.")
-            if step.status == StepStatus.COMPLETED.value:
-                return
-            if step.status != StepStatus.RUNNING.value:
-                raise WorkflowConflict("Only a running step can be completed.")
-            step.status = StepStatus.COMPLETED.value
-            step.completed_at = utc_text()
-            step.output_json = canonical_json(versioned_payload(**output_payload))
-            build = require_build(session, step.workflow_id)
-            append_event(
-                session,
-                build,
-                event_type="workflow.step.completed",
-                actor_type=ActorType.ORCHESTRATOR.value,
-                actor_id="workflow-service",
-                idempotency_key=idempotency_key,
-                payload={"step_id": step.id, "stage": step.stage, "attempt": step.attempt},
-                from_state=build.current_stage,
-                to_state=build.current_stage,
-            )
-
-    def create_approval(self, request: ApprovalRequest, *, idempotency_key: str) -> dict:
-        with self.database.session() as session:
-            build = require_build(session, request.workflow_id)
-            return self._approval_dict(
-                self._create_approval(session, build, request, idempotency_key=idempotency_key)
-            )
-
-    def list_approvals(self, workflow_id: str, *, pending_only: bool = False) -> list[dict]:
-        with self.database.session() as session:
-            require_build(session, workflow_id)
-            statement = select(ApprovalRow).where(ApprovalRow.workflow_id == workflow_id)
-            if pending_only:
-                statement = statement.where(ApprovalRow.status == ApprovalStatus.PENDING.value)
-            rows = session.scalars(statement.order_by(ApprovalRow.created_at, ApprovalRow.id)).all()
-            return [self._approval_dict(row) for row in rows]
-
-    def get_approval(self, approval_id: str) -> dict:
-        with self.database.session() as session:
-            row = session.get(ApprovalRow, approval_id)
-            if row is None:
-                raise WorkflowNotFound("Approval was not found.")
-            return self._approval_dict(row)
-
-    def decide_approval(self, approval_id: str, decision: ApprovalDecision) -> WorkflowSnapshot:
-        with self.database.session() as session:
-            approval = session.get(ApprovalRow, approval_id)
-            if approval is None:
-                raise WorkflowNotFound("Approval was not found.")
-            build = require_build(session, approval.workflow_id)
-            return self._record_decision(session, build, approval, decision, advance=True)
-
-    def timeline(self, workflow_id: str) -> list[dict]:
-        with self.database.session() as session:
-            require_build(session, workflow_id)
-            rows = session.scalars(
-                select(WorkflowEventRow)
-                .where(WorkflowEventRow.workflow_id == workflow_id)
-                .order_by(WorkflowEventRow.sequence)
-            ).all()
-            return [
-                {
-                    "schema_version": SCHEMA_VERSION,
-                    "id": row.id,
-                    "sequence": row.sequence,
-                    "event_type": row.event_type,
-                    "actor_type": row.actor_type,
-                    "actor_id": row.actor_id,
-                    "from_state": row.from_state,
-                    "to_state": row.to_state,
-                    "payload": load_versioned_json(row.payload_json),
-                    "event_hash": row.event_hash,
-                    "previous_event_hash": row.previous_event_hash,
-                    "created_at": row.created_at,
-                }
-                for row in rows
-            ]
-
-    def steps(self, workflow_id: str) -> list[dict]:
-        with self.database.session() as session:
-            require_build(session, workflow_id)
-            rows = session.scalars(
-                select(WorkflowStepRow)
-                .where(WorkflowStepRow.workflow_id == workflow_id)
-                .order_by(WorkflowStepRow.started_at, WorkflowStepRow.id)
-            ).all()
-            return [self._step_dict(row) for row in rows]
-
-    def agent_runs(self, workflow_id: str) -> list[dict]:
-        with self.database.session() as session:
-            require_build(session, workflow_id)
-            rows = session.scalars(
-                select(AgentRunRow)
-                .where(AgentRunRow.workflow_id == workflow_id)
-                .order_by(AgentRunRow.created_at, AgentRunRow.id)
-            ).all()
-            return [self._agent_run_dict(session, row, include_trace=False) for row in rows]
-
-    def agent_run(self, run_id: str) -> dict:
-        with self.database.session() as session:
-            row = session.get(AgentRunRow, run_id)
-            if row is None:
-                raise WorkflowNotFound("Agent run was not found.")
-            return self._agent_run_dict(session, row, include_trace=True)
-
-    def errors(self, workflow_id: str) -> list[dict]:
-        with self.database.session() as session:
-            require_build(session, workflow_id)
-            rows = session.scalars(
-                select(WorkflowErrorRow)
-                .where(WorkflowErrorRow.workflow_id == workflow_id)
-                .order_by(WorkflowErrorRow.created_at, WorkflowErrorRow.id)
-            ).all()
-            return [
-                {
-                    "schema_version": SCHEMA_VERSION,
-                    "id": row.id,
-                    "step_id": row.step_id,
-                    "code": row.code,
-                    "category": row.category,
-                    "retryable": bool(row.retryable),
-                    "safe_message": row.safe_message,
-                    "detail": load_versioned_json(row.detail_json),
-                    "created_at": row.created_at,
-                }
-                for row in rows
-            ]
-
-    def simulate_failure(
-        self, workflow_id: str, *, expected_version: int, actor: str, idempotency_key: str
-    ) -> WorkflowSnapshot:
-        with self.database.session() as session:
-            build = require_build(session, workflow_id)
-            if WorkflowState(build.current_stage) in {
-                WorkflowState.DRAFT,
-                WorkflowState.PAUSED,
-                WorkflowState.FAILED,
-                WorkflowState.CANCELLED,
-                WorkflowState.COMPLETED,
-                WorkflowState.REGISTERING,
-            }:
-                raise InvalidTransition("Controlled failure is unavailable in this stage.")
-            step = session.scalar(
-                select(WorkflowStepRow)
-                .where(WorkflowStepRow.workflow_id == workflow_id)
-                .order_by(WorkflowStepRow.started_at.desc())
-                .limit(1)
-            )
-            error_id = deterministic_id("err", workflow_id, idempotency_key)
-            if session.get(WorkflowErrorRow, error_id) is None:
-                error = WorkflowErrorRow(
-                    id=error_id,
-                    workflow_id=workflow_id,
-                    step_id=step.id if step else None,
-                    agent_run_id=None,
-                    tool_call_id=None,
-                    code="phase0_controlled_failure",
-                    category="demonstration",
-                    retryable=1,
-                    safe_message="Prepared controlled Phase-0 failure; retry is allowed.",
-                    detail_json=canonical_json(
-                        versioned_payload(reason="Explicit local-admin demonstration action.")
-                    ),
-                    created_at=utc_text(),
-                )
-                session.add(error)
-                if step and step.status == StepStatus.RUNNING.value:
-                    step.status = StepStatus.FAILED_RETRYABLE.value
-                    step.error_id = error_id
-                    step.completed_at = utc_text()
-            return self._apply_transition(
-                session,
-                build,
-                TransitionRequest(
-                    target_state=WorkflowState.FAILED,
-                    expected_version=expected_version,
-                    idempotency_key=idempotency_key,
-                    initiator=ActorType.ORCHESTRATOR,
-                    initiator_id=actor,
-                    reason="Prepared controlled failure for restart/retry demonstration.",
-                ),
-            )
-
-    def retry_failed(
-        self, workflow_id: str, *, expected_version: int, actor: str, idempotency_key: str
-    ) -> WorkflowSnapshot:
-        with self.database.session() as session:
-            build = require_build(session, workflow_id)
-            if build.current_stage != WorkflowState.FAILED.value or not build.failed_from_state:
-                raise InvalidTransition("Only a failed retryable workflow can be retried.")
-            retryable = session.scalar(
-                select(WorkflowErrorRow)
-                .where(WorkflowErrorRow.workflow_id == workflow_id)
-                .order_by(WorkflowErrorRow.created_at.desc(), WorkflowErrorRow.id.desc())
-                .limit(1)
-            )
-            if retryable is None or not bool(retryable.retryable):
-                raise GuardNotSatisfied("The most recent workflow failure is not retryable.")
-            snapshot = self._apply_transition(
-                session,
-                build,
-                TransitionRequest(
-                    target_state=WorkflowState(build.failed_from_state),
-                    expected_version=expected_version,
-                    idempotency_key=idempotency_key,
-                    initiator=ActorType.HUMAN,
-                    initiator_id=actor,
-                    reason="Administrator authorized a new idempotent step attempt.",
-                ),
-                retry=True,
-            )
-            return snapshot
-
-    def recover_interrupted(self) -> int:
-        recovered = 0
-        with self.database.session() as session:
-            steps = session.scalars(
-                select(WorkflowStepRow).where(WorkflowStepRow.status == StepStatus.RUNNING.value)
-            ).all()
-            workflow_ids = sorted({step.workflow_id for step in steps})
-            for workflow_id in workflow_ids:
-                build = require_build(session, workflow_id)
-                original = build.current_stage
-                workflow_steps = [step for step in steps if step.workflow_id == workflow_id]
-                latest_error = session.scalar(
-                    select(WorkflowErrorRow)
-                    .where(WorkflowErrorRow.workflow_id == workflow_id)
-                    .order_by(WorkflowErrorRow.created_at.desc(), WorkflowErrorRow.id.desc())
-                    .limit(1)
-                )
-                repair_retryable = (
-                    bool(latest_error.retryable)
-                    if original == WorkflowState.FAILED.value and latest_error is not None
-                    else True
-                )
-                for step in workflow_steps:
-                    error_id = deterministic_id("err", build.id, step.id, "startup-recovery")
-                    if session.get(WorkflowErrorRow, error_id) is None:
-                        session.add(
-                            WorkflowErrorRow(
-                                id=error_id,
-                                workflow_id=build.id,
-                                step_id=step.id,
-                                agent_run_id=None,
-                                tool_call_id=None,
-                                code="interrupted_by_restart",
-                                category="recovery",
-                                retryable=int(repair_retryable),
-                                safe_message=(
-                                    "A stale running attempt was interrupted during backend "
-                                    "restart recovery."
-                                ),
-                                detail_json=canonical_json(
-                                    versioned_payload(
-                                        previous_stage=original,
-                                        repaired_status=StepStatus.INTERRUPTED.value,
-                                    )
-                                ),
-                                created_at=utc_text(),
-                            )
-                        )
-                    step.status = StepStatus.INTERRUPTED.value
-                    step.error_id = error_id
-                    step.completed_at = utc_text()
-                    append_event(
-                        session,
-                        build,
-                        event_type="workflow.step.interrupted",
-                        actor_type=ActorType.SYSTEM.value,
-                        actor_id="startup-recovery",
-                        idempotency_key=f"startup-recovery:{step.id}",
-                        payload={
-                            "step_id": step.id,
-                            "stage": step.stage,
-                            "attempt": step.attempt,
-                            "repair": "backend_restart",
-                        },
-                        from_state=original,
-                        to_state=original,
-                    )
-                    recovered += 1
-                if original not in {
-                    WorkflowState.FAILED.value,
-                    WorkflowState.CANCELLED.value,
-                    WorkflowState.COMPLETED.value,
-                }:
-                    current_version = build.version
-                    result = session.execute(
-                        update(EndpointBuildRow)
-                        .where(
-                            EndpointBuildRow.id == build.id,
-                            EndpointBuildRow.version == current_version,
-                        )
-                        .values(
-                            failed_from_state=original,
-                            current_stage=WorkflowState.FAILED.value,
-                            status=WorkflowStatus.FAILED.value,
-                            updated_at=utc_text(),
-                            version=current_version + 1,
-                        )
-                    )
-                    if result.rowcount != 1:
-                        raise StaleWorkflowVersion("Concurrent startup recovery detected.")
-                    session.refresh(build)
-                    append_event(
-                        session,
-                        build,
-                        event_type="workflow.recovered_interruption",
-                        actor_type=ActorType.SYSTEM.value,
-                        actor_id="startup-recovery",
-                        idempotency_key=f"startup-recovery:{build.id}:failed",
-                        payload={
-                            "step_ids": [step.id for step in workflow_steps],
-                            "failed_from_state": original,
-                        },
-                        from_state=original,
-                        to_state=WorkflowState.FAILED.value,
-                    )
-        return recovered
-
-    def _apply_transition(
-        self,
-        session: Session,
-        build: EndpointBuildRow,
-        request: TransitionRequest,
-        *,
-        resume: bool = False,
-        retry: bool = False,
-    ) -> WorkflowSnapshot:
-        existing = session.scalar(
-            select(WorkflowEventRow).where(
-                WorkflowEventRow.workflow_id == build.id,
-                WorkflowEventRow.idempotency_key == request.idempotency_key,
-            )
-        )
-        if existing is not None:
-            payload = load_versioned_json(existing.payload_json)
-            if payload.get("target_state") != request.target_state.value:
-                raise WorkflowConflict("Idempotency key was already used for another transition.")
-            return self._snapshot(session, build)
-        if build.version != request.expected_version:
-            raise StaleWorkflowVersion(
-                "Workflow version is stale.",
-                detail={
-                    "expected_version": request.expected_version,
-                    "current_version": build.version,
-                },
-            )
-        current = WorkflowState(build.current_stage)
-        if current in {WorkflowState.COMPLETED, WorkflowState.CANCELLED}:
-            raise InvalidTransition(f"{current.value} is terminal.")
-        if current is WorkflowState.PAUSED and not resume:
-            raise InvalidTransition("A paused workflow must be resumed or cancelled.")
-        if (
-            current is WorkflowState.FAILED
-            and not retry
-            and request.target_state is not WorkflowState.CANCELLED
-        ):
-            raise InvalidTransition("A failed workflow must be retried or cancelled.")
-        if resume:
-            if build.paused_from_state != request.target_state.value:
-                raise InvalidTransition("Resume target does not match the preserved stage.")
-            spec = None
-        elif retry:
-            if build.failed_from_state != request.target_state.value:
-                raise InvalidTransition("Retry target does not match the failed stage.")
-            spec = None
-        else:
-            spec = self.graph.transition(current, request.target_state, request.initiator)
-        self._validate_guards(session, build, spec, request)
-
-        now = utc_text()
-        values: dict = {
-            "current_stage": request.target_state.value,
-            "status": self._status_for(request.target_state).value,
-            "version": build.version + 1,
-            "updated_at": now,
-        }
-        if request.target_state is WorkflowState.PAUSED:
-            values.update(paused_from_state=current.value, paused_at=now)
-        elif resume:
-            values.update(paused_from_state=None, paused_at=None)
-        if request.target_state is WorkflowState.FAILED:
-            values["failed_from_state"] = current.value
-        elif retry:
-            values["failed_from_state"] = None
-        if request.target_state is WorkflowState.CANCELLED:
-            values["cancelled_at"] = now
-        if request.target_state is WorkflowState.COMPLETED:
-            values["completed_at"] = now
-        result = session.execute(
-            update(EndpointBuildRow)
-            .where(EndpointBuildRow.id == build.id, EndpointBuildRow.version == build.version)
-            .values(**values)
-        )
-        if result.rowcount != 1:
-            raise StaleWorkflowVersion("Concurrent workflow update detected.")
-        session.flush()
-        for key, value in values.items():
-            setattr(build, key, value)
-        append_event(
-            session,
-            build,
-            event_type=(
-                "workflow.resumed"
-                if resume
-                else "workflow.retried"
-                if retry
-                else "workflow.transitioned"
-            ),
-            actor_type=request.initiator.value,
-            actor_id=request.initiator_id,
-            idempotency_key=request.idempotency_key,
-            payload={
-                "target_state": request.target_state.value,
-                "reason": request.reason,
-                "artifact_hashes": request.artifact_hashes,
-                "new_version": build.version,
-            },
-            from_state=current.value,
-            to_state=request.target_state.value,
-        )
-        return self._snapshot(session, build)
-
-    def _validate_guards(
-        self,
-        session: Session,
-        build: EndpointBuildRow,
-        spec: TransitionSpec | None,
-        request: TransitionRequest,
-    ) -> None:
-        if spec is None:
-            return
-        missing: list[str] = []
-        for required in spec.required_artifacts:
-            approval_type = APPROVAL_ARTIFACT_TYPES.get(required)
-            if approval_type:
-                found = session.scalar(
-                    select(ApprovalRow).where(
-                        ApprovalRow.workflow_id == build.id,
-                        ApprovalRow.approval_type == approval_type.value,
-                        ApprovalRow.status.in_(
-                            [
-                                ApprovalStatus.APPROVED.value,
-                                ApprovalStatus.ALTERNATIVE_SELECTED.value,
-                            ]
-                        ),
-                    )
-                )
-            elif required == "review_decision":
-                found = session.scalar(
-                    select(HumanDecisionRow).where(HumanDecisionRow.workflow_id == build.id)
-                )
-            else:
-                found = session.scalar(
-                    select(ArtifactRow).where(
-                        ArtifactRow.workflow_id == build.id,
-                        ArtifactRow.artifact_type == required,
-                    )
-                )
-            if found is None:
-                missing.append(required)
-        if request.artifact_hashes:
-            available = set(
-                session.scalars(
-                    select(ArtifactRow.sha256).where(ArtifactRow.workflow_id == build.id)
-                ).all()
-            )
-            missing_hashes = sorted(set(request.artifact_hashes) - available)
-            missing.extend(f"sha256:{value}" for value in missing_hashes)
-        if missing:
-            raise GuardNotSatisfied(
-                "Workflow transition prerequisites are not satisfied.",
-                detail={"missing": missing, "guard": spec.guard},
-            )
-
-    def _create_approval(
-        self,
-        session: Session,
-        build: EndpointBuildRow,
-        request: ApprovalRequest,
-        *,
-        idempotency_key: str,
-        supersedes_id: str | None = None,
-    ) -> ApprovalRow:
-        if request.workflow_id != build.id:
-            raise WorkflowConflict("Approval workflow binding does not match.")
-        available = set(
-            session.scalars(
-                select(ArtifactRow.sha256).where(ArtifactRow.workflow_id == build.id)
-            ).all()
-        )
-        if not set(request.artifact_hashes).issubset(available):
-            raise GuardNotSatisfied("Approval references unknown or stale artifact hashes.")
-        proposal_hash = hashlib.sha256(canonical_json(request).encode()).hexdigest()
-        approval_id = deterministic_id(
-            "approval", build.id, request.approval_type.value, proposal_hash
-        )
-        existing = session.get(ApprovalRow, approval_id)
-        if existing is not None:
-            return existing
-        approval = ApprovalRow(
-            id=approval_id,
-            workflow_id=build.id,
-            stage=request.stage.value,
-            approval_type=request.approval_type.value,
-            status=ApprovalStatus.PENDING.value,
-            proposal_hash=proposal_hash,
-            request_json=request.model_dump_json(),
-            decision_json=None,
-            created_at=utc_text(),
-            decided_at=None,
-            supersedes_id=supersedes_id,
-        )
-        session.add(approval)
-        session.flush()
-        append_event(
-            session,
-            build,
-            event_type="approval.created",
-            actor_type=ActorType.ORCHESTRATOR.value,
-            actor_id="workflow-service",
-            idempotency_key=idempotency_key,
-            payload={
-                "approval_id": approval.id,
-                "approval_type": approval.approval_type,
-                "proposal_hash": proposal_hash,
-                "artifact_hashes": request.artifact_hashes,
-            },
-            from_state=build.current_stage,
-            to_state=build.current_stage,
-        )
-        return approval
-
-    def _record_decision(
-        self,
-        session: Session,
-        build: EndpointBuildRow,
-        approval: ApprovalRow,
-        decision: ApprovalDecision,
-        *,
-        advance: bool,
-    ) -> WorkflowSnapshot:
-        existing = session.scalar(
-            select(WorkflowEventRow).where(
-                WorkflowEventRow.workflow_id == build.id,
-                WorkflowEventRow.idempotency_key == decision.idempotency_key,
-            )
-        )
-        if existing is not None:
-            return self._snapshot(session, build)
-        if approval.status != ApprovalStatus.PENDING.value:
-            raise WorkflowConflict("Approval decision is immutable and has already been recorded.")
-        if build.version != decision.expected_version:
-            raise StaleWorkflowVersion(
-                "Workflow version is stale.", detail={"current_version": build.version}
-            )
-        if decision.decision is not ApprovalDecisionValue.APPROVE and not decision.reviewer_comment:
-            raise WorkflowConflict("Reviewer comment is required for this decision.")
-        request = ApprovalRequest.model_validate_json(approval.request_json)
-        if sorted(request.artifact_hashes) != sorted(decision.artifact_hashes):
-            raise GuardNotSatisfied("Approval artifact hashes do not match the bound proposal.")
-        available = set(
-            session.scalars(
-                select(ArtifactRow.sha256).where(ArtifactRow.workflow_id == build.id)
-            ).all()
-        )
-        if not set(decision.artifact_hashes).issubset(available):
-            raise GuardNotSatisfied("Approval references artifacts that are no longer current.")
-        status_by_decision = {
-            ApprovalDecisionValue.APPROVE: ApprovalStatus.APPROVED,
-            ApprovalDecisionValue.REJECT: ApprovalStatus.REJECTED,
-            ApprovalDecisionValue.REQUEST_REVISION: ApprovalStatus.REVISION_REQUESTED,
-            ApprovalDecisionValue.CHOOSE_ALTERNATIVE: ApprovalStatus.ALTERNATIVE_SELECTED,
-            ApprovalDecisionValue.CANCEL_WORKFLOW: ApprovalStatus.CANCELLED,
-        }
-        if (
-            decision.decision is ApprovalDecisionValue.CHOOSE_ALTERNATIVE
-            and not decision.selected_alternative_id
-        ):
-            raise WorkflowConflict("Choosing an alternative requires an alternative ID.")
-        approval.status = status_by_decision[decision.decision].value
-        approval.decision_json = decision.model_dump_json()
-        approval.decided_at = utc_text()
-        human_decision = HumanDecisionRow(
-            id=deterministic_id("decision", approval.id, decision.idempotency_key),
-            workflow_id=build.id,
-            approval_id=approval.id,
-            reviewer_id=decision.reviewer_id,
-            decision=decision.decision.value,
-            payload_json=decision.model_dump_json(),
-            created_at=approval.decided_at,
-        )
-        session.add(human_decision)
-        session.flush()
-        append_event(
-            session,
-            build,
-            event_type="approval.decided",
-            actor_type=ActorType.HUMAN.value,
-            actor_id=decision.reviewer_id,
-            idempotency_key=decision.idempotency_key,
-            payload={
-                "approval_id": approval.id,
-                "decision_id": human_decision.id,
-                "decision": decision.decision.value,
-                "artifact_hashes": decision.artifact_hashes,
-                "reviewer_comment": decision.reviewer_comment,
-                "selected_alternative_id": decision.selected_alternative_id,
-            },
-            from_state=build.current_stage,
-            to_state=build.current_stage,
-        )
-        if not advance:
-            return self._snapshot(session, build)
-        if approval.approval_type == ApprovalType.SEARCH_REVISION.value:
-            if decision.decision not in {
-                ApprovalDecisionValue.REQUEST_REVISION,
-                ApprovalDecisionValue.REJECT,
-                ApprovalDecisionValue.CANCEL_WORKFLOW,
-            }:
-                raise InvalidTransition(
-                    "Search review permits only revised search, rejection, or cancellation."
-                )
-            target = (
-                WorkflowState.DISCOVERING_DATA
-                if decision.decision is ApprovalDecisionValue.REQUEST_REVISION
-                else WorkflowState.CANCELLED
-            )
-            return self._apply_transition(
-                session,
-                build,
-                TransitionRequest(
-                    target_state=target,
-                    expected_version=build.version,
-                    idempotency_key=f"{decision.idempotency_key}:transition",
-                    initiator=ActorType.HUMAN,
-                    initiator_id=decision.reviewer_id,
-                    reason=f"Search review decision: {decision.decision.value}.",
-                    artifact_hashes=decision.artifact_hashes,
-                ),
-            )
-        if approval.approval_type != ApprovalType.DATASET_SELECTION.value:
-            raise InvalidTransition("This approval type does not advance the Phase-1 workflow.")
-        target_by_decision = {
-            ApprovalDecisionValue.APPROVE: WorkflowState.CURATING_DATA,
-            ApprovalDecisionValue.CHOOSE_ALTERNATIVE: WorkflowState.CURATING_DATA,
-            ApprovalDecisionValue.REQUEST_REVISION: WorkflowState.DISCOVERING_DATA,
-            ApprovalDecisionValue.REJECT: WorkflowState.CANCELLED,
-            ApprovalDecisionValue.CANCEL_WORKFLOW: WorkflowState.CANCELLED,
-        }
-        return self._apply_transition(
-            session,
-            build,
-            TransitionRequest(
-                target_state=target_by_decision[decision.decision],
-                expected_version=build.version,
-                idempotency_key=f"{decision.idempotency_key}:transition",
-                initiator=ActorType.HUMAN,
-                initiator_id=decision.reviewer_id,
-                reason=f"Dataset approval decision: {decision.decision.value}.",
-                artifact_hashes=decision.artifact_hashes,
-            ),
-        )
-
-    def _snapshot(self, session: Session, row: EndpointBuildRow) -> WorkflowSnapshot:
-        pending = session.scalar(
-            select(ApprovalRow.id)
-            .where(
-                ApprovalRow.workflow_id == row.id,
-                ApprovalRow.status == ApprovalStatus.PENDING.value,
-            )
-            .order_by(ApprovalRow.created_at.desc())
-            .limit(1)
-        )
-        state = WorkflowState(row.current_stage)
-        progress_state = state
-        if state is WorkflowState.PAUSED and row.paused_from_state:
-            progress_state = WorkflowState(row.paused_from_state)
-        if state is WorkflowState.FAILED and row.failed_from_state:
-            progress_state = WorkflowState(row.failed_from_state)
-        return WorkflowSnapshot(
-            id=row.id,
-            endpoint_name=row.endpoint_name,
-            endpoint_slug=row.endpoint_slug,
-            biological_goal=row.biological_goal,
-            state=state,
-            status=WorkflowStatus(row.status),
-            current_stage=state,
-            version=row.version,
-            progress=STATE_PROGRESS[progress_state],
-            pending_approval_id=pending,
-            paused_from_state=(
-                WorkflowState(row.paused_from_state) if row.paused_from_state else None
-            ),
-            failed_from_state=(
-                WorkflowState(row.failed_from_state) if row.failed_from_state else None
-            ),
-            created_by=row.created_by,
-            created_at=parse_utc(row.created_at),
-            updated_at=parse_utc(row.updated_at),
-            paused_at=parse_utc(row.paused_at),
-            cancelled_at=parse_utc(row.cancelled_at),
-            completed_at=parse_utc(row.completed_at),
-        )
-
-    def _approval_dict(self, row: ApprovalRow) -> dict:
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "id": row.id,
-            "workflow_id": row.workflow_id,
-            "stage": row.stage,
-            "approval_type": row.approval_type,
-            "status": row.status,
-            "proposal_hash": row.proposal_hash,
-            "request": ApprovalRequest.model_validate_json(row.request_json).model_dump(
-                mode="json"
-            ),
-            "decision": (
-                ApprovalDecision.model_validate_json(row.decision_json).model_dump(mode="json")
-                if row.decision_json
-                else None
-            ),
-            "created_at": row.created_at,
-            "decided_at": row.decided_at,
-            "supersedes_id": row.supersedes_id,
-        }
-
-    @staticmethod
-    def _step_dict(row: WorkflowStepRow) -> dict:
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "id": row.id,
-            "workflow_id": row.workflow_id,
-            "stage": row.stage,
-            "attempt": row.attempt,
-            "status": row.status,
-            "idempotency_key": row.idempotency_key,
-            "started_at": row.started_at,
-            "completed_at": row.completed_at,
-            "heartbeat_at": row.heartbeat_at,
-            "input": load_versioned_json(row.input_json),
-            "output": load_versioned_json(row.output_json) if row.output_json else None,
-            "error_id": row.error_id,
-        }
-
-    @staticmethod
-    def _agent_run_dict(session: Session, row: AgentRunRow, *, include_trace: bool) -> dict:
-        request_payload = load_versioned_json(row.request_json)
-        context = request_payload.get("context")
-        run_mode = context.get("run_mode") if isinstance(context, dict) else None
-        if run_mode not in {"live", "cached", "replay"}:
-            run_mode = None
-        tool_calls = session.scalars(
-            select(ToolCallRow)
-            .where(ToolCallRow.agent_run_id == row.id)
-            .order_by(ToolCallRow.created_at, ToolCallRow.id)
-        ).all()
-        result = {
-            "schema_version": SCHEMA_VERSION,
-            "id": row.id,
-            "workflow_id": row.workflow_id,
-            "step_id": row.step_id,
-            "agent_name": row.agent_name,
-            "agent_version": row.agent_version,
-            "provider": row.provider,
-            "model_identifier": row.model_identifier,
-            "run_mode": run_mode,
-            "instruction_version": row.instruction_version,
-            "input_hash": row.input_hash,
-            "status": row.status,
-            "usage": load_versioned_json(row.usage_json),
-            "turns": row.turns,
-            "duration_ms": row.duration_ms,
-            "created_at": row.created_at,
-            "completed_at": row.completed_at,
-            "tools": [
-                {
-                    "id": call.id,
-                    "tool_name": call.tool_name,
-                    "tool_version": call.tool_version,
-                    "status": call.status,
-                    "duration_ms": call.duration_ms,
-                    "created_at": call.created_at,
-                }
-                for call in tool_calls
+            approved_scientific_policies=[
+                "discovery before strategy",
+                "primary public records over literature summaries",
+                "exact values only from deterministic computation",
+                "human approval before deterministic construction",
             ],
-        }
-        if include_trace:
-            result.update(
-                request=request_payload,
-                result=load_versioned_json(row.result_json) if row.result_json else None,
-                trace=load_versioned_json(row.trace_json),
-                tool_calls=[
-                    {
-                        "schema_version": SCHEMA_VERSION,
-                        "id": call.id,
-                        "tool_name": call.tool_name,
-                        "tool_version": call.tool_version,
-                        "status": call.status,
-                        "permission_scope": load_versioned_json(call.permission_scope_json),
-                        "arguments": load_versioned_json(call.arguments_json),
-                        "result": load_versioned_json(call.result_json)
-                        if call.result_json
-                        else None,
-                        "duration_ms": call.duration_ms,
-                    }
-                    for call in tool_calls
-                ],
-            )
-        return result
-
-    @staticmethod
-    def _status_for(state: WorkflowState) -> WorkflowStatus:
-        if state is WorkflowState.DRAFT:
-            return WorkflowStatus.DRAFT
-        if state in {
-            WorkflowState.AWAITING_DATASET_APPROVAL,
-            WorkflowState.AWAITING_SEARCH_REVIEW,
-            WorkflowState.AWAITING_LABEL_APPROVAL,
-            WorkflowState.AWAITING_TRAINING_APPROVAL,
-            WorkflowState.AWAITING_SCIENTIFIC_APPROVAL,
-        }:
-            return WorkflowStatus.WAITING
-        if state is WorkflowState.PAUSED:
-            return WorkflowStatus.PAUSED
-        if state is WorkflowState.FAILED:
-            return WorkflowStatus.FAILED
-        if state is WorkflowState.CANCELLED:
-            return WorkflowStatus.CANCELLED
-        if state is WorkflowState.COMPLETED:
-            return WorkflowStatus.COMPLETED
-        return WorkflowStatus.ACTIVE
-
-    def _create_step_in_session(
-        self,
-        session: Session,
-        build: EndpointBuildRow,
-        stage: WorkflowState,
-        *,
-        idempotency_key: str,
-        input_payload: dict,
-    ) -> WorkflowStepRow:
-        attempt = (
-            int(
-                session.scalar(
-                    select(func.coalesce(func.max(WorkflowStepRow.attempt), 0)).where(
-                        WorkflowStepRow.workflow_id == build.id,
-                        WorkflowStepRow.stage == stage.value,
-                    )
-                )
-                or 0
-            )
-            + 1
-        )
-        now = utc_text()
-        active_steps = session.scalars(
-            select(WorkflowStepRow).where(
-                WorkflowStepRow.workflow_id == build.id,
-                WorkflowStepRow.stage == stage.value,
-                WorkflowStepRow.status == StepStatus.RUNNING.value,
-            )
-        ).all()
-        for active in active_steps:
-            error_id = deterministic_id("err", active.id, "superseded", str(attempt))
-            session.add(
-                WorkflowErrorRow(
-                    id=error_id,
-                    workflow_id=build.id,
-                    step_id=active.id,
-                    agent_run_id=None,
-                    tool_call_id=None,
-                    code="step_attempt_superseded",
-                    category="consistency",
-                    retryable=0,
-                    safe_message="An older running attempt was superseded by a newer attempt.",
-                    detail_json=canonical_json(
-                        versioned_payload(
-                            stage=stage.value,
-                            old_attempt=active.attempt,
-                            new_attempt=attempt,
-                        )
-                    ),
-                    created_at=now,
-                )
-            )
-            active.status = StepStatus.INTERRUPTED.value
-            active.error_id = error_id
-            active.completed_at = now
-            append_event(
-                session,
-                build,
-                event_type="workflow.step.superseded",
-                actor_type=ActorType.ORCHESTRATOR.value,
-                actor_id="workflow-service",
-                idempotency_key=f"step-superseded:{active.id}:{attempt}",
-                payload={
-                    "step_id": active.id,
-                    "stage": stage.value,
-                    "old_attempt": active.attempt,
-                    "new_attempt": attempt,
-                },
-                from_state=build.current_stage,
-                to_state=build.current_stage,
-            )
-        step = WorkflowStepRow(
-            id=deterministic_id("step", build.id, stage.value, str(attempt)),
-            workflow_id=build.id,
-            stage=stage.value,
-            attempt=attempt,
-            status=StepStatus.RUNNING.value,
-            idempotency_key=idempotency_key,
-            started_at=now,
-            completed_at=None,
-            heartbeat_at=now,
-            input_json=canonical_json(versioned_payload(**input_payload)),
-            output_json=None,
-            error_id=None,
-        )
-        session.add(step)
-        session.flush()
-        append_event(
-            session,
-            build,
-            event_type="workflow.step.started",
-            actor_type=ActorType.ORCHESTRATOR.value,
-            actor_id="workflow-service",
-            idempotency_key=f"{idempotency_key}:started",
-            payload={"step_id": step.id, "stage": stage.value, "attempt": attempt},
-            from_state=build.current_stage,
-            to_state=build.current_stage,
-        )
-        return step
+            allowed_tools=sorted(
+                {tool for agent in SPECIALIZED_AGENT_SEQUENCE for tool in agent.allowed_tools}
+            ),
+            planner_provider=self.agent_configuration.planner_provider,
+            planner_model=self.agent_configuration.planner_model,
+            worker_provider=self.agent_configuration.worker_provider,
+            worker_model=self.agent_configuration.worker_model,
+            budgets={
+                "per_agent": {
+                    "maximum_turns": self.agent_configuration.maximum_turns,
+                    "maximum_tool_calls": self.agent_configuration.maximum_tool_calls,
+                    "maximum_input_tokens": self.agent_configuration.maximum_input_tokens,
+                    "maximum_output_tokens": self.agent_configuration.maximum_output_tokens,
+                    "maximum_cost_usd": self.agent_configuration.maximum_cost_usd,
+                    "timeout_seconds": self.agent_configuration.timeout_seconds,
+    Û4ÚÚ$z{-®éÜj×V6—6–öåfÇVRä4ä4TÅõtõ$´dÄõs¢v÷&¶fÆ÷u7FFRä4ä4TÄÄTBÀ¢Ğ¢&WGW&â6VÆbåöÇ•÷G&ç6—F–öâ€¢6W76–öâÀ¢'V–ÆBÀ¢G&ç6—F–öå&WVW7B€¢F&vWE÷7FFS×F&vWEö'•öFV6—6–öå¶FV6—6–öâæFV6—6–öåÒÀ¢W‡V7FVE÷fW'6–öãÖ'V–ÆBçfW'6–öâÀ¢–FV×÷FVæ7•ö¶W“Öb'¶FV6—6–öâæ–FV×÷FVæ7•ö¶W—Ó§G&ç6—F–öâ"À¢–æ—F–F÷#Ô7F÷%G—Rä…TÔâÀ¢–æ—F–F÷%ö–CÖFV6—6–öâç&Wf–WvW%ö–BÀ¢&V6öãÖb$FF6WB7V6–f–6F–öâFV6—6–öã¢¶FV6—6–öâæFV6—6–öâçfÇVWÒâ"À¢'F–f7Eö†6†W3ÖFV6—6–öâæ'F–f7Eö†6†W2À¢’À¢¢–b&÷fÂæ&÷fÅ÷G—RÓÒ&÷fÅG—RåE$”ä”äuôDD4UEô54TÔ$Å•õ5E$DTu’çfÇVS ¢F&vWEö'•öFV6—6–öâÒ°¢&÷fÄFV6—6–öåfÇVRä$õdS¢v÷&¶fÆ÷u7FFRä4ôÕÄUDTBÀ¢&÷fÄFV6—6–öåfÇVRä4„ôõ4UôÅDU$äD•dS¢v÷&¶fÆ÷u7FFRä4ôÕÄUDTBÀ¢&÷fÄFV6—6–öåfÇVRå$UTU5Eõ$Ud•4”ôã¢€¢v÷&¶fÆ÷u7FFRåÄää”äuô54TÔ$Å•õ5E$DTt”U0¢’À¢&÷fÄFV6—6–öåfÇVRå$T¤T5C¢v÷&¶fÆ÷u7FFRä4ä4TÄÄTBÀ¢&÷fÄFV6—6–öåfÇVRä4ä4TÅõtõ$´dÄõs¢v÷&¶fÆ÷u7FFRä4ä4TÄÄTBÀ¢Ğ¢&WGW&â6VÆbåöÇ•÷G&ç6—F–öâ€¢6W76–öâÀ¢'V–ÆBÀ¢G&ç6—F–öå&WVW7B€¢F&vWE÷7FFS×F&vWEö'•öFV6—6–öå¶FV6—6–öâæFV6—6–öåÒÀ¢W‡V7FVE÷fW'6–öãÖ'V–ÆBçfW'6–öâÀ¢–FV×÷FVæ7•ö¶W“Öb'¶FV6—6–öâæ–FV×÷FVæ7•ö¶W—Ó§G&ç6—F–öâ"À¢–æ—F–F÷#Ô7F÷%G—Rä…TÔâÀ¢–æ—F–F÷%ö–CÖFV6—6–öâç&Wf–WvW%ö–BÀ¢&V6öãÖb$76VÖ&Ç’7G&FVw’FV6—6–öã¢¶FV6—6–öâæFV6—6–öâçfÇVWÒâ"À¢'F–f7Eö†6†W3ÖFV6—6–öâæ'F–f7Eö†6†W2À¢’À¢¢–b&÷fÂæ&÷fÅ÷G—RÓÒ&÷fÅG—Rå4T$4…õ$Ud•4”ôâçfÇVS ¢–bFV6—6–öâæFV6—6–öâæ÷B–â°¢&÷fÄFV6—6–öåfÇVRå$UTU5Eõ$Ud•4”ôâÀ¢&÷fÄFV6—6–öåfÇVRå$T¤T5BÀ¢&÷fÄFV6—6–öåfÇVRä4ä4TÅõtõ$´dÄõrÀ¢Ó ¢&—6R–çfÆ–EG&ç6—F–öâ€¢%6V&6‚&Wf–WrW&Ö—G2öæÇ’&Wf—6VB6V&6‚Â&V¦V7F–öâÂ÷"6æ6VÆÆF–öââ ¢¢F&vWBÒ€¢v÷&¶fÆ÷u7FFRäD•44õdU$”äuôDD¢–bFV6—6–öâæFV6—6–öâ—2&÷fÄFV6—6–öåfÇVRå$UTU5Eõ$Ud•4”ôà¢VÇ6Rv÷&¶fÆ÷u7FFRä4ä4TÄÄT@¢¢&WGW&â6VÆbåöÇ•÷G&ç6—F–öâ€¢6W76–öâÀ¢'V–ÆBÀ¢G&ç6—F–öå&WVW7B€¢F&vWE÷7FFS×F&vWBÀ¢W‡V7FVE÷fW'6–öãÖ'V–ÆBçfW'6–öâÀ¢–FV×÷FVæ7•ö¶W“Öb'¶FV6—6–öâæ–FV×÷FVæ7•ö¶W—Ó§G&ç6—F–öâ"À¢–æ—F–F÷#Ô7F÷%G—Rä…TÔâÀ¢–æ—F–F÷%ö–CÖFV6—6–öâç&Wf–WvW%ö–BÀ¢&V6öãÖb%6V&6‚&Wf–WrFV6—6–öã¢¶FV6—6–öâæFV6—6–öâçfÇVWÒâ"À¢'F–f7Eö†6†W3ÖFV6—6–öâæ'F–f7Eö†6†W2À¢’À¢¢–b&÷fÂæ&÷fÅ÷G—RÒ&÷fÅG—RäDD4UEõ4TÄT5D”ôâçfÇVS ¢&—6R–çfÆ–EG&ç6—F–öâ‚%F†—2&÷fÂG—RFöW2æ÷BGfæ6RF†R†6RÓv÷&¶fÆ÷râ"¢F&vWEö'•öFV6—6–öâÒ°¢&÷fÄFV6—6–öåfÇVRä$õdS¢v÷&¶fÆ÷u7FFRä5U$D”äuôDDÀ¢&÷fÄFV6—6–öåfÇVRä4„ôõ4UôÅDU$äD•dS¢v÷&¶fÆ÷u7FFRä5U$D”äuôDDÀ¢&÷fÄFV6—6–öåfÇVRå$UTU5Eõ$Ud•4”ôã¢v÷&¶fÆ÷u7FFRäD•44õdU$”äuôDDÀ¢&÷fÄFV6—6–öåfÇVRå$T¤T5C¢v÷&¶fÆ÷u7FFRä4ä4TÄÄTBÀ¢&÷fÄFV6—6–öåfÇVRä4ä4TÅõtõ$´dÄõs¢v÷&¶fÆ÷u7FFRä4ä4TÄÄTBÀ¢Ğ¢&WGW&â6VÆbåöÇ•÷G&ç6—F–öâ€¢6W76–öâÀ¢'V–ÆBÀ¢G&ç6—F–öå&WVW7B€¢F&vWE÷7FFS×F&vWEö'•öFV6—6–öå¶FV6—6–öâæFV6—6–öåÒÀ¢W‡V7FVE÷fW'6–öãÖ'V–ÆBçfW'6–öâÀ¢–FV×÷FVæ7•ö¶W“Öb'¶FV6—6–öâæ–FV×÷FVæ7•ö¶W—Ó§G&ç6—F–öâ"À¢–æ—F–F÷#Ô7F÷%G—Rä…TÔâÀ¢–æ—F–F÷%ö–CÖFV6—6–öâç&Wf–WvW%ö–BÀ¢&V6öãÖb$FF6WB&÷fÂFV6—6–öã¢¶FV6—6–öâæFV6—6–öâçfÇVWÒâ"À¢'F–f7Eö†6†W3ÖFV6—6–öâæ'F–f7Eö†6†W2À¢’À¢ ¢FVb÷6æ6†÷B‡6VÆbÂ6W76–öã¢6W76–öâÂ&÷s¢VæGö–çD'V–ÆE&÷r’Óâv÷&¶fÆ÷u6æ6†÷C ¢VæF–ærÒ6W76–öâç66Æ"€¢6VÆV7B„&÷fÅ&÷ræ–B¢çv†W&R€¢&÷fÅ&÷rçv÷&¶fÆ÷uö–BÓÒ&÷ræ–BÀ¢&÷fÅ&÷rç7FGW2ÓÒ&÷fÅ7FGW2åTäD”ärçfÇVRÀ¢¢æ÷&FW%ö'’„&÷fÅ&÷ræ7&VFVEöBæFW62‚’¢æÆ–Ö—Bƒ¢¢7FFRÒv÷&¶fÆ÷u7FFR‡&÷ræ7W'&VçE÷7FvR¢&öw&W75÷7FFRÒ7FFP¢–b7FFR—2v÷&¶fÆ÷u7FFRåU4TBæB&÷rçW6VEög&öÕ÷7FFS ¢&öw&W75÷7FFRÒv÷&¶fÆ÷u7FFR‡&÷rçW6VEög&öÕ÷7FFR¢–b7FFR—2v÷&¶fÆ÷u7FFRäd”ÄTBæB&÷ræf–ÆVEög&öÕ÷7FFS ¢&öw&W75÷7FFRÒv÷&¶fÆ÷u7FFR‡&÷ræf–ÆVEög&öÕ÷7FFR¢&WGW&âv÷&¶fÆ÷u6æ6†÷B€¢–C×&÷ræ–BÀ¢VæGö–çEöæÖS×&÷ræVæGö–çEöæÖRÀ¢VæGö–çE÷6ÇVs×&÷ræVæGö–çE÷6ÇVrÀ¢&–öÆöv–6ÅövöÃ×&÷ræ&–öÆöv–6ÅövöÂÀ¢v÷&¶fÆ÷uö¶–æCÕv÷&¶fÆ÷t¶–æB‡&÷rçv÷&¶fÆ÷uö¶–æB’À¢&Væ6†Ö&µöÖöFS×&÷ræ&Væ6†Ö&µöÖöFRÀ¢7FFS×7FFRÀ¢7FGW3Õv÷&¶fÆ÷u7FGW2‡&÷rç7FGW2’À¢7W'&VçE÷7FvS×7FFRÀ¢fW'6–öã×&÷rçfW'6–öâÀ¢&öw&W73Õ5DDUõ$ôu$U55·&öw&W75÷7FFUÒÀ¢VæF–æuö&÷fÅö–C×VæF–ærÀ¢W6VEög&öÕ÷7FFSÒ€¢v÷&¶fÆ÷u7FFR‡&÷rçW6VEög&öÕ÷7FFR’–b&÷rçW6VEög&öÕ÷7FFRVÇ6RæöæP¢’À¢f–ÆVEög&öÕ÷7FFSÒ€¢v÷&¶fÆ÷u7FFR‡&÷ræf–ÆVEög&öÕ÷7FFR’–b&÷ræf–ÆVEög&öÕ÷7FFRVÇ6RæöæP¢’À¢7&VFVEö'“×&÷ræ7&VFVEö'’À¢7&VFVEöC×'6U÷WF2‡&÷ræ7&VFVEöB’À¢WFFVEöC×'6U÷WF2‡&÷rçWFFVEöB’À¢W6VEöC×'6U÷WF2‡&÷rçW6VEöB’À¢6æ6VÆÆVEöC×'6U÷WF2‡&÷ræ6æ6VÆÆVEöB’À¢6ö×ÆWFVEöC×'6U÷WF2‡&÷ræ6ö×ÆWFVEöB’À¢ ¢FVbö&÷fÅöF–7B‡6VÆbÂ&÷s¢&÷fÅ&÷r’ÓâF–7C ¢&WGW&â°¢'66†VÖ÷fW'6–öâ#¢44„TÔõdU%4”ôâÀ¢&–B#¢&÷ræ–BÀ¢'v÷&¶fÆ÷uö–B#¢&÷rçv÷&¶fÆ÷uö–BÀ¢'7FvR#¢&÷rç7FvRÀ¢&&÷fÅ÷G—R#¢&÷ræ&÷fÅ÷G—RÀ¢'7FGW2#¢&÷rç7FGW2À¢'&÷÷6Åö†6‚#¢&÷rç&÷÷6Åö†6‚À¢'&WVW7B#¢&÷fÅ&WVW7BæÖöFVÅ÷fÆ–FFUö§6öâ‡&÷rç&WVW7Eö§6öâ’æÖöFVÅöGV×€¢ÖöFSÒ&§6öâ ¢’À¢&FV6—6–öâ#¢€¢&÷fÄFV6—6–öâæÖöFVÅ÷fÆ–FFUö§6öâ‡&÷ræFV6—6–öåö§6öâ’æÖöFVÅöGV×†ÖöFSÒ&§6öâ"¢–b&÷ræFV6—6–öåö§6öà¢VÇ6RæöæP¢’À¢&7&VFVEöB#¢&÷ræ7&VFVEöBÀ¢&FV6–FVEöB#¢&÷ræFV6–FVEöBÀ¢'7WW'6VFW5ö–B#¢&÷rç7WW'6VFW5ö–BÀ¢Ğ ¢7FF–6ÖWF†ö@¢FVb÷7FWöF–7B‡&÷s¢v÷&¶fÆ÷u7FW&÷r’ÓâF–7C ¢&WGW&â°¢'66†VÖ÷fW'6–öâ#¢44„TÔõdU%4”ôâÀ¢&–B#¢&÷ræ–BÀ¢'v÷&¶fÆ÷uö–B#¢&÷rçv÷&¶fÆ÷uö–BÀ¢'7FvR#¢&÷rç7FvRÀ¢&GFV×B#¢&÷ræGFV×BÀ¢'7FGW2#¢&÷rç7FGW2À¢&–FV×÷FVæ7•ö¶W’#¢&÷ræ–FV×÷FVæ7•ö¶W’À¢'7F'FVEöB#¢&÷rç7F'FVEöBÀ¢&6ö×ÆWFVEöB#¢&÷ræ6ö×ÆWFVEöBÀ¢&†V'F&VEöB#¢&÷ræ†V'F&VEöBÀ¢&–çWB#¢ÆöE÷fW'6–öæVEö§6öâ‡&÷ræ–çWEö§6öâ’À¢&÷WGWB#¢ÆöE÷fW'6–öæVEö§6öâ‡&÷ræ÷WGWEö§6öâ’–b&÷ræ÷WGWEö§6öâVÇ6RæöæRÀ¢&W'&÷%ö–B#¢&÷ræW'&÷%ö–BÀ¢Ğ ¢7FF–6ÖWF†ö@¢FVbövVçE÷'VåöF–7B‡6W76–öã¢6W76–öâÂ&÷s¢vVçE'Vå&÷rÂ¢Â–æ6ÇVFU÷G&6S¢&ööÂ’ÓâF–7C ¢&WVW7E÷–ÆöBÒÆöE÷fW'6–öæVEö§6öâ‡&÷rç&WVW7Eö§6öâ¢6öçFW‡BÒ&WVW7E÷–ÆöBævWB‚&6öçFW‡B"¢'VåöÖöFRÒ6öçFW‡BævWB‚''VåöÖöFR"’–b—6–ç7Fæ6R†6öçFW‡BÂF–7B’VÇ6RæöæP¢–b'VåöÖöFRæ÷B–â²&Æ—fR"Â&66†VB"Â'&WÆ’'Ó ¢'VåöÖöFRÒæöæP¢FööÅö6ÆÇ2Ò6W76–öâç66Æ'2€¢6VÆV7B…FööÄ6ÆÅ&÷r¢çv†W&R…FööÄ6ÆÅ&÷rævVçE÷'Våö–BÓÒ&÷ræ–B¢æ÷&FW%ö'’…FööÄ6ÆÅ&÷ræ7&VFVEöBÂFööÄ6ÆÅ&÷ræ–B¢’æÆÂ‚¢&W7VÇBÒ°¢'66†VÖ÷fW'6–öâ#¢44„TÔõdU%4”ôâÀ¢&–B#¢&÷ræ–BÀ¢'v÷&¶fÆ÷uö–B#¢&÷rçv÷&¶fÆ÷uö–BÀ¢'7FWö–B#¢&÷rç7FWö–BÀ¢&vVçEöæÖR#¢&÷rævVçEöæÖRÀ¢&vVçE÷fW'6–öâ#¢&÷rævVçE÷fW'6–öâÀ¢'&÷f–FW"#¢&÷rç&÷f–FW"À¢&ÖöFVÅö–FVçF–f–W"#¢&÷ræÖöFVÅö–FVçF–f–W"À¢''VåöÖöFR#¢'VåöÖöFRÀ¢&–ç7G'V7F–öå÷fW'6–öâ#¢&÷ræ–ç7G'V7F–öå÷fW'6–öâÀ¢&–çWEö†6‚#¢&÷ræ–çWEö†6‚À¢'7FGW2#¢&÷rç7FGW2À¢'W6vR#¢ÆöE÷fW'6–öæVEö§6öâ‡&÷rçW6vUö§6öâ’À¢'GW&ç2#¢&÷rçGW&ç2À¢&GW&F–öåö×2#¢&÷ræGW&F–öåö×2À¢&7&VFVEöB#¢&÷ræ7&VFVEöBÀ¢&6ö×ÆWFVEöB#¢&÷ræ6ö×ÆWFVEöBÀ¢'FööÇ2#¢°¢°¢&–B#¢6ÆÂæ–BÀ¢'FööÅöæÖR#¢6ÆÂçFööÅöæÖRÀ¢'FööÅ÷fW'6–öâ#¢6ÆÂçFööÅ÷fW'6–öâÀ¢'7FGW2#¢6ÆÂç7FGW2À¢&GW&F–öåö×2#¢6ÆÂæGW&F–öåö×2À¢&7&VFVEöB#¢6ÆÂæ7&VFVEöBÀ¢Ğ¢f÷"6ÆÂ–âFööÅö6ÆÇ0¢ÒÀ¢Ğ¢–b–æ6ÇVFU÷G&6S ¢&W7VÇBçWFFR€¢&WVW7C×&WVW7E÷–ÆöBÀ¢&W7VÇCÖÆöE÷fW'6–öæVEö§6öâ‡&÷rç&W7VÇEö§6öâ’–b&÷rç&W7VÇEö§6öâVÇ6RæöæRÀ¢G&6SÖÆöE÷fW'6–öæVEö§6öâ‡&÷rçG&6Uö§6öâ’À¢FööÅö6ÆÇ3Õ°¢°¢'66†VÖ÷fW'6–öâ#¢44„TÔõdU%4”ôâÀ¢&–B#¢6ÆÂæ–BÀ¢'FööÅöæÖR#¢6ÆÂçFööÅöæÖRÀ¢'FööÅ÷fW'6–öâ#¢6ÆÂçFööÅ÷fW'6–öâÀ¢'7FGW2#¢6ÆÂç7FGW2À¢'W&Ö—76–öå÷66÷R#¢ÆöE÷fW'6–öæVEö§6öâ†6ÆÂçW&Ö—76–öå÷66÷Uö§6öâ’À¢&&wVÖVçG2#¢ÆöE÷fW'6–öæVEö§6öâ†6ÆÂæ&wVÖVçG5ö§6öâ’À¢'&W7VÇB#¢ÆöE÷fW'6–öæVEö§6öâ†6ÆÂç&W7VÇEö§6öâ¢–b6ÆÂç&W7VÇEö§6öà¢VÇ6RæöæRÀ¢&GW&F–öåö×2#¢6ÆÂæGW&F–öåö×2À¢Ğ¢f÷"6ÆÂ–âFööÅö6ÆÇ0¢ÒÀ¢¢&WGW&â&W7VÇ@ ¢7FF–6ÖWF†ö@¢FVb÷7FGW5öf÷"‡7FFS¢v÷&¶fÆ÷u7FFR’Óâv÷&¶fÆ÷u7FGW3 ¢–b7FFR—2v÷&¶fÆ÷u7FFRäE$eC ¢&WGW&âv÷&¶fÆ÷u7FGW2äE$e@¢–b7FFR–â°¢v÷&¶fÆ÷u7FFRät•D”äuôDD4UEô$õdÂÀ¢v÷&¶fÆ÷u7FFRät•D”äuõ4T$4…õ$Ud”UrÀ¢v÷&¶fÆ÷u7FFRät•D”äuôÄ$TÅô$õdÂÀ¢v÷&¶fÆ÷u7FFRät•D”äuõE$”ä”äuô$õdÂÀ¢v÷&¶fÆ÷u7FFRät•D”äuõ44”TåD”d”5ô$õdÂÀ¢Ó ¢&WGW&âv÷&¶fÆ÷u7FGW2åt•D”äp¢–b7FFR—2v÷&¶fÆ÷u7FFRåU4TC ¢&WGW&âv÷&¶fÆ÷u7FGW2åU4T@¢–b7FFR—2v÷&¶fÆ÷u7FFRäd”ÄTC ¢&WGW&âv÷&¶fÆ÷u7FGW2äd”ÄT@¢–b7FFR—2v÷&¶fÆ÷u7FFRä4ä4TÄÄTC ¢&WGW&âv÷&¶fÆ÷u7FGW2ä4ä4TÄÄT@¢–b7FFR—2v÷&¶fÆ÷u7FFRä4ôÕÄUDTC ¢&WGW&âv÷&¶fÆ÷u7FGW2ä4ôÕÄUDT@¢&WGW&âv÷&¶fÆ÷u7FGW2ä5D•dP ¢FVbö7&VFU÷7FWö–å÷6W76–öâ€¢6VÆbÀ¢6W76–öã¢6W76–öâÀ¢'V–ÆC¢VæGö–çD'V–ÆE&÷rÀ¢7FvS¢v÷&¶fÆ÷u7FFRÀ¢¢À¢–FV×÷FVæ7•ö¶W“¢7G"À¢–çWE÷–ÆöC¢F–7BÀ¢’Óâv÷&¶fÆ÷u7FW&÷s ¢GFV×BÒ€¢–çB€¢6W76–öâç66Æ"€¢6VÆV7B†gVæ2æ6öÆW66R†gVæ2æÖ‚…v÷&¶fÆ÷u7FW&÷ræGFV×B’Â’’çv†W&R€¢v÷&¶fÆ÷u7FW&÷rçv÷&¶fÆ÷uö–BÓÒ'V–ÆBæ–BÀ¢v÷&¶fÆ÷u7FW&÷rç7FvRÓÒ7FvRçfÇVRÀ¢¢¢÷" ¢¢²¢¢æ÷rÒWF5÷FW‡B‚¢7F—fU÷7FW2Ò6W76–öâç66Æ'2€¢6VÆV7B…v÷&¶fÆ÷u7FW&÷r’çv†W&R€¢v÷&¶fÆ÷u7FW&÷rçv÷&¶fÆ÷uö–BÓÒ'V–ÆBæ–BÀ¢v÷&¶fÆ÷u7FW&÷rç7FvRÓÒ7FvRçfÇVRÀ¢v÷&¶fÆ÷u7FW&÷rç7FGW2ÓÒ7FW7FGW2å%Tää”ärçfÇVRÀ¢¢’æÆÂ‚¢f÷"7F—fR–â7F—fU÷7FW3 ¢W'&÷%ö–BÒFWFW&Ö–æ—7F–5ö–B‚&W'""Â7F—fRæ–BÂ'7WW'6VFVB"Â7G"†GFV×B’¢6W76–öâæFB€¢v÷&¶fÆ÷tW'&÷%&÷r€¢–CÖW'&÷%ö–BÀ¢v÷&¶fÆ÷uö–CÖ'V–ÆBæ–BÀ¢7FWö–CÖ7F—fRæ–BÀ¢vVçE÷'Våö–CÔæöæRÀ¢FööÅö6ÆÅö–CÔæöæRÀ¢6öFSÒ'7FWöGFV×E÷7WW'6VFVB"À¢6FVv÷'“Ò&6öç6—7FVæ7’"À¢&WG'–&ÆSÓÀ¢6fUöÖW76vSÒ$âöÆFW"'Vææ–ærGFV×Bv27WW'6VFVB'’æWvW"GFV×Bâ"À¢FWF–Åö§6öãÖ6æöæ–6Åö§6öâ€¢fW'6–öæVE÷–ÆöB€¢7FvS×7FvRçfÇVRÀ¢öÆEöGFV×CÖ7F—fRæGFV×BÀ¢æWuöGFV×CÖGFV×BÀ¢¢’À¢7&VFVEöCÖæ÷rÀ¢¢¢7F—fRç7FGW2Ò7FW7FGW2ä”åDU%%UDTBçfÇVP¢7F—fRæW'&÷%ö–BÒW'&÷%ö–@¢7F—fRæ6ö×ÆWFVEöBÒæ÷p¢VæEöWfVçB€¢6W76–öâÀ¢'V–ÆBÀ¢WfVçE÷G—SÒ'v÷&¶fÆ÷rç7FWç7WW'6VFVB"À¢7F÷%÷G—SÔ7F÷%G—Räõ$4„U5E$Dõ"çfÇVRÀ¢7F÷%ö–CÒ'v÷&¶fÆ÷r×6W'f–6R"À¢–FV×÷FVæ7•ö¶W“Öb'7FW×7WW'6VFVC§¶7F—fRæ–GÓ§¶GFV×GÒ"À¢–ÆöC×°¢'7FWö–B#¢7F—fRæ–BÀ¢'7FvR#¢7FvRçfÇVRÀ¢&öÆEöGFV×B#¢7F—fRæGFV×BÀ¢&æWuöGFV×B#¢GFV×BÀ¢ÒÀ¢g&öÕ÷7FFSÖ'V–ÆBæ7W'&VçE÷7FvRÀ¢Fõ÷7FFSÖ'V–ÆBæ7W'&VçE÷7FvRÀ¢¢7FWÒv÷&¶fÆ÷u7FW&÷r€¢–CÖFWFW&Ö–æ—7F–5ö–B‚'7FW"Â'V–ÆBæ–BÂ7FvRçfÇVRÂ7G"†GFV×B’’À¢v÷&¶fÆ÷uö–CÖ'V–ÆBæ–BÀ¢7FvS×7FvRçfÇVRÀ¢GFV×CÖGFV×BÀ¢7FGW3Õ7FW7FGW2å%Tää”ärçfÇVRÀ¢–FV×÷FVæ7•ö¶W“Ö–FV×÷FVæ7•ö¶W’À¢7F'FVEöCÖæ÷rÀ¢6ö×ÆWFVEöCÔæöæRÀ¢†V'F&VEöCÖæ÷rÀ¢–çWEö§6öãÖ6æöæ–6Åö§6öâ‡fW'6–öæVE÷–ÆöB‚¢¦–çWE÷–ÆöB’’À¢÷WGWEö§6öãÔæöæRÀ¢W'&÷%ö–CÔæöæRÀ¢¢6W76–öâæFB‡7FW¢6W76–öâæfÇW6‚‚¢VæEöWfVçB€¢6W76–öâÀ¢'V–ÆBÀ¢WfVçE÷G—SÒ'v÷&¶fÆ÷rç7FWç7F'FVB"À¢7F÷%÷G—SÔ7F÷%G—Räõ$4„U5E$Dõ"çfÇVRÀ¢7F÷%ö–CÒ'v÷&¶fÆ÷r×6W'f–6R"À¢–FV×÷FVæ7•ö¶W“Öb'¶–FV×÷FVæ7•ö¶W—Ó§7F'FVB"À¢–ÆöC×²'7FWö–B#¢7FWæ–BÂ'7FvR#¢7FvRçfÇVRÂ&GFV×B#¢GFV×GÒÀ¢g&öÕ÷7FFSÖ'V–ÆBæ7W'&VçE÷7FvRÀ¢Fõ÷7FFSÖ'V–ÆBæ7W'&VçE÷7FvRÀ¢¢&WGW&â7FW 

@@ -11,6 +11,7 @@ from endoscan_workflows.contracts import (
     ApprovalDecision,
     ApprovalDecisionValue,
     EndpointBuildCreate,
+    WorkflowKind,
     WorkflowState,
 )
 from endoscan_workflows.database import WorkflowDatabase
@@ -25,6 +26,7 @@ from endoscan_workflows.errors import (
 )
 from endoscan_workflows.models import EndpointBuildRow, WorkflowErrorRow, WorkflowEventRow
 from endoscan_workflows.repository import load_versioned_json
+from endoscan_workflows.training_dataset import TrainingDatasetSpecification
 
 
 def create_build(service, key="phase0-test-create"):
@@ -66,6 +68,7 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
         "human_decisions",
         "workflow_errors",
         "source_response_cache",
+        "training_dataset_workflows",
         "alembic_version",
     }.issubset(tables)
     assert database.capability() == {
@@ -74,6 +77,167 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
         "foreign_keys": True,
     }
     database.dispose()
+
+
+def training_specification() -> TrainingDatasetSpecification:
+    return TrainingDatasetSpecification(
+        specification_id="spec-offline-general",
+        endpoint_name="Example functional endpoint",
+        biological_target="Example target",
+        endpoint_modality="functional response",
+        endpoint_definition="Compound activity measured by a reviewed functional assay.",
+        intended_prediction_task="Predict endpoint activity for an explicitly bounded context.",
+        prediction_unit="compound_cell_context_dose_time",
+        acceptable_activity_representations=["continuous_activity", "binary_active_inactive"],
+        acceptable_transcriptomic_representations=["processed differential signature"],
+        compound_identity_requirements=["PubChem CID", "InChIKey"],
+        chemical_structure_requirements=["canonical SMILES"],
+        experimental_context_requirements=["cell or tissue", "dose", "time", "control"],
+        mandatory_output_fields=[
+            "canonical_compound_id",
+            "canonical_smiles",
+            "transcriptomic_signature",
+            "endpoint_activity_value",
+            "provenance",
+        ],
+        minimum_evidence_requirements=["official primary public records"],
+        intended_scope_of_claim="Research use for the explicit endpoint and contexts only.",
+    )
+
+
+def test_training_dataset_draft_is_hint_free_durable_and_strategy_locked(
+    workflow_runtime,
+) -> None:
+    _database, store, _providers, _harness, service = workflow_runtime
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Example functional endpoint",
+            endpoint_slug="example-functional-endpoint",
+            biological_goal=(
+                "Construct public training data linking compounds, structures, response "
+                "signatures and endpoint activity."
+            ),
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="training-dataset-draft",
+        )
+    )
+    workflow = service.training_dataset_workflow(build.id)
+    context = workflow["initial_context"]
+    assert build.current_stage is WorkflowState.DRAFT
+    assert service.agent_runs(build.id) == []
+    assert workflow["verified_source_inventory"] is None
+    assert workflow["assembly_strategies"] is None
+    assert context["source_hints"] == []
+    assert context["article_hint"] is None
+    assert context["doi_hint"] is None
+    assert context["assay_id_hint"] is None
+    assert context["expected_overlap_hint"] is None
+    assert context["allowed_tools"]
+    assert context["budgets"]["per_agent"]["provider_retries"] == 0
+    assert {item.artifact_type for item in store.list_artifacts(build.id)} == {
+        "endpoint_definition",
+        "blind_context_audit",
+    }
+    with pytest.raises(ValueError, match="specification"):
+        service.validate_training_dataset_strategy_checkpoint(build.id)
+
+    started = service.start_build(
+        build.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="start-training-dataset",
+    )
+    assert started.current_stage is WorkflowState.SPECIFYING_TARGET_DATASET
+    assert service.agent_runs(build.id) == []
+
+
+def test_training_dataset_documents_survive_readback_and_requirements_are_deterministic(
+    workflow_runtime,
+) -> None:
+    _database, _store, _providers, _harness, service = workflow_runtime
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Example functional endpoint",
+            endpoint_slug="example-functional-endpoint",
+            biological_goal="Construct a source-neutral public training-dataset plan.",
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="standard_training_dataset_discovery",
+            idempotency_key="training-documents",
+        )
+    )
+    spec = training_specification()
+    stored = service.persist_training_dataset_document(
+        build.id,
+        document_name="specification",
+        value=spec.model_dump(mode="json"),
+        actor="Dataset Specification Agent",
+        idempotency_key="persist-training-spec",
+    )
+    service.derive_training_dataset_requirements(
+        build.id,
+        actor="deterministic-orchestrator",
+        idempotency_key="derive-training-requirements",
+    )
+    workflow = service.training_dataset_workflow(build.id)
+    assert len(stored["sha256"]) == 64
+    assert workflow["target_specification"]["specification_id"] == spec.specification_id
+    roles = {item["role"] for item in workflow["component_requirements"]["requirements"]}
+    assert {"endpoint_activity", "transcriptomic_matrix", "compound_identity"}.issubset(roles)
+
+
+def test_training_dataset_specification_approval_precedes_discovery(
+    workflow_runtime,
+) -> None:
+    _database, _store, _providers, _harness, service = workflow_runtime
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Example functional endpoint",
+            endpoint_slug="example-functional-endpoint",
+            biological_goal="Construct a reviewable public training-dataset plan.",
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="training-spec-approval",
+        )
+    )
+    started = service.start_build(
+        build.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="training-spec-start",
+    )
+    waiting = service.finalize_training_dataset_specification(
+        build.id,
+        specification=training_specification(),
+        expected_version=started.version,
+        actor="Dataset Specification Agent",
+        idempotency_key="training-spec-finalize",
+    )
+    assert waiting.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL
+    approval = service.list_approvals(build.id, pending_only=True)[0]
+    assert approval["approval_type"] == "dataset_specification"
+    assert len(approval["request"]["artifact_hashes"]) == 1
+    approved = service.decide_approval(
+        approval["id"],
+        ApprovalDecision(
+            decision=ApprovalDecisionValue.APPROVE,
+            reviewer_id="test-admin",
+            expected_version=waiting.version,
+            idempotency_key="training-spec-approved",
+            artifact_hashes=approval["request"]["artifact_hashes"],
+        ),
+    )
+    assert approved.current_stage is WorkflowState.DERIVING_COMPONENT_REQUIREMENTS
+    discovering = service.derive_training_dataset_requirements(
+        build.id,
+        actor="deterministic-orchestrator",
+        idempotency_key="derive-approved-requirements",
+    )
+    assert discovering.current_stage is WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE
+    assert service.training_dataset_workflow(build.id)["assembly_strategies"] is None
 
 
 def test_create_is_idempotent_and_deterministic(workflow_runtime) -> None:
