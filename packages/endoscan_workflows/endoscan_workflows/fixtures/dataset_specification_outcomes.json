@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "valid": {
+    "schema_version": "1.0.0",
+    "status": "completed",
+    "specification": {
+      "schema_version": "1.0.0",
+      "endpoint_name": "Example receptor antagonist",
+      "biological_target": "Example receptor",
+      "endpoint_modality": "functional antagonism",
+      "endpoint_definition": "Compound-level functional antagonism in a reviewed assay.",
+      "intended_prediction_task": "Predict endpoint activity from compound response evidence.",
+      "candidate_prediction_grain": "compound_cell_context_dose_time",
+      "explicit_prediction_grain": null,
+      "acceptable_activity_evidence_types": ["continuous_activity"],
+      "acceptable_transcriptomic_evidence_types": ["processed differential signature"],
+      "compound_identity_requirements": ["PubChem CID", "InChIKey"],
+      "chemical_structure_requirements": ["canonical SMILES"],
+      "experimental_context_requirements": ["cell", "dose", "time", "control"],
+      "mandatory_target_table_fields": ["canonical_compound_id", "canonical_smiles", "transcriptomic_signature", "endpoint_activity_value", "provenance"],
+      "minimum_evidence_requirements": ["official primary public record"],
+      "intended_scope_of_claim": "Research use for the explicit endpoint and contexts only.",
+      "explicit_ambiguities": ["Permitted contexts require review."],
+      "assumptions": [],
+      "human_decisions_required": ["Approve the prediction grain."]
+    },
+    "requires_human_review": true,
+    "decision_summary": "Review the proposed target contract.",
+    "unresolved_questions": [],
+    "limitations": [],
+    "failure_category": null,
+    "safe_failure_summary": null
+  },
+  "invalid": [
+    {"name": "malformed_json", "raw": "{not-json"},
+    {"name": "missing_required_field", "raw": "{\"schema_version\":\"1.0.0\",\"status\":\"completed\"}"},
+    {"name": "extra_field", "raw": "{\"schema_version\":\"1.0.0\",\"status\":\"invalid_model_output\",\"specification\":null,\"requires_human_review\":true,\"decision_summary\":\"Revision required.\",\"unresolved_questions\":[],\"limitations\":[],\"failure_category\":\"schema_validation_failed\",\"safe_failure_summary\":\"Invalid.\",\"extra\":true}"},
+    {"name": "null_output", "raw": "null"},
+    {"name": "empty_text", "raw": ""},
+    {"name": "incomplete_response_metadata", "raw": "{\"schema_version\":\"1.0.0\"}"},
+    {"name": "refusal", "raw": "{\"refusal\":true}"},
+    {"name": "wrong_enum", "raw": "{\"schema_version\":\"1.0.0\",\"status\":\"invented\"}"},
+    {"name": "excessive_nesting", "raw": "{\"schema_version\":\"1.0.0\",\"status\":{\"nested\":{\"too\":{\"deep\":true}}}}"},
+    {"name": "unexpected_tool_call", "raw": "{\"__endoscan_tool_request__\":true,\"tool_name\":\"search_geo_series\",\"arguments\":{}}"}
+  ]
+}

@@ -66,14 +66,17 @@ from .training_dataset import (
     SPECIALIZED_AGENT_SEQUENCE,
     TRAINING_DATASET_CONTRACT_VERSION,
     BlindBenchmarkInitialContext,
+    DatasetSpecificationAgentOutcome,
     DiscoveryBeforeStrategyGuard,
     SourceCapabilityMatrix,
     TrainingDatasetAssemblyReview,
     TrainingDatasetComponentRequirements,
     TrainingDatasetPreparationPlan,
     TrainingDatasetSpecification,
+    TrainingDatasetSpecificationDraft,
     VerifiedSourceInventory,
     derive_component_requirements,
+    materialize_training_dataset_specification,
     specialized_agent_request,
     validate_strategy_sources,
 )
@@ -81,6 +84,7 @@ from .training_dataset import (
 STATE_PROGRESS = {
     WorkflowState.DRAFT: 0,
     WorkflowState.SPECIFYING_TARGET_DATASET: 3,
+    WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION: 5,
     WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL: 8,
     WorkflowState.DERIVING_COMPONENT_REQUIREMENTS: 11,
     WorkflowState.DISCOVERING_ACTIVITY_EVIDENCE: 16,
@@ -254,6 +258,8 @@ class WorkflowService:
                         initial_context_json=canonical_json(
                             versioned_payload(document=initial_context.model_dump(mode="json"))
                         ),
+                        specification_draft_json=None,
+                        specification_outcome_json=None,
                         specification_json=None,
                         component_requirements_json=None,
                         source_inventory_json=None,
@@ -395,6 +401,16 @@ class WorkflowService:
                 "target_specification": (
                     _load_training_document(row.specification_json)
                     if row.specification_json
+                    else None
+                ),
+                "specification_draft": (
+                    _load_training_document(row.specification_draft_json)
+                    if row.specification_draft_json
+                    else None
+                ),
+                "specification_agent_outcome": (
+                    _load_training_document(row.specification_outcome_json)
+                    if row.specification_outcome_json
                     else None
                 ),
                 "component_requirements": (
@@ -903,6 +919,81 @@ class WorkflowService:
             "The current training-dataset stage has no explicit continuation activity."
         )
 
+    def retry_training_dataset_specification(
+        self,
+        workflow_id: str,
+        *,
+        expected_version: int,
+        actor: str,
+        idempotency_key: str,
+    ) -> WorkflowSnapshot:
+        """Human-authorized new planner run; never an automatic provider retry."""
+
+        snapshot = self.get_build(workflow_id)
+        if snapshot.current_stage is not WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION:
+            raise InvalidTransition("Only a specification revision gate may be retried.")
+        outcome = next(
+            (
+                item
+                for item in reversed(self.artifact_store.list_artifacts(workflow_id))
+                if item.artifact_type == "dataset_specification_agent_outcome"
+            ),
+            None,
+        )
+        if outcome is None:
+            raise GuardNotSatisfied("The terminal specification outcome is missing.")
+        snapshot = self.transition(
+            workflow_id,
+            TransitionRequest(
+                target_state=WorkflowState.SPECIFYING_TARGET_DATASET,
+                expected_version=expected_version,
+                idempotency_key=f"{idempotency_key}:authorize",
+                initiator=ActorType.HUMAN,
+                initiator_id=actor,
+                reason="Administrator explicitly authorized a new specification-agent run.",
+                artifact_hashes=[outcome.sha256],
+            ),
+        )
+        return self.run_training_dataset_specification(
+            workflow_id,
+            expected_version=snapshot.version,
+            actor=actor,
+            idempotency_key=f"{idempotency_key}:run",
+        )
+
+    def revise_training_dataset_request(
+        self,
+        workflow_id: str,
+        *,
+        expected_version: int,
+        actor: str,
+        idempotency_key: str,
+    ) -> WorkflowSnapshot:
+        """Return to draft without calling a provider; endpoint edits remain human-authored."""
+
+        outcome = next(
+            (
+                item
+                for item in reversed(self.artifact_store.list_artifacts(workflow_id))
+                if item.artifact_type == "dataset_specification_agent_outcome"
+            ),
+            None,
+        )
+        if outcome is None:
+            raise GuardNotSatisfied("The terminal specification outcome is missing.")
+        return self.transition(
+            workflow_id,
+            TransitionRequest(
+                target_state=WorkflowState.DRAFT,
+                expected_version=expected_version,
+                idempotency_key=idempotency_key,
+                initiator=ActorType.HUMAN,
+                initiator_id=actor,
+                reason="Administrator selected endpoint-request revision.",
+                artifact_hashes=[outcome.sha256],
+            ),
+        )
+
     def run_training_dataset_specification(
         self,
         workflow_id: str,
@@ -963,7 +1054,7 @@ class WorkflowService:
             },
             configuration=self.agent_configuration,
         )
-        run_id, result = self.harness.run(request, TrainingDatasetSpecification)
+        run_id, result = self.harness.run(request, DatasetSpecificationAgentOutcome)
         if result.status is not AgentRunStatus.COMPLETED or result.output is None:
             return self._fail_training_dataset_agent_step(
                 workflow_id=workflow_id,
@@ -974,7 +1065,7 @@ class WorkflowService:
                 expected_version=expected_version,
                 idempotency_key=idempotency_key,
             )
-        specification = TrainingDatasetSpecification.model_validate(result.output)
+        outcome = DatasetSpecificationAgentOutcome.model_validate(result.output)
         trace_artifact = self._persist_specialized_agent_trace(
             workflow_id=workflow_id,
             step=step,
@@ -988,17 +1079,125 @@ class WorkflowService:
             output_payload={
                 "agent_run_id": run_id,
                 "trace_artifact_id": trace_artifact.id,
-                "output_schema": TrainingDatasetSpecification.__name__,
+                "output_schema": DatasetSpecificationAgentOutcome.__name__,
+                "outcome_status": outcome.status,
             },
             idempotency_key=f"{idempotency_key}:step-complete",
         )
-        return self.finalize_training_dataset_specification(
+        return self.finalize_training_dataset_specification_outcome(
             workflow_id,
-            specification=specification,
+            outcome=outcome,
+            trace_artifact_hash=trace_artifact.sha256,
             expected_version=expected_version,
             actor=definition.agent_name,
             idempotency_key=f"{idempotency_key}:finalize",
         )
+
+    def finalize_training_dataset_specification_outcome(
+        self,
+        workflow_id: str,
+        *,
+        outcome: DatasetSpecificationAgentOutcome,
+        trace_artifact_hash: str,
+        expected_version: int,
+        actor: str,
+        idempotency_key: str,
+    ) -> WorkflowSnapshot:
+        """Persist the planner outcome and stop at approval or explicit revision."""
+
+        outcome_payload = outcome.model_dump(mode="json")
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            if build.current_stage != WorkflowState.SPECIFYING_TARGET_DATASET.value:
+                raise InvalidTransition("Specification outcome is not the active workflow stage.")
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None:
+                raise WorkflowNotFound("Training-dataset workflow state was not found.")
+            outcome_artifact = self.artifact_store._put_bytes(
+                session,
+                workflow_id=workflow_id,
+                content=canonical_json(outcome_payload).encode(),
+                mime_type="application/json",
+                artifact_type="dataset_specification_agent_outcome",
+                logical_name="dataset-specification-agent-outcome-v1.json",
+                producer=actor,
+                idempotency_key=f"{idempotency_key}:outcome-artifact",
+            )
+            row.specification_outcome_json = canonical_json(
+                versioned_payload(document=outcome_payload)
+            )
+            artifact_hashes = [trace_artifact_hash, outcome_artifact.sha256]
+            if outcome.status == "completed" and outcome.specification is not None:
+                draft_payload = outcome.specification.model_dump(mode="json")
+                draft_artifact = self.artifact_store._put_bytes(
+                    session,
+                    workflow_id=workflow_id,
+                    content=canonical_json(draft_payload).encode(),
+                    mime_type="application/json",
+                    artifact_type="training_dataset_specification_draft",
+                    logical_name="training-dataset-specification-draft-v1.json",
+                    producer=actor,
+                    idempotency_key=f"{idempotency_key}:draft-artifact",
+                )
+                row.specification_draft_json = canonical_json(
+                    versioned_payload(document=draft_payload)
+                )
+                artifact_hashes.append(draft_artifact.sha256)
+                row.updated_at = utc_text()
+                snapshot = self._apply_transition(
+                    session,
+                    build,
+                    TransitionRequest(
+                        target_state=WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL,
+                        expected_version=expected_version,
+                        idempotency_key=f"{idempotency_key}:transition",
+                        initiator=ActorType.ORCHESTRATOR,
+                        initiator_id=actor,
+                        reason="Strict target training-dataset draft is ready for review.",
+                        artifact_hashes=artifact_hashes,
+                    ),
+                )
+                self._create_approval(
+                    session,
+                    build,
+                    ApprovalRequest(
+                        workflow_id=workflow_id,
+                        stage=WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL,
+                        approval_type=ApprovalType.DATASET_SPECIFICATION,
+                        proposed_decision="Approve the target training-dataset draft.",
+                        evidence_summary=outcome.decision_summary,
+                        limitations=[*outcome.limitations, *outcome.unresolved_questions],
+                        artifact_hashes=artifact_hashes,
+                        agent_recommendation=(
+                            "Review the proposed grain, evidence forms, assumptions, and "
+                            "unresolved decisions. Policy thresholds are not model-generated."
+                        ),
+                        requested_action=(
+                            "Approve the draft for deterministic full-contract materialization, "
+                            "or request revision."
+                        ),
+                    ),
+                    idempotency_key=f"{idempotency_key}:approval",
+                )
+                return snapshot
+
+            row.specification_draft_json = None
+            row.updated_at = utc_text()
+            return self._apply_transition(
+                session,
+                build,
+                TransitionRequest(
+                    target_state=WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION,
+                    expected_version=expected_version,
+                    idempotency_key=f"{idempotency_key}:transition",
+                    initiator=ActorType.ORCHESTRATOR,
+                    initiator_id=actor,
+                    reason=(
+                        "Dataset specification needs revision; no source discovery was started."
+                    ),
+                    artifact_hashes=artifact_hashes,
+                ),
+            )
 
     def _persist_specialized_agent_trace(
         self,
@@ -1010,6 +1209,12 @@ class WorkflowService:
         result,
         idempotency_key: str,
     ):
+        diagnostics = [
+            event.detail.get("structured_output_diagnostic")
+            for event in result.trace
+            if isinstance(event.detail.get("structured_output_diagnostic"), dict)
+        ]
+        terminal_diagnostic = diagnostics[-1] if diagnostics else None
         return self.artifact_store.put_json(
             workflow_id=workflow_id,
             step_id=step.id,
@@ -1024,6 +1229,26 @@ class WorkflowService:
                 "turns": result.turns,
                 "tool_calls": result.tool_calls,
                 "usage": result.usage.model_dump(mode="json"),
+                "sdk_version": (
+                    terminal_diagnostic.get("sdk_version") if terminal_diagnostic else None
+                ),
+                "output_schema_name": request.output_schema_name,
+                "output_schema_version": (
+                    terminal_diagnostic.get("output_schema_version")
+                    if terminal_diagnostic
+                    else None
+                ),
+                "output_schema_hash": (
+                    terminal_diagnostic.get("output_schema_hash")
+                    if terminal_diagnostic
+                    else None
+                ),
+                "structured_output_diagnostic": terminal_diagnostic,
+                "termination_reason": (
+                    terminal_diagnostic.get("handler_outcome")
+                    if terminal_diagnostic
+                    else result.status.value
+                ),
                 "events": [event.model_dump(mode="json") for event in result.trace],
             },
             artifact_type="specialized_agent_trace",
@@ -2199,6 +2424,50 @@ class WorkflowService:
         if not advance:
             return self._snapshot(session, build)
         if approval.approval_type == ApprovalType.DATASET_SPECIFICATION.value:
+            transition_hashes = list(decision.artifact_hashes)
+            if decision.decision in {
+                ApprovalDecisionValue.APPROVE,
+                ApprovalDecisionValue.CHOOSE_ALTERNATIVE,
+            }:
+                workflow = session.get(TrainingDatasetWorkflowRow, build.id)
+                if workflow is None or not workflow.specification_draft_json:
+                    raise GuardNotSatisfied("Approved specification draft is missing.")
+                draft = TrainingDatasetSpecificationDraft.model_validate(
+                    _load_training_document(workflow.specification_draft_json)
+                )
+                specification = materialize_training_dataset_specification(
+                    draft,
+                    specification_id=deterministic_id("spec", build.id, approval.proposal_hash),
+                )
+                payload = specification.model_dump(mode="json")
+                artifact = self.artifact_store._put_bytes(
+                    session,
+                    workflow_id=build.id,
+                    content=canonical_json(payload).encode(),
+                    mime_type="application/json",
+                    artifact_type="training_dataset_specification",
+                    logical_name=f"training-dataset-specification-{specification.specification_id}.json",
+                    producer="deterministic-orchestrator",
+                    idempotency_key=f"{decision.idempotency_key}:approved-contract",
+                )
+                workflow.specification_json = canonical_json(versioned_payload(document=payload))
+                workflow.updated_at = utc_text()
+                transition_hashes.append(artifact.sha256)
+                append_event(
+                    session,
+                    build,
+                    event_type="training_dataset.approved_contract_materialized",
+                    actor_type=ActorType.ORCHESTRATOR.value,
+                    actor_id="deterministic-orchestrator",
+                    idempotency_key=f"{decision.idempotency_key}:approved-contract:event",
+                    payload={
+                        "artifact_id": artifact.id,
+                        "sha256": artifact.sha256,
+                        "policy_derived_thresholds": False,
+                    },
+                    from_state=build.current_stage,
+                    to_state=build.current_stage,
+                )
             target_by_decision = {
                 ApprovalDecisionValue.APPROVE: WorkflowState.DERIVING_COMPONENT_REQUIREMENTS,
                 ApprovalDecisionValue.CHOOSE_ALTERNATIVE: (
@@ -2218,7 +2487,7 @@ class WorkflowService:
                     initiator=ActorType.HUMAN,
                     initiator_id=decision.reviewer_id,
                     reason=f"Dataset specification decision: {decision.decision.value}.",
-                    artifact_hashes=decision.artifact_hashes,
+                    artifact_hashes=transition_hashes,
                 ),
             )
         if approval.approval_type == ApprovalType.TRAINING_DATASET_ASSEMBLY_STRATEGY.value:
@@ -2448,6 +2717,8 @@ class WorkflowService:
         if state is WorkflowState.DRAFT:
             return WorkflowStatus.DRAFT
         if state in {
+            WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL,
+            WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION,
             WorkflowState.AWAITING_DATASET_APPROVAL,
             WorkflowState.AWAITING_SEARCH_REVIEW,
             WorkflowState.AWAITING_LABEL_APPROVAL,

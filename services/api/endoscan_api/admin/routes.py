@@ -126,6 +126,26 @@ def continue_training_dataset(
     return _command("continue_training_dataset_workflow", build_id, body, request, key)
 
 
+@router.post(
+    "/endpoint-builds/{build_id}/retry-dataset-specification",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def retry_dataset_specification(
+    build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)
+):
+    return _command("retry_training_dataset_specification", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/revise-endpoint-request",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def revise_endpoint_request(
+    build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)
+):
+    return _command("revise_training_dataset_request", build_id, body, request, key)
+
+
 @router.post("/endpoint-builds/{build_id}/pause", dependencies=[Depends(require_mutation_budget)])
 def pause(build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)):
     return _command("pause", build_id, body, request, key)

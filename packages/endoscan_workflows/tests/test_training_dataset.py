@@ -13,6 +13,7 @@ from endoscan_workflows.training_dataset import (
     BlindBenchmarkInitialContext,
     CapabilityStatus,
     ComponentRole,
+    DatasetSpecificationAgentOutcome,
     DiscoveryBeforeStrategyGuard,
     GraphNodeType,
     JoinabilityDiagnostic,
@@ -27,10 +28,12 @@ from endoscan_workflows.training_dataset import (
     TrainingDatasetPreparationPlan,
     TrainingDatasetPreparationStep,
     TrainingDatasetSpecification,
+    TrainingDatasetSpecificationDraft,
     VerifiedSourceInventory,
     VerifiedSourceRecord,
     build_capability_matrix,
     derive_component_requirements,
+    materialize_training_dataset_specification,
 )
 
 MANDATORY_FIELDS = [
@@ -87,6 +90,86 @@ def specification(**changes) -> TrainingDatasetSpecification:
     }
     values.update(changes)
     return TrainingDatasetSpecification(**values)
+
+
+def specification_draft(**changes) -> TrainingDatasetSpecificationDraft:
+    values = {
+        "schema_version": "1.0.0",
+        "endpoint_name": "Example receptor antagonist",
+        "biological_target": "Example receptor",
+        "endpoint_modality": "functional antagonism",
+        "endpoint_definition": "Compound-level functional antagonism in a reviewed assay.",
+        "intended_prediction_task": "Predict endpoint activity from chemical response evidence.",
+        "candidate_prediction_grain": "compound_cell_context_dose_time",
+        "explicit_prediction_grain": None,
+        "acceptable_activity_evidence_types": ["continuous_activity"],
+        "acceptable_transcriptomic_evidence_types": ["processed differential signature"],
+        "compound_identity_requirements": ["PubChem CID", "InChIKey"],
+        "chemical_structure_requirements": ["canonical SMILES"],
+        "experimental_context_requirements": ["cell", "dose", "time", "control"],
+        "mandatory_target_table_fields": MANDATORY_FIELDS,
+        "minimum_evidence_requirements": ["official primary public record"],
+        "intended_scope_of_claim": "Research use for the explicit endpoint and contexts only.",
+        "explicit_ambiguities": ["Permitted contexts require review."],
+        "assumptions": [],
+        "human_decisions_required": ["Approve the prediction grain."],
+    }
+    values.update(changes)
+    return TrainingDatasetSpecificationDraft(**values)
+
+
+def test_specification_outcome_enforces_terminal_semantics() -> None:
+    completed = DatasetSpecificationAgentOutcome(
+        schema_version="1.0.0",
+        status="completed",
+        specification=specification_draft(),
+        requires_human_review=True,
+        decision_summary="Review the proposed target contract.",
+        unresolved_questions=[],
+        limitations=[],
+        failure_category=None,
+        safe_failure_summary=None,
+    )
+    assert completed.specification is not None
+    for status, category in [
+        ("invalid_model_output", "schema_validation_failed"),
+        ("model_refused", "model_refusal"),
+        ("insufficient_endpoint_definition", "missing_structured_output"),
+    ]:
+        outcome = DatasetSpecificationAgentOutcome(
+            schema_version="1.0.0",
+            status=status,
+            specification=None,
+            requires_human_review=True,
+            decision_summary="Human revision is required.",
+            unresolved_questions=[],
+            limitations=["No valid specification was produced."],
+            failure_category=category,
+            safe_failure_summary="Structured specification is unavailable.",
+        )
+        assert outcome.specification is None
+    with pytest.raises(ValidationError):
+        DatasetSpecificationAgentOutcome(
+            schema_version="1.0.0",
+            status="invalid_model_output",
+            specification=specification_draft(),
+            requires_human_review=True,
+            decision_summary="Invalid.",
+            unresolved_questions=[],
+            limitations=[],
+            failure_category="schema_validation_failed",
+            safe_failure_summary="Invalid.",
+        )
+
+
+def test_draft_materialization_does_not_invent_policy_thresholds() -> None:
+    full = materialize_training_dataset_specification(
+        specification_draft(), specification_id="spec-approved-deterministically"
+    )
+    assert full.allowed_missingness == {}
+    assert full.minimum_coverage_requirements == {}
+    assert full.minimum_class_size_requirements == {}
+    assert full.permitted_biological_contexts == []
 
 
 def source(

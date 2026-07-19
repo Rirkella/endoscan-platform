@@ -14,6 +14,7 @@ from .contracts import (
     NormalizedAgentError,
     ProviderToolRequest,
     ProviderTurn,
+    StructuredOutputDiagnostic,
     UsageReport,
 )
 
@@ -75,11 +76,12 @@ class ProviderFailure(RuntimeError):
         adapter_parallel_tool_calls: bool | None = None,
         adapter_store: bool | None = None,
         adapter_tracing_disabled: bool | None = None,
+        structured_output_diagnostic: StructuredOutputDiagnostic | None = None,
     ):
         super().__init__(message)
         self.retryable = retryable
         safe_exception_class = _safe_provider_detail(exception_class)
-        local_sdk_configuration_error = safe_exception_class == "UserError"
+        safe_sdk_diagnostic = safe_exception_class in {"UserError", "ModelBehaviorError"}
         self.trace_detail = {
             key: value
             for key, value in {
@@ -95,44 +97,50 @@ class ProviderFailure(RuntimeError):
                 "provider_parameter": _safe_provider_detail(provider_parameter),
                 "developer_message": (
                     sanitize_local_sdk_message(developer_message)
-                    if local_sdk_configuration_error
+                    if safe_sdk_diagnostic
                     else None
                 ),
                 "sdk_version": (
-                    _safe_provider_detail(sdk_version) if local_sdk_configuration_error else None
+                    _safe_provider_detail(sdk_version) if safe_sdk_diagnostic else None
                 ),
                 "adapter_operation": (
                     _safe_provider_detail(adapter_operation)
-                    if local_sdk_configuration_error
+                    if safe_sdk_diagnostic
                     else None
                 ),
                 "adapter_model": (
-                    _safe_provider_detail(adapter_model) if local_sdk_configuration_error else None
+                    _safe_provider_detail(adapter_model) if safe_sdk_diagnostic else None
                 ),
                 "adapter_max_turns": (
                     adapter_max_turns
-                    if local_sdk_configuration_error and isinstance(adapter_max_turns, int)
+                    if safe_sdk_diagnostic and isinstance(adapter_max_turns, int)
                     else None
                 ),
                 "adapter_tool_count": (
                     adapter_tool_count
-                    if local_sdk_configuration_error and isinstance(adapter_tool_count, int)
+                    if safe_sdk_diagnostic and isinstance(adapter_tool_count, int)
                     else None
                 ),
                 "adapter_output_schema": (
                     _safe_provider_detail(adapter_output_schema)
-                    if local_sdk_configuration_error
+                    if safe_sdk_diagnostic
                     else None
                 ),
                 "adapter_use_responses": (
-                    adapter_use_responses if local_sdk_configuration_error else None
+                    adapter_use_responses if safe_sdk_diagnostic else None
                 ),
                 "adapter_parallel_tool_calls": (
-                    adapter_parallel_tool_calls if local_sdk_configuration_error else None
+                    adapter_parallel_tool_calls if safe_sdk_diagnostic else None
                 ),
-                "adapter_store": (adapter_store if local_sdk_configuration_error else None),
+                "adapter_store": (adapter_store if safe_sdk_diagnostic else None),
                 "adapter_tracing_disabled": (
-                    adapter_tracing_disabled if local_sdk_configuration_error else None
+                    adapter_tracing_disabled if safe_sdk_diagnostic else None
+                ),
+                "structured_output_diagnostic": (
+                    structured_output_diagnostic.model_dump(mode="json")
+                    if safe_exception_class == "ModelBehaviorError"
+                    and structured_output_diagnostic is not None
+                    else None
                 ),
             }.items()
             if value is not None
@@ -231,7 +239,7 @@ class FakeAgentProvider:
             if not isinstance(approval, dict):
                 raise ProviderFailure("Prepared approval payload is missing.", retryable=False)
             return ProviderTurn(kind="approval", approval=approval, usage=self._usage(len(history)))
-        if request.output_schema_name == "TrainingDatasetSpecification":
+        if request.output_schema_name == "DatasetSpecificationAgentOutcome":
             return self._training_dataset_specification_turn(request, history)
         return self._discovery_turn(request, history)
 
@@ -243,82 +251,65 @@ class FakeAgentProvider:
         return ProviderTurn(
             kind="output",
             output={
-                "contract_version": "1.0.0",
-                "specification_id": "prepared-source-neutral-specification",
-                "endpoint_name": endpoint_name,
-                "biological_target": "Unresolved target requiring human review",
-                "endpoint_modality": "Unresolved endpoint modality",
-                "endpoint_definition": (
-                    biological_goal
-                    or "Prepared source-neutral endpoint definition requiring human review."
-                ),
-                "intended_prediction_task": (
-                    "Predict endpoint-relative compound activity from compound-induced "
-                    "transcriptomic responses for an explicitly approved biological context."
-                ),
-                "prediction_unit": "compound_cell_context_dose_time",
-                "explicit_prediction_grain": None,
-                "acceptable_activity_representations": [
-                    "continuous_activity",
-                    "binary_active_inactive",
-                ],
-                "acceptable_transcriptomic_representations": [
-                    "processed differential signature",
-                    "raw expression with matched controls",
-                ],
-                "compound_identity_requirements": ["PubChem CID", "InChIKey"],
-                "chemical_structure_requirements": [
-                    "canonical SMILES",
-                    "isomeric SMILES where available",
-                ],
-                "experimental_context_requirements": [
-                    "cell or tissue context",
-                    "dose",
-                    "exposure duration",
-                    "control or reference definition",
-                ],
-                "mandatory_output_fields": [
-                    "canonical_compound_id",
-                    "canonical_smiles",
-                    "inchikey",
-                    "transcriptomic_signature",
-                    "feature_schema",
-                    "cell_or_tissue_context",
-                    "dose",
-                    "exposure_time",
-                    "endpoint_activity_value",
-                    "endpoint_modality",
-                    "assay_id",
-                    "provenance",
-                    "quality_flags",
-                ],
-                "optional_output_fields": [
-                    "preferred_name",
-                    "isomeric_smiles",
-                    "endpoint_activity_label",
-                ],
-                "allowed_missingness": {"isomeric_smiles": 1.0},
-                "minimum_evidence_requirements": [
-                    "official primary public records",
-                    "human-reviewed endpoint modality",
-                ],
-                "minimum_coverage_requirements": {},
-                "minimum_class_size_requirements": {},
-                "permitted_biological_contexts": [],
-                "excluded_modalities": [],
-                "intended_scope_of_claim": (
-                    "Prepared research-use scope restricted to the approved endpoint, evidence "
-                    "modalities, and experimental contexts."
-                ),
-                "assumptions_requiring_human_approval": [
-                    "Resolve the biological target and endpoint modality.",
-                    "Approve the observation grain and acceptable context aggregation.",
-                ],
-                "unresolved_questions": [
-                    "Which biological contexts are permitted?",
-                    "Which activity representation is primary?",
-                ],
+                "schema_version": "1.0.0",
+                "status": "completed",
+                "specification": {
+                    "schema_version": "1.0.0",
+                    "endpoint_name": endpoint_name,
+                    "biological_target": "Unresolved target requiring human review",
+                    "endpoint_modality": "Unresolved endpoint modality",
+                    "endpoint_definition": biological_goal
+                    or "Prepared source-neutral endpoint definition requiring human review.",
+                    "intended_prediction_task": (
+                        "Predict endpoint-relative compound activity from compound-induced "
+                        "transcriptomic responses in an approved biological context."
+                    ),
+                    "candidate_prediction_grain": "compound_cell_context_dose_time",
+                    "explicit_prediction_grain": None,
+                    "acceptable_activity_evidence_types": [
+                        "continuous_activity",
+                        "binary_active_inactive",
+                    ],
+                    "acceptable_transcriptomic_evidence_types": [
+                        "processed differential signature",
+                        "raw expression with matched controls",
+                    ],
+                    "compound_identity_requirements": ["PubChem CID", "InChIKey"],
+                    "chemical_structure_requirements": ["canonical SMILES", "InChIKey"],
+                    "experimental_context_requirements": [
+                        "cell or tissue context",
+                        "dose",
+                        "exposure duration",
+                        "control or reference definition",
+                    ],
+                    "mandatory_target_table_fields": [
+                        "canonical_compound_id",
+                        "canonical_smiles",
+                        "inchikey",
+                        "transcriptomic_signature",
+                        "endpoint_activity_value",
+                        "provenance",
+                    ],
+                    "minimum_evidence_requirements": [
+                        "official primary public records",
+                        "human-reviewed endpoint modality",
+                    ],
+                    "intended_scope_of_claim": (
+                        "Prepared research-use scope restricted to the approved endpoint and "
+                        "experimental contexts."
+                    ),
+                    "explicit_ambiguities": ["Permitted biological contexts are unresolved."],
+                    "assumptions": ["The proposed prediction grain requires human review."],
+                    "human_decisions_required": [
+                        "Approve the biological target and endpoint modality."
+                    ],
+                },
                 "requires_human_review": True,
+                "decision_summary": "Prepared source-neutral specification draft for review.",
+                "unresolved_questions": ["Which biological contexts are permitted?"],
+                "limitations": ["Prepared deterministic fixture, not a live discovery."],
+                "failure_category": None,
+                "safe_failure_summary": None,
             },
             usage=self._usage(len(history)),
         )
@@ -373,11 +364,13 @@ class FakeAgentProvider:
     @staticmethod
     def _usage(index: int) -> UsageReport:
         return UsageReport(
+            usage_status="usage_recorded",
             input_tokens=120 + index * 10,
             output_tokens=40 + index * 5,
             cached_tokens=0,
             cost_cents=0.0,
             provider_request_ids=[f"fake-request-{index + 1}"],
+            provider_invocations=1,
         )
 
 

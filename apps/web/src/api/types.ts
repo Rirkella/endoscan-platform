@@ -47,6 +47,8 @@ export interface AdminTrainingDatasetWorkflow {
   label?: string;
   initial_context?: Record<string, unknown>;
   target_specification?: Record<string, unknown> | null;
+  specification_draft?: Record<string, unknown> | null;
+  specification_agent_outcome?: Record<string, unknown> | null;
   component_requirements?: Record<string, unknown> | null;
   verified_source_inventory?: Record<string, unknown> | null;
   capability_matrix?: Record<string, unknown> | null;

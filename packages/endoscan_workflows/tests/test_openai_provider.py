@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from agents.exceptions import UserError
+from agents import AgentOutputSchema
+from agents.exceptions import ModelBehaviorError, ModelRefusalError, UserError
 from openai import (
     APIConnectionError,
     AuthenticationError,
@@ -20,9 +21,10 @@ from pydantic import SecretStr
 
 from endoscan_workflows.config import AgentConfiguration, AgentRunMode
 from endoscan_workflows.contracts import AgentBudget, AgentRunRequest, ModelConfiguration
-from endoscan_workflows.openai_provider import TOOL_ENVELOPE, OpenAIAgentProvider
+from endoscan_workflows.openai_provider import TOOL_ENVELOPE, OpenAIAgentProvider, sdk_output_schema
 from endoscan_workflows.providers import ProviderFailure, ProviderTimeout
 from endoscan_workflows.tools import phase0_tool_registry
+from endoscan_workflows.training_dataset import TrainingDatasetSpecification
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -143,7 +145,10 @@ def test_valid_structured_output_and_normalized_usage() -> None:
     assert turn.usage.input_tokens == 1000
     assert turn.usage.output_tokens == 500
     assert turn.usage.cached_tokens == 7
-    assert turn.usage.provider_request_ids == ["resp-safe"]
+    assert turn.usage.provider_request_ids == []
+    assert turn.usage.provider_response_ids == ["resp-safe"]
+    assert turn.usage.usage_status == "usage_recorded"
+    assert turn.usage.provider_invocations == 1
     assert turn.usage.cost_cents == pytest.approx(0.3)
 
 
@@ -401,3 +406,130 @@ def test_secret_is_never_exposed_in_status_or_error() -> None:
         item.run_turn(request(), [], interruption_requested=False)
     assert secret not in str(raised.value)
     assert secret not in str(item.configuration.public_status())
+
+
+def specification_request() -> AgentRunRequest:
+    return request().model_copy(
+        update={
+            "agent_name": "Dataset Specification Agent",
+            "output_schema_name": "DatasetSpecificationAgentOutcome",
+            "available_tools": [],
+        }
+    )
+
+
+def test_exact_specification_schema_is_strict_and_bounded() -> None:
+    with pytest.raises(UserError, match="Strict JSON schema is enabled"):
+        AgentOutputSchema(TrainingDatasetSpecification)
+    schema = sdk_output_schema("DatasetSpecificationAgentOutcome").json_schema()
+    encoded = json.dumps(schema, separators=(",", ":"), sort_keys=True)
+    assert len(encoded) < 8_000
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == list(schema["properties"])
+    assert '"additionalProperties":true' not in encoded
+    assert '"default"' not in encoded
+
+
+def test_offline_specification_boundary_fixtures_cover_invalid_shapes() -> None:
+    fixtures = json.loads(
+        (
+            REPO_ROOT
+            / "packages"
+            / "endoscan_workflows"
+            / "endoscan_workflows"
+            / "fixtures"
+            / "dataset_specification_outcomes.json"
+        ).read_text(encoding="utf-8")
+    )
+    schema = sdk_output_schema("DatasetSpecificationAgentOutcome")
+    valid = schema.validate_json(json.dumps(fixtures["valid"]))
+    assert valid.status == "completed"
+    assert len(fixtures["invalid"]) == 10
+    for case in fixtures["invalid"]:
+        with pytest.raises(ModelBehaviorError):
+            schema.validate_json(case["raw"])
+
+
+@pytest.mark.parametrize(
+    ("handler_name", "error", "expected_status", "expected_category"),
+    [
+        (
+            "invalid_final_output",
+            ModelBehaviorError(
+                "Invalid JSON raw={api_key: sk-unit-test-secret, scientific: do-not-store}"
+            ),
+            "invalid_model_output",
+            "malformed_json",
+        ),
+        (
+            "model_refusal",
+            ModelRefusalError("refusal text must not persist"),
+            "model_refused",
+            "model_refusal",
+        ),
+    ],
+)
+def test_specification_error_handlers_are_terminal_safe_and_preserve_metadata(
+    handler_name: str,
+    error: Exception,
+    expected_status: str,
+    expected_category: str,
+) -> None:
+    calls = 0
+    include_in_history = True
+    raw_usage = SimpleNamespace(
+        requests=1,
+        input_tokens=321,
+        output_tokens=45,
+        input_tokens_details=SimpleNamespace(cached_tokens=12),
+    )
+    raw_response = SimpleNamespace(
+        request_id="req_safe_123",
+        response_id="resp_safe_456",
+        usage=raw_usage,
+        status="incomplete" if handler_name == "invalid_final_output" else "completed",
+        incomplete_details=(
+            SimpleNamespace(reason="max_output_tokens")
+            if handler_name == "invalid_final_output"
+            else None
+        ),
+        output=[SimpleNamespace(type="message", content=[])],
+    )
+
+    def runner(*_args, **kwargs):
+        nonlocal calls, include_in_history
+        calls += 1
+        handled = kwargs["error_handlers"][handler_name](
+            SimpleNamespace(
+                error=error,
+                run_data=SimpleNamespace(raw_responses=[raw_response]),
+            )
+        )
+        include_in_history = handled.include_in_history
+        return SimpleNamespace(
+            final_output=handled.final_output,
+            context_wrapper=SimpleNamespace(usage=raw_usage),
+            raw_responses=[raw_response],
+        )
+
+    turn = provider(runner).run_turn(
+        specification_request(), [], interruption_requested=False
+    )
+    assert calls == 1
+    assert include_in_history is False
+    assert turn.kind == "output"
+    assert turn.output["status"] == expected_status
+    assert turn.output["specification"] is None
+    assert turn.diagnostic.failure_classification == (
+        "response_incomplete" if handler_name == "invalid_final_output" else expected_category
+    )
+    assert turn.diagnostic.provider_request_ids == ["req_safe_123"]
+    assert turn.diagnostic.provider_response_ids == ["resp_safe_456"]
+    assert turn.diagnostic.usage.input_tokens == 321
+    assert turn.diagnostic.usage.output_tokens == 45
+    assert turn.diagnostic.usage.cached_tokens == 12
+    assert turn.diagnostic.retryable is False
+    serialized = turn.model_dump_json()
+    assert "sk-unit-test-secret" not in serialized
+    assert "do-not-store" not in serialized
+    assert "refusal text must not persist" not in serialized

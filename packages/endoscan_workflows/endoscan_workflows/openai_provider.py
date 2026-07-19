@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import time
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -15,9 +17,16 @@ from agents import (
     ModelSettings,
     OpenAIProvider,
     RunConfig,
+    RunErrorHandlerResult,
     Runner,
 )
-from agents.exceptions import AgentsException, MaxTurnsExceeded, ModelBehaviorError, UserError
+from agents.exceptions import (
+    AgentsException,
+    MaxTurnsExceeded,
+    ModelBehaviorError,
+    ModelRefusalError,
+    UserError,
+)
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
 from pydantic import BaseModel
 
@@ -27,6 +36,7 @@ from .contracts import (
     NormalizedAgentError,
     ProviderToolRequest,
     ProviderTurn,
+    StructuredOutputDiagnostic,
     UsageReport,
 )
 from .discovery import DiscoveryOutput
@@ -34,8 +44,8 @@ from .providers import ProviderFailure, ProviderTimeout
 from .repository import canonical_json
 from .tools import ToolRegistry
 from .training_dataset import (
+    DatasetSpecificationAgentOutcome,
     TrainingDatasetAssemblyReview,
-    TrainingDatasetSpecification,
     VerifiedSourceInventoryFragment,
 )
 
@@ -43,7 +53,7 @@ TOOL_ENVELOPE = "__endoscan_tool_request__"
 
 OUTPUT_SCHEMAS: dict[str, type[BaseModel]] = {
     DiscoveryOutput.__name__: DiscoveryOutput,
-    TrainingDatasetSpecification.__name__: TrainingDatasetSpecification,
+    DatasetSpecificationAgentOutcome.__name__: DatasetSpecificationAgentOutcome,
     VerifiedSourceInventoryFragment.__name__: VerifiedSourceInventoryFragment,
     TrainingDatasetAssemblyReview.__name__: TrainingDatasetAssemblyReview,
 }
@@ -60,7 +70,51 @@ def sdk_output_schema(name: str):
     schema = resolve_output_schema(name)
     if schema is DiscoveryOutput:
         return schema
+    if schema is DatasetSpecificationAgentOutcome:
+        return AgentOutputSchema(schema, strict_json_schema=True)
     return AgentOutputSchema(schema, strict_json_schema=False)
+
+
+_SAFE_MODEL_BEHAVIOR_PATTERNS = (
+    (re.compile(r"refus", re.I), "model_refusal", "The model refused the structured request."),
+    (
+        re.compile(r"incomplete|length|token limit", re.I),
+        "response_incomplete",
+        "The provider response was incomplete before structured validation finished.",
+    ),
+    (
+        re.compile(r"validat|schema|required|extra field", re.I),
+        "schema_validation_failed",
+        "The model response did not match the required structured schema.",
+    ),
+    (
+        re.compile(r"json|decode|parse", re.I),
+        "malformed_json",
+        "The model response was not valid structured JSON.",
+    ),
+    (
+        re.compile(r"tool", re.I),
+        "unexpected_tool_call",
+        "The model emitted a tool request where a final structured outcome was required.",
+    ),
+    (
+        re.compile(r"final output|structured output|no output|empty", re.I),
+        "missing_structured_output",
+        "The model did not provide a structured final outcome.",
+    ),
+)
+
+
+def classify_model_behavior(message: object | None, *, refusal: bool = False) -> tuple[str, str]:
+    """Classify known SDK behavior without retaining arbitrary model content."""
+
+    if refusal:
+        return "model_refusal", "The model refused the structured request."
+    text = str(message or "")[:4000]
+    for pattern, category, safe_message in _SAFE_MODEL_BEHAVIOR_PATTERNS:
+        if pattern.search(text):
+            return category, safe_message
+    return "unknown_model_behavior", "The model produced an invalid structured outcome."
 
 
 class OpenAIAgentProvider:
@@ -152,15 +206,19 @@ class OpenAIAgentProvider:
                 provider_error_code="missing_api_key",
                 provider_error_type="local_configuration",
             )
+        started = time.monotonic()
+        handler_capture: dict[str, StructuredOutputDiagnostic] = {}
         try:
             agent = self._build_agent(request)
             run_config = self._build_run_config(request)
-            result = self.runner(
-                agent,
-                self._turn_input(request, history),
-                max_turns=1,
-                run_config=run_config,
-            )
+            runner_kwargs: dict[str, Any] = {
+                "max_turns": 1,
+                "run_config": run_config,
+            }
+            handlers = self._error_handlers(request, handler_capture, started)
+            if handlers:
+                runner_kwargs["error_handlers"] = handlers
+            result = self.runner(agent, self._turn_input(request, history), **runner_kwargs)
         except (APITimeoutError, TimeoutError) as exc:
             raise ProviderTimeout(
                 "OpenAI provider exceeded the configured timeout.",
@@ -182,9 +240,30 @@ class OpenAIAgentProvider:
                 retryable=False,
             ) from exc
         except ModelBehaviorError as exc:
+            diagnostic = self._structured_output_diagnostic(
+                exc,
+                getattr(exc, "run_data", None),
+                request,
+                started,
+                error_handler="none",
+            )
+            raise ProviderFailure(
+                "OpenAI provider returned malformed structured output.",
+                retryable=False,
+                exception_class=type(exc).__name__,
+                developer_message=diagnostic.developer_message,
+                sdk_version=diagnostic.sdk_version,
+                adapter_operation="run_turn",
+                adapter_model=request.model.model_identifier,
+                adapter_max_turns=1,
+                adapter_tool_count=len(request.available_tools),
+                adapter_output_schema=request.output_schema_name,
+                structured_output_diagnostic=diagnostic,
+            ) from exc
+        except ModelRefusalError as exc:
             raise self._failure(
                 exc,
-                "OpenAI provider returned malformed structured output.",
+                "OpenAI provider refused the structured request.",
                 retryable=False,
             ) from exc
         except UserError as exc:
@@ -199,7 +278,7 @@ class OpenAIAgentProvider:
             ) from exc
 
         try:
-            return self._translate_result(result)
+            return self._translate_result(result, diagnostic=handler_capture.get("diagnostic"))
         except ProviderFailure:
             raise
         except Exception as exc:
@@ -207,11 +286,18 @@ class OpenAIAgentProvider:
                 exc, "OpenAI provider adapter failed safely.", retryable=False
             ) from exc
 
-    def _translate_result(self, result: Any) -> ProviderTurn:
+    def _translate_result(
+        self, result: Any, *, diagnostic: StructuredOutputDiagnostic | None = None
+    ) -> ProviderTurn:
         usage = self._usage(result)
         output = result.final_output
         if hasattr(output, "model_dump"):
-            return ProviderTurn(kind="output", output=output.model_dump(mode="json"), usage=usage)
+            return ProviderTurn(
+                kind="output",
+                output=output.model_dump(mode="json"),
+                usage=usage,
+                diagnostic=diagnostic,
+            )
         if isinstance(output, str):
             try:
                 output = json.loads(output)
@@ -244,13 +330,218 @@ class OpenAIAgentProvider:
                 usage=usage,
             )
         if isinstance(output, dict):
-            return ProviderTurn(kind="output", output=output, usage=usage)
+            return ProviderTurn(kind="output", output=output, usage=usage, diagnostic=diagnostic)
         raise ProviderFailure(
             "OpenAI provider returned an unsupported output type.",
             retryable=False,
             exception_class="ProviderProtocolError",
             provider_error_code="unsupported_output_type",
             provider_error_type="local_output_validation",
+        )
+
+    def _error_handlers(
+        self,
+        request: AgentRunRequest,
+        capture: dict[str, StructuredOutputDiagnostic],
+        started: float,
+    ) -> dict[str, Any]:
+        if request.output_schema_name != DatasetSpecificationAgentOutcome.__name__:
+            return {}
+
+        def invalid_final_output(handler_input):
+            diagnostic = self._structured_output_diagnostic(
+                handler_input.error,
+                handler_input.run_data,
+                request,
+                started,
+                error_handler="invalid_final_output",
+            )
+            capture["diagnostic"] = diagnostic
+            outcome = DatasetSpecificationAgentOutcome(
+                schema_version="1.0.0",
+                status="invalid_model_output",
+                specification=None,
+                requires_human_review=True,
+                decision_summary=(
+                    "The structured response requires revision before source discovery."
+                ),
+                unresolved_questions=[],
+                limitations=["No valid dataset specification was produced."],
+                failure_category=diagnostic.failure_classification,
+                safe_failure_summary=(
+                    "Structured output validation failed; no scientific values were inferred."
+                ),
+            )
+            return RunErrorHandlerResult(final_output=outcome, include_in_history=False)
+
+        def model_refusal(handler_input):
+            diagnostic = self._structured_output_diagnostic(
+                handler_input.error,
+                handler_input.run_data,
+                request,
+                started,
+                error_handler="model_refusal",
+                refusal=True,
+            )
+            capture["diagnostic"] = diagnostic
+            outcome = DatasetSpecificationAgentOutcome(
+                schema_version="1.0.0",
+                status="model_refused",
+                specification=None,
+                requires_human_review=True,
+                decision_summary="The model refused the structured specification request.",
+                unresolved_questions=[],
+                limitations=["No valid dataset specification was produced."],
+                failure_category="model_refusal",
+                safe_failure_summary="The model refused the structured request.",
+            )
+            return RunErrorHandlerResult(final_output=outcome, include_in_history=False)
+
+        return {
+            "invalid_final_output": invalid_final_output,
+            "model_refusal": model_refusal,
+        }
+
+    def _structured_output_diagnostic(
+        self,
+        exc: Exception,
+        run_data: Any,
+        request: AgentRunRequest,
+        started: float,
+        *,
+        error_handler: str,
+        refusal: bool = False,
+    ) -> StructuredOutputDiagnostic:
+        raw_responses = list(getattr(run_data, "raw_responses", None) or [])[:100]
+        response_ids = self._safe_ids(raw_responses, "response_id")
+        request_ids = self._safe_ids(raw_responses, "request_id")
+        output_item_types: list[str] = []
+        refusal_present = refusal
+        response_status = None
+        http_status = None
+        incomplete_reason = None
+        for response in raw_responses:
+            status = self._safe_metadata(getattr(response, "status", None), 120)
+            response_status = response_status or status
+            candidate_http_status = getattr(response, "status_code", None)
+            if isinstance(candidate_http_status, int) and 100 <= candidate_http_status <= 599:
+                http_status = http_status or candidate_http_status
+            details = getattr(response, "incomplete_details", None)
+            reason = self._safe_metadata(getattr(details, "reason", None), 240)
+            incomplete_reason = incomplete_reason or reason
+            for item in list(getattr(response, "output", None) or [])[:40]:
+                item_type = self._safe_metadata(
+                    getattr(item, "type", None) or type(item).__name__, 120
+                )
+                if item_type and item_type not in output_item_types:
+                    output_item_types.append(item_type)
+                refusal_present = refusal_present or "refusal" in (item_type or "").casefold()
+                for content in list(getattr(item, "content", None) or [])[:20]:
+                    content_type = self._safe_metadata(
+                        getattr(content, "type", None) or type(content).__name__, 120
+                    )
+                    if content_type and content_type not in output_item_types:
+                        output_item_types.append(content_type)
+                    refusal_present = refusal_present or "refusal" in (
+                        content_type or ""
+                    ).casefold()
+        classification, safe_message = classify_model_behavior(
+            getattr(exc, "message", None), refusal=refusal_present
+        )
+        if incomplete_reason:
+            classification = "response_incomplete"
+            safe_message = "The provider response was incomplete before validation finished."
+        usage = self._usage_from_raw_responses(raw_responses)
+        schema = sdk_output_schema(request.output_schema_name).json_schema()
+        return StructuredOutputDiagnostic(
+            exception_class=type(exc).__name__,
+            developer_message=safe_message,
+            sdk_version=self.sdk_version(),
+            provider=request.model.provider,
+            configured_model=request.model.model_identifier,
+            agent_role=request.agent_name,
+            last_agent_name=self._safe_metadata(
+                getattr(getattr(run_data, "last_agent", None), "name", None), 120
+            ),
+            output_schema_name=request.output_schema_name,
+            output_schema_version="1.0.0",
+            output_schema_hash=hashlib.sha256(canonical_json(schema).encode()).hexdigest(),
+            adapter_operation="run_turn",
+            provider_request_ids=request_ids,
+            provider_response_ids=response_ids,
+            provider_parameter=self._safe_metadata(getattr(exc, "param", None), 120),
+            http_status=http_status,
+            response_status=response_status,
+            incomplete_reason=incomplete_reason,
+            refusal_present=refusal_present,
+            output_item_types=output_item_types,
+            raw_response_count=len(raw_responses),
+            usage=usage,
+            duration_ms=max(0, int((time.monotonic() - started) * 1000)),
+            retryable=False,
+            failure_classification=classification,
+            provider_response_received=bool(raw_responses),
+            error_handler=error_handler,
+            handler_outcome=(
+                "invalid_model_output"
+                if error_handler == "invalid_final_output"
+                else "model_refused"
+                if error_handler == "model_refusal"
+                else None
+            ),
+        )
+
+    @staticmethod
+    def _safe_metadata(value: object | None, limit: int) -> str | None:
+        if value is None:
+            return None
+        text = str(value)
+        if not re.fullmatch(r"[A-Za-z0-9_.:/\[\]-]+", text):
+            return None
+        return text[:limit]
+
+    @classmethod
+    def _safe_ids(cls, responses: list[Any], field: str) -> list[str]:
+        values: list[str] = []
+        for response in responses:
+            value = cls._safe_metadata(getattr(response, field, None), 200)
+            if value and value not in values:
+                values.append(value)
+        return values[:20]
+
+    def _usage_from_raw_responses(self, responses: list[Any]) -> UsageReport:
+        if not responses:
+            return UsageReport(usage_status="usage_unavailable", provider_invocations=0)
+        usages = [getattr(item, "usage", None) for item in responses]
+        available = [item for item in usages if item is not None]
+        if not available:
+            return UsageReport(
+                usage_status="usage_unavailable",
+                provider_invocations=len(responses),
+                provider_request_ids=self._safe_ids(responses, "request_id"),
+                provider_response_ids=self._safe_ids(responses, "response_id"),
+            )
+        input_tokens = sum(int(getattr(item, "input_tokens", 0) or 0) for item in available)
+        output_tokens = sum(int(getattr(item, "output_tokens", 0) or 0) for item in available)
+        cached_tokens = sum(
+            int(getattr(getattr(item, "input_tokens_details", None), "cached_tokens", 0) or 0)
+            for item in available
+        )
+        cost_usd = (
+            input_tokens * self.configuration.input_cost_per_million_usd
+            + output_tokens * self.configuration.output_cost_per_million_usd
+        ) / 1_000_000
+        return UsageReport(
+            usage_status=(
+                "usage_recorded" if len(available) == len(responses) else "usage_partial"
+            ),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            cost_cents=cost_usd * 100,
+            provider_request_ids=self._safe_ids(responses, "request_id"),
+            provider_response_ids=self._safe_ids(responses, "response_id"),
+            provider_invocations=len(responses),
         )
 
     def _build_agent(self, request: AgentRunRequest) -> Agent:
@@ -552,7 +843,10 @@ class OpenAIAgentProvider:
         }
 
     def _usage(self, result: Any) -> UsageReport:
-        raw = result.context_wrapper.usage
+        raw = getattr(getattr(result, "context_wrapper", None), "usage", None)
+        responses = list(getattr(result, "raw_responses", None) or [])
+        if raw is None:
+            return self._usage_from_raw_responses(responses)
         input_tokens = int(getattr(raw, "input_tokens", 0) or 0)
         output_tokens = int(getattr(raw, "output_tokens", 0) or 0)
         cached_tokens = int(
@@ -562,15 +856,13 @@ class OpenAIAgentProvider:
             input_tokens * self.configuration.input_cost_per_million_usd
             + output_tokens * self.configuration.output_cost_per_million_usd
         ) / 1_000_000
-        response_ids = [
-            str(getattr(item, "response_id", ""))
-            for item in getattr(result, "raw_responses", [])
-            if getattr(item, "response_id", None)
-        ]
         return UsageReport(
+            usage_status="usage_recorded",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cached_tokens=cached_tokens,
             cost_cents=cost_usd * 100,
-            provider_request_ids=response_ids,
+            provider_request_ids=self._safe_ids(responses, "request_id"),
+            provider_response_ids=self._safe_ids(responses, "response_id"),
+            provider_invocations=max(int(getattr(raw, "requests", 0) or 0), len(responses)),
         )

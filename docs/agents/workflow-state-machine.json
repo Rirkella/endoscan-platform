@@ -8,6 +8,7 @@
   },
   "states": [
     "DRAFT", "SPECIFYING_TARGET_DATASET", "AWAITING_DATASET_SPECIFICATION_APPROVAL",
+    "AWAITING_DATASET_SPECIFICATION_REVISION",
     "DERIVING_COMPONENT_REQUIREMENTS", "DISCOVERING_ACTIVITY_EVIDENCE",
     "DISCOVERING_TRANSCRIPTOMIC_EVIDENCE", "DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES",
     "DISCOVERING_SUPPORTING_METADATA", "VALIDATING_DISCOVERED_SOURCES",
@@ -22,7 +23,10 @@
   ],
   "transitions": [
     {"from":"DRAFT","to":"SPECIFYING_TARGET_DATASET","initiator":"human","guard":"training-dataset workflow start explicitly authorized","required_artifacts":["endpoint_definition","blind_context_audit"]},
-    {"from":"SPECIFYING_TARGET_DATASET","to":"AWAITING_DATASET_SPECIFICATION_APPROVAL","initiator":"orchestrator","guard":"strict target training-dataset specification produced","required_artifacts":["training_dataset_specification"]},
+    {"from":"SPECIFYING_TARGET_DATASET","to":"AWAITING_DATASET_SPECIFICATION_APPROVAL","initiator":"orchestrator","guard":"strict target training-dataset draft produced","required_artifacts":["training_dataset_specification_draft","dataset_specification_agent_outcome"]},
+    {"from":"SPECIFYING_TARGET_DATASET","to":"AWAITING_DATASET_SPECIFICATION_REVISION","initiator":"orchestrator","guard":"terminal specification-agent outcome requires human revision","required_artifacts":["dataset_specification_agent_outcome","specialized_agent_trace"]},
+    {"from":"AWAITING_DATASET_SPECIFICATION_REVISION","to":"SPECIFYING_TARGET_DATASET","initiator":"human","guard":"explicit retry or configured alternate planner model authorized","required_artifacts":["dataset_specification_agent_outcome"]},
+    {"from":"AWAITING_DATASET_SPECIFICATION_REVISION","to":"DRAFT","initiator":"human","guard":"endpoint request revision selected","required_artifacts":["dataset_specification_agent_outcome"]},
     {"from":"AWAITING_DATASET_SPECIFICATION_APPROVAL","to":"DERIVING_COMPONENT_REQUIREMENTS","initiator":"human","guard":"target specification approved with immutable hash binding","required_artifacts":["dataset_specification_approval"]},
     {"from":"AWAITING_DATASET_SPECIFICATION_APPROVAL","to":"SPECIFYING_TARGET_DATASET","initiator":"human","guard":"target specification revision requested","required_artifacts":["review_decision"]},
     {"from":"DERIVING_COMPONENT_REQUIREMENTS","to":"DISCOVERING_ACTIVITY_EVIDENCE","initiator":"orchestrator","guard":"component requirements derived deterministically","required_artifacts":["component_requirements"]},

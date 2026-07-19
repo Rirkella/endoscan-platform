@@ -1,7 +1,7 @@
 import type { AdminBuild, AdminTimelineEvent } from "./api/types";
 
 export const WORKFLOW_STAGES = [
-  { label: "Definition", states: ["DRAFT"] },
+  { label: "Definition", states: ["DRAFT", "SPECIFYING_TARGET_DATASET", "AWAITING_DATASET_SPECIFICATION_APPROVAL", "AWAITING_DATASET_SPECIFICATION_REVISION"] },
   { label: "Discovery", states: ["DISCOVERING_DATA"] },
   { label: "Dataset review", states: ["AWAITING_DATASET_APPROVAL", "AWAITING_SEARCH_REVIEW"] },
   { label: "Curation", states: ["CURATING_DATA", "AWAITING_LABEL_APPROVAL"] },
@@ -15,6 +15,9 @@ export const WORKFLOW_STAGES = [
 
 const STATE_LABELS: Record<string, string> = {
   DRAFT: "Draft ready to start",
+  SPECIFYING_TARGET_DATASET: "Preparing dataset specification",
+  AWAITING_DATASET_SPECIFICATION_APPROVAL: "Waiting for specification review",
+  AWAITING_DATASET_SPECIFICATION_REVISION: "Dataset specification needs revision",
   DISCOVERING_DATA: "Searching for candidate datasets",
   AWAITING_DATASET_APPROVAL: "Waiting for dataset review",
   AWAITING_SEARCH_REVIEW: "Waiting for revised-search review",

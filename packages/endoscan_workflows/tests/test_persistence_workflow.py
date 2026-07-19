@@ -12,7 +12,9 @@ from endoscan_workflows.contracts import (
     ApprovalDecision,
     ApprovalDecisionValue,
     EndpointBuildCreate,
+    ProviderTurn,
     TransitionRequest,
+    UsageReport,
     WorkflowKind,
     WorkflowState,
 )
@@ -79,6 +81,34 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
         "journal_mode": "wal",
         "foreign_keys": True,
     }
+    columns = {
+        item["name"] for item in inspect(database.engine).get_columns("training_dataset_workflows")
+    }
+    assert {"specification_draft_json", "specification_outcome_json"}.issubset(columns)
+    database.dispose()
+
+
+def test_specification_outcome_migration_upgrades_phase1_database_in_place(tmp_path) -> None:
+    database = WorkflowDatabase(tmp_path / "phase1-before-outcomes.db")
+    with database.engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE training_dataset_workflows ("
+                "workflow_id VARCHAR(128) PRIMARY KEY, specification_json TEXT)"
+            )
+        )
+        connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(64))"))
+        connection.execute(
+            text(
+                "INSERT INTO alembic_version (version_num) "
+                "VALUES ('0003_training_dataset_discovery')"
+            )
+        )
+    database.migrate()
+    columns = {
+        item["name"] for item in inspect(database.engine).get_columns("training_dataset_workflows")
+    }
+    assert {"specification_draft_json", "specification_outcome_json"}.issubset(columns)
     database.dispose()
 
 
@@ -218,7 +248,7 @@ def test_training_dataset_specification_approval_precedes_discovery(
     assert waiting.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_APPROVAL
     approval = service.list_approvals(build.id, pending_only=True)[0]
     assert approval["approval_type"] == "dataset_specification"
-    assert len(approval["request"]["artifact_hashes"]) == 1
+    assert len(approval["request"]["artifact_hashes"]) == 3
     approved = service.decide_approval(
         approval["id"],
         ApprovalDecision(
@@ -328,6 +358,115 @@ def test_training_dataset_specification_failure_invokes_provider_once_without_re
     runs = service.agent_runs(build.id)
     assert len(runs) == 1
     assert runs[0]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "invalid_output",
+    [
+        None,
+        {},
+        {"schema_version": "1.0.0", "status": "completed"},
+        {"schema_version": "1.0.0", "status": "wrong_enum", "extra": True},
+    ],
+)
+def test_invalid_specification_output_enters_revision_without_discovery_or_retry(
+    workflow_runtime,
+    invalid_output,
+) -> None:
+    database, store, providers, _harness, service = workflow_runtime
+
+    class InvalidOutputProvider:
+        name = "fake"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run_turn(self, *_args, **_kwargs):
+            self.calls += 1
+            return ProviderTurn(
+                kind="output",
+                output=invalid_output,
+                usage=UsageReport(
+                    usage_status="usage_recorded",
+                    input_tokens=100,
+                    output_tokens=20,
+                    provider_request_ids=["req-offline-fixture"],
+                    provider_invocations=1,
+                ),
+            )
+
+    provider = InvalidOutputProvider()
+    providers._providers["fake"] = lambda: provider
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Example functional endpoint",
+            endpoint_slug=f"invalid-spec-{len(str(invalid_output))}",
+            biological_goal="Construct a reviewable source-neutral public training plan.",
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key=f"invalid-spec-{len(str(invalid_output))}",
+        )
+    )
+    waiting = service.start_build(
+        build.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="invalid-spec-start",
+    )
+    assert waiting.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION
+    assert provider.calls == 1
+    assert len(service.agent_runs(build.id)) == 1
+    workflow = service.training_dataset_workflow(build.id)
+    assert workflow["target_specification"] is None
+    assert workflow["verified_source_inventory"] is None
+    assert workflow["assembly_strategies"] is None
+    artifact_types = {item.artifact_type for item in store.list_artifacts(build.id)}
+    assert "dataset_specification_agent_outcome" in artifact_types
+    assert "specialized_agent_trace" in artifact_types
+    assert "verified_source_inventory" not in artifact_types
+    database.dispose()
+    database.migrate()
+    restored = service.get_build(build.id)
+    assert restored.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION
+
+
+def test_specification_revision_requires_explicit_human_action(workflow_runtime) -> None:
+    _database, _store, providers, _harness, service = workflow_runtime
+
+    class InvalidOutputProvider:
+        name = "fake"
+
+        def run_turn(self, *_args, **_kwargs):
+            return ProviderTurn(kind="output", output={"unexpected": True})
+
+    providers._providers["fake"] = InvalidOutputProvider
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Example functional endpoint",
+            endpoint_slug="explicit-spec-revision",
+            biological_goal="Construct a reviewable source-neutral public training plan.",
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="explicit-spec-revision",
+        )
+    )
+    waiting = service.start_build(
+        build.id,
+        expected_version=0,
+        actor="test-admin",
+        idempotency_key="explicit-spec-revision:start",
+    )
+    assert len(service.agent_runs(build.id)) == 1
+    draft = service.revise_training_dataset_request(
+        build.id,
+        expected_version=waiting.version,
+        actor="test-admin",
+        idempotency_key="explicit-spec-revision:revise",
+    )
+    assert draft.current_stage is WorkflowState.DRAFT
+    assert len(service.agent_runs(build.id)) == 1
 
 
 def test_create_is_idempotent_and_deterministic(workflow_runtime) -> None:

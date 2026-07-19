@@ -88,11 +88,21 @@ def test_every_specialized_agent_reaches_its_schema_boundary_without_network(
     assert all(item["local_sdk_configuration_valid"] for item in results)
     assert all(item["model_call_boundary_reached"] for item in results)
     assert all(item["network_requests"] == 0 for item in results)
+    assert all(item["output_schema_version"] == "training-dataset-v1" for item in results)
     assert {item["output_schema_name"] for item in results} == {
-        "TrainingDatasetSpecification",
+        "DatasetSpecificationAgentOutcome",
         "VerifiedSourceInventoryFragment",
         "TrainingDatasetAssemblyReview",
     }
+    specification = next(
+        item for item in results if item["agent_name"] == "Dataset Specification Agent"
+    )
+    assert specification["error_handler_names"] == [
+        "invalid_final_output",
+        "model_refusal",
+    ]
+    assert specification["output_schema_size"] < 8_000
+    assert specification["provider_retries"] == 0
 
 
 def test_production_agent_tools_and_output_schema_are_strict_sdk_inputs() -> None:

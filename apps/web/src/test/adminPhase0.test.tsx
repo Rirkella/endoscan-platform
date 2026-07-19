@@ -1000,6 +1000,83 @@ describe("Phase-1 live discovery presentation", () => {
     expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("1");
   });
 
+  it("shows the specification revision gate without fake usage or source claims", async () => {
+    const revisionRun: AdminAgentRun = {
+      ...run,
+      agent_name: "Dataset Specification Agent",
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "completed",
+      turns: 1,
+      tools: [],
+      usage: {
+        usage_status: "usage_unavailable",
+        input_tokens: 0,
+        output_tokens: 0,
+        cached_tokens: 0,
+        cost_cents: 0,
+        provider_invocations: 1,
+      },
+      trace: {
+        events: [{
+          event_type: "provider.turn.completed",
+          detail: {
+            structured_output_diagnostic: {
+              developer_message: "The model response did not match the required structured schema.",
+              failure_classification: "schema_validation_failed",
+              output_schema_name: "DatasetSpecificationAgentOutcome",
+              output_schema_version: "1.0.0",
+              provider_request_ids: ["req_safe_123"],
+              provider_response_ids: ["resp_safe_456"],
+              usage: { usage_status: "usage_unavailable" },
+              error_handler: "invalid_final_output",
+            },
+          },
+        }],
+      },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVISION", 2, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: null,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [revisionRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: revisionRun },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: {
+        body: {
+          schema_version: "1.0.0",
+          workflow_id: buildId,
+          workflow_kind: "training_dataset_discovery",
+          benchmark_mode: "blind_training_dataset_discovery",
+          legacy: false,
+          specification_draft: null,
+          target_specification: null,
+          verified_source_inventory: null,
+          assembly_strategies: null,
+          specification_agent_outcome: {
+            status: "invalid_model_output",
+            failure_category: "schema_validation_failed",
+          },
+        } satisfies AdminTrainingDatasetWorkflow,
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByRole("heading", { name: "Dataset specification needs revision" })).toBeInTheDocument();
+    expect(screen.getByText("The agent response did not match the required structured contract. No source discovery was started.")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Revise endpoint request" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Retry specification" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Use another planner model" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Usage unavailable after structured-output failure")).toBeInTheDocument();
+    expect(screen.getByText("req_safe_123")).toBeInTheDocument();
+    expect(screen.getByText("resp_safe_456")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Verified source inventory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Bounded GEO searches found no suitable candidate")).not.toBeInTheDocument();
+  });
+
   it("renders only allowlisted scientific-source diagnostics", async () => {
     const sourceDiagnostic = {
       tool_name: "validate_geo_accessions",

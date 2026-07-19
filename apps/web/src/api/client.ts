@@ -240,7 +240,7 @@ export const api = {
   }) => adminPost<AdminBuild>("/admin/endpoint-builds", payload, "create-build"),
   adminCommand: (
     id: string,
-    action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure",
+    action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure" | "retry-dataset-specification" | "revise-endpoint-request",
     version: number,
   ) =>
     adminPost<AdminBuild>(

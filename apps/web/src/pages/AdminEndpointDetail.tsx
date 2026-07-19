@@ -265,13 +265,28 @@ function safeDeveloperDiagnostic(run: AdminAgentRun): string | null {
     const detail = event.detail;
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
       const direct = (detail as Record<string, unknown>).developer_message;
+      const structured = (detail as Record<string, unknown>).structured_output_diagnostic;
       const nested = (detail as Record<string, unknown>).source_diagnostic;
       const message = typeof direct === "string"
         ? direct
+        : structured && typeof structured === "object" && !Array.isArray(structured)
+          ? (structured as Record<string, unknown>).developer_message
         : nested && typeof nested === "object" && !Array.isArray(nested)
           ? (nested as Record<string, unknown>).developer_message
           : null;
       if (typeof message === "string" && message.length > 0) return message;
+    }
+  }
+  return null;
+}
+
+function structuredOutputDiagnostic(run: AdminAgentRun): Record<string, unknown> | null {
+  for (const event of [...(run.trace?.events ?? [])].reverse()) {
+    const detail = event.detail;
+    if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
+    const diagnostic = (detail as Record<string, unknown>).structured_output_diagnostic;
+    if (diagnostic && typeof diagnostic === "object" && !Array.isArray(diagnostic)) {
+      return diagnostic as Record<string, unknown>;
     }
   }
   return null;
@@ -415,7 +430,7 @@ export function AdminEndpointDetail() {
     void load();
   }, [load]);
 
-  async function command(action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure") {
+  async function command(action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure" | "retry-dataset-specification" | "revise-endpoint-request") {
     if (!build) return;
     setBusy(true);
     try {
@@ -509,13 +524,14 @@ export function AdminEndpointDetail() {
 
   const progress = stageProgress(build);
   const displayEvents = fullActivity ? [...events].reverse() : [...events].reverse().slice(0, 6);
-  const canFail = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
+  const canFail = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING", "AWAITING_DATASET_SPECIFICATION_REVISION"].includes(build.current_stage);
   const canPause = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
   const canCancel = !["CANCELLED", "COMPLETED"].includes(build.current_stage);
   const canRetry = build.current_stage === "FAILED" && errors.at(-1)?.retryable === true;
   const selectedIndex = Math.max(0, candidates.findIndex((candidate) => candidate.candidate_id === selected));
   const selectedCandidate = candidates[selectedIndex];
   const developerDiagnostic = trace ? safeDeveloperDiagnostic(trace) : null;
+  const outputDiagnostic = trace ? structuredOutputDiagnostic(trace) : null;
   const scientificSourceDiagnostics = trace ? sourceDiagnostics(trace) : [];
   const providerRetries = trace ? traceEventCount(trace, "provider.retry") : 0;
   const geoSearches = trace ? geoSearchSummaries(trace) : [];
@@ -542,6 +558,11 @@ export function AdminEndpointDetail() {
   const hasCandidateRecommendation = Boolean(pending && recommended && candidates.length > 0);
   const isAssemblyApproval = pending?.approval_type === "training_dataset_assembly_strategy";
   const isSpecificationApproval = pending?.approval_type === "dataset_specification";
+  const isSpecificationRevision = build.current_stage === "AWAITING_DATASET_SPECIFICATION_REVISION";
+  const specificationOutcome = trainingWorkflow?.specification_agent_outcome;
+  const specificationFailureCategory = typeof specificationOutcome?.failure_category === "string"
+    ? specificationOutcome.failure_category
+    : "unknown_model_behavior";
 
   function requestConfirmation(kind: Confirmation["kind"], approval?: AdminApproval, trigger?: HTMLElement) {
     confirmationTrigger.current = trigger ?? null;
@@ -616,17 +637,31 @@ export function AdminEndpointDetail() {
 
       <div className="admin-detail-grid">
         <main className="admin-primary-column">
-          {trainingWorkflow && <TrainingDatasetWorkspace data={trainingWorkflow} />}
+          {trainingWorkflow && !isSpecificationRevision && <TrainingDatasetWorkspace data={trainingWorkflow} />}
           <section className="admin-panel admin-decision-panel" aria-labelledby="decision-title">
             <div className="admin-decision-heading">
               <div>
                 <span className="admin-section-kicker">Human decision</span>
-                <h2 id="decision-title">{isAssemblyApproval ? "Assembly strategy review required" : isSpecificationApproval ? "Target specification review required" : pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
-                <p>{isAssemblyApproval ? "Approve only the immutable verified source graph and deterministic preparation plan; training remains deferred." : isSpecificationApproval ? "Review the target structure before any source discovery or strategy planning begins." : pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
+                <h2 id="decision-title">{isSpecificationRevision ? "Dataset specification needs revision" : isAssemblyApproval ? "Assembly strategy review required" : isSpecificationApproval ? "Target specification review required" : pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
+                <p>{isSpecificationRevision ? "The agent response did not match the required structured contract. No source discovery was started." : isAssemblyApproval ? "Approve only the immutable verified source graph and deterministic preparation plan; training remains deferred." : isSpecificationApproval ? "Review the target structure before any source discovery or strategy planning begins." : pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
               </div>
               {pending && <span className="admin-review-flag">Action required</span>}
             </div>
-            {pending && (isAssemblyApproval || isSpecificationApproval) ? (
+            {isSpecificationRevision ? (
+              <div className="admin-approval-card admin-no-candidate-review">
+                <div className="admin-recommendation">
+                  <span>Structured-output review gate</span>
+                  <h3>No valid dataset specification was produced</h3>
+                  <p>Failure category: {humanizeMachineValue(specificationFailureCategory)}</p>
+                </div>
+                <div className="admin-approval-actions">
+                  <button className="admin-secondary" disabled={busy} onClick={() => void command("revise-endpoint-request")}>Revise endpoint request</button>
+                  <button className="admin-primary" disabled={busy} onClick={() => void command("retry-dataset-specification")}>Retry specification</button>
+                  <button className="admin-secondary" disabled title="Configure an alternate planner model before retrying">Use another planner model</button>
+                  <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel build</button>
+                </div>
+              </div>
+            ) : pending && (isAssemblyApproval || isSpecificationApproval) ? (
               <div className="admin-approval-card">
                 <div className="admin-recommendation"><span>{isAssemblyApproval ? "Verified assembly proposal" : "Target contract"}</span><h3>{pending.request.proposed_decision}</h3><p>{pending.request.evidence_summary}</p></div>
                 <div className="admin-decision-evidence"><div><h3>Approval scope</h3><p>{pending.request.requested_action}</p></div><div><h3>Limitations</h3><ul>{pending.request.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div></div>
@@ -683,7 +718,7 @@ export function AdminEndpointDetail() {
                   <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>
                 </div>
               </div>
-            ) : hasCompletedOutput && candidates.length === 0 ? (
+            ) : !isSpecificationRevision && hasCompletedOutput && candidates.length === 0 ? (
               <div className="admin-approval-card admin-no-candidate-review">
                 <div className="admin-recommendation">
                   <span>No dataset recommendation</span>
@@ -747,10 +782,15 @@ export function AdminEndpointDetail() {
                 )}
               {canPause && <button disabled={busy} onClick={() => void command("pause")}>Pause</button>}
               {build.current_stage === "PAUSED" && <button disabled={busy} onClick={() => void command("resume")}>Resume</button>}
+              {isSpecificationRevision && <>
+                <button disabled={busy} onClick={() => void command("revise-endpoint-request")}>Revise endpoint request</button>
+                <button disabled={busy} onClick={() => void command("retry-dataset-specification")}>Retry specification</button>
+                <button disabled title="Configure an alternate planner model before retrying">Use another planner model</button>
+              </>}
               {canRetry && <button disabled={busy} onClick={() => void command("retry")}>Retry failed step</button>}
               {canCancel && <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>}
               <button className="admin-secondary" disabled={busy} onClick={() => void load()}>Refresh</button>
-              {import.meta.env.DEV && runMode !== "replay" && <button className="admin-secondary" disabled={busy} onClick={() => void refreshSourceMetadata()}>Refresh source metadata</button>}
+              {import.meta.env.DEV && runMode !== "replay" && !isSpecificationRevision && <button className="admin-secondary" disabled={busy} onClick={() => void refreshSourceMetadata()}>Refresh source metadata</button>}
             </div>
           </section>
 
@@ -794,12 +834,13 @@ export function AdminEndpointDetail() {
                   <div><dt>Input tokens</dt><dd>{usageNumber(trace, "input_tokens")}</dd></div>
                   <div><dt>Output tokens</dt><dd>{usageNumber(trace, "output_tokens")}</dd></div>
                   <div><dt>Cached input tokens</dt><dd>{usageNumber(trace, "cached_tokens")}</dd></div>
-                  <div><dt>Estimated cost</dt><dd>${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}</dd></div>
+                  <div><dt>Estimated cost</dt><dd>{trace.usage.usage_status === "usage_unavailable" ? "Usage unavailable after structured-output failure" : `$${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}`}</dd></div>
                 </dl>
                 {geoSearches.length > 0 && <div className="admin-trace-summary"><h4>Rendered GEO queries</h4><ol>{geoSearches.map((search, index) => <li key={`${search.renderedQuery}-${index}`}><strong>{search.strategyReason}</strong><code>{search.renderedQuery}</code><span>{search.resultCount} results / {search.cacheStatus}</span></li>)}</ol></div>}
                 {turnExposures.length > 0 && <div className="admin-trace-summary"><h4>Tools exposed per turn</h4><ol>{turnExposures.map((turn) => <li key={`${turn.turn}-${turn.substage}`}><strong>Turn {turn.turn}: {humanizeMachineValue(turn.substage)}</strong><span>{turn.tools.length > 0 ? turn.tools.map(toolLabel).join(", ") : "Final structured output only"}</span></li>)}</ol></div>}
                 {normalizationWarningCount > 0 && <p className="admin-secondary-note">{controlledVocabularyWarningCount > 0 ? `${controlledVocabularyWarningCount} controlled-vocabulary ${controlledVocabularyWarningCount === 1 ? "value was" : "values were"} normalized before execution.` : emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
                 {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
+                {outputDiagnostic && <details className="admin-trace-summary"><summary>Technical audit</summary><dl><div><dt>Failure category</dt><dd>{humanizeMachineValue(String(outputDiagnostic.failure_classification ?? "unknown_model_behavior"))}</dd></div><div><dt>Schema</dt><dd>{String(outputDiagnostic.output_schema_name ?? "unknown")} · {String(outputDiagnostic.output_schema_version ?? "unknown")}</dd></div><div><dt>Request IDs</dt><dd>{Array.isArray(outputDiagnostic.provider_request_ids) && outputDiagnostic.provider_request_ids.length ? outputDiagnostic.provider_request_ids.join(", ") : "not available"}</dd></div><div><dt>Response IDs</dt><dd>{Array.isArray(outputDiagnostic.provider_response_ids) && outputDiagnostic.provider_response_ids.length ? outputDiagnostic.provider_response_ids.join(", ") : "not available"}</dd></div><div><dt>Usage status</dt><dd>{humanizeMachineValue(String((outputDiagnostic.usage as Record<string, unknown> | undefined)?.usage_status ?? trace.usage.usage_status ?? "usage_unavailable"))}</dd></div><div><dt>Handler</dt><dd>{humanizeMachineValue(String(outputDiagnostic.error_handler ?? "none"))}</dd></div></dl></details>}
                 {scientificSourceDiagnostics.length > 0 && <div className="admin-trace-summary"><h4>Scientific-source diagnostics</h4>{scientificSourceDiagnostics.map((diagnostic, index) => <SourceDiagnosticDetails diagnostic={diagnostic} key={`${diagnostic.tool_name}-${index}`} />)}</div>}
                 <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
                 <div className="admin-inline-actions">

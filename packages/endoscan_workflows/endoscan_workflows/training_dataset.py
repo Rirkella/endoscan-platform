@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .config import AgentConfiguration
 from .contracts import (
@@ -174,6 +174,137 @@ class TrainingDatasetSpecification(StrictContract):
         if invalid:
             raise ValueError("allowed_missingness values must be between zero and one")
         return self
+
+
+class TrainingDatasetSpecificationDraft(BaseModel):
+    """Strict planner proposal containing only choices available before review.
+
+    Deliberately excludes dynamic maps and numeric coverage/class thresholds. Those
+    remain part of the approved contract and are populated deterministically from
+    explicit policy or left empty when no policy has supplied them.
+    """
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    schema_version: Literal["1.0.0"]
+    endpoint_name: str = Field(min_length=3, max_length=160)
+    biological_target: str = Field(min_length=1, max_length=500)
+    endpoint_modality: str = Field(min_length=1, max_length=300)
+    endpoint_definition: str = Field(min_length=10, max_length=4000)
+    intended_prediction_task: str = Field(min_length=10, max_length=2000)
+    candidate_prediction_grain: PredictionUnit
+    explicit_prediction_grain: str | None = Field(max_length=1000)
+    acceptable_activity_evidence_types: list[ActivityRepresentation] = Field(
+        min_length=1, max_length=10
+    )
+    acceptable_transcriptomic_evidence_types: list[str] = Field(min_length=1, max_length=30)
+    compound_identity_requirements: list[str] = Field(min_length=1, max_length=30)
+    chemical_structure_requirements: list[str] = Field(min_length=1, max_length=30)
+    experimental_context_requirements: list[str] = Field(min_length=1, max_length=50)
+    mandatory_target_table_fields: list[str] = Field(min_length=1, max_length=100)
+    minimum_evidence_requirements: list[str] = Field(min_length=1, max_length=50)
+    intended_scope_of_claim: str = Field(min_length=10, max_length=4000)
+    explicit_ambiguities: list[str] = Field(max_length=50)
+    assumptions: list[str] = Field(max_length=50)
+    human_decisions_required: list[str] = Field(max_length=100)
+
+    @model_validator(mode="after")
+    def require_prediction_grain_detail(self) -> TrainingDatasetSpecificationDraft:
+        if (
+            self.candidate_prediction_grain is PredictionUnit.EXPLICIT_OTHER
+            and not self.explicit_prediction_grain
+        ):
+            raise ValueError("explicit_prediction_grain is required for explicit_other")
+        return self
+
+
+class DatasetSpecificationAgentOutcome(BaseModel):
+    """Strict terminal planner envelope; non-completed states never invent a contract."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    schema_version: Literal["1.0.0"]
+    status: Literal[
+        "completed",
+        "needs_human_clarification",
+        "invalid_model_output",
+        "model_refused",
+        "insufficient_endpoint_definition",
+    ]
+    specification: TrainingDatasetSpecificationDraft | None
+    requires_human_review: bool
+    decision_summary: str = Field(min_length=1, max_length=2000)
+    unresolved_questions: list[str] = Field(max_length=100)
+    limitations: list[str] = Field(max_length=100)
+    failure_category: Literal[
+        "malformed_json",
+        "schema_validation_failed",
+        "missing_structured_output",
+        "response_incomplete",
+        "model_refusal",
+        "unexpected_tool_call",
+        "unknown_model_behavior",
+    ] | None
+    safe_failure_summary: str | None = Field(max_length=800)
+
+    @model_validator(mode="after")
+    def enforce_terminal_semantics(self) -> DatasetSpecificationAgentOutcome:
+        if self.status == "completed" and self.specification is None:
+            raise ValueError("completed outcome requires a specification draft")
+        if self.status in {
+            "invalid_model_output",
+            "model_refused",
+            "insufficient_endpoint_definition",
+        } and self.specification is not None:
+            raise ValueError(f"{self.status} outcome cannot contain a specification")
+        if self.status == "completed" and self.failure_category is not None:
+            raise ValueError("completed outcome cannot contain a failure category")
+        if self.status == "model_refused" and self.failure_category != "model_refusal":
+            raise ValueError("model_refused outcome requires model_refusal category")
+        if not self.requires_human_review:
+            raise ValueError("every specification-agent outcome requires human review")
+        return self
+
+
+def materialize_training_dataset_specification(
+    draft: TrainingDatasetSpecificationDraft,
+    *,
+    specification_id: str,
+) -> TrainingDatasetSpecification:
+    """Create the full approved contract without inventing policy thresholds."""
+
+    return TrainingDatasetSpecification(
+        specification_id=specification_id,
+        endpoint_name=draft.endpoint_name,
+        biological_target=draft.biological_target,
+        endpoint_modality=draft.endpoint_modality,
+        endpoint_definition=draft.endpoint_definition,
+        intended_prediction_task=draft.intended_prediction_task,
+        prediction_unit=draft.candidate_prediction_grain,
+        explicit_prediction_grain=draft.explicit_prediction_grain,
+        acceptable_activity_representations=draft.acceptable_activity_evidence_types,
+        acceptable_transcriptomic_representations=(
+            draft.acceptable_transcriptomic_evidence_types
+        ),
+        compound_identity_requirements=draft.compound_identity_requirements,
+        chemical_structure_requirements=draft.chemical_structure_requirements,
+        experimental_context_requirements=draft.experimental_context_requirements,
+        mandatory_output_fields=draft.mandatory_target_table_fields,
+        optional_output_fields=[],
+        allowed_missingness={},
+        minimum_evidence_requirements=draft.minimum_evidence_requirements,
+        minimum_coverage_requirements={},
+        minimum_class_size_requirements={},
+        permitted_biological_contexts=[],
+        excluded_modalities=[],
+        intended_scope_of_claim=draft.intended_scope_of_claim,
+        assumptions_requiring_human_approval=[
+            *draft.assumptions,
+            *draft.human_decisions_required,
+        ],
+        unresolved_questions=draft.explicit_ambiguities,
+        requires_human_review=True,
+    )
 
 
 class ComponentRequirement(StrictContract):
@@ -720,7 +851,7 @@ SPECIALIZED_AGENT_SEQUENCE = [
     SpecializedAgentDefinition(
         agent_name="Dataset Specification Agent",
         role="planner",
-        output_schema_name="TrainingDatasetSpecification",
+        output_schema_name="DatasetSpecificationAgentOutcome",
         receives_artifacts=["endpoint_definition"],
         produces_artifact="training_dataset_specification",
     ),
@@ -815,13 +946,11 @@ SPECIALIZED_AGENT_SEQUENCE = [
 
 SPECIALIZED_AGENT_INSTRUCTIONS = {
     "Dataset Specification Agent": (
-        "Convert the endpoint request into a strict TrainingDatasetSpecification. "
-        "Distinguish the requested endpoint modality from adjacent mechanisms and state "
-        "ambiguities explicitly. Define the prediction unit, acceptable activity and "
-        "transcriptomic representations, identity and structure requirements, experimental "
-        "context, output fields, evidence thresholds, missingness, scope of claim, and all "
-        "assumptions requiring human approval. Do not identify or recommend concrete data "
-        "sources. Do not invent source identifiers, counts, overlaps, or evidence."
+        "Return exactly one DatasetSpecificationAgentOutcome and no markdown. Do not add "
+        "fields absent from the schema; use null only where permitted. Expose ambiguity "
+        "instead of guessing. Distinguish thyroid-receptor antagonism from agonism, binding, "
+        "downstream thyroid effects, and other modalities. Do not search for sources or name "
+        "assays, datasets, papers, counts, coverage, overlap, or an assembly strategy."
     ),
     "Activity Evidence Discovery Agent": (
         "Discover bounded official public compound-level activity evidence for the approved "

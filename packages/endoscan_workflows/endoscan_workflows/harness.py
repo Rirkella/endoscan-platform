@@ -270,6 +270,14 @@ class AgentHarness:
                 )
                 break
             except ProviderFailure as exc:
+                exception_diagnostic = exc.trace_detail.get("structured_output_diagnostic")
+                if isinstance(exception_diagnostic, dict):
+                    diagnostic_usage = exception_diagnostic.get("usage")
+                    if isinstance(diagnostic_usage, dict):
+                        usage = self._add_usage(
+                            usage,
+                            UsageReport.model_validate(diagnostic_usage),
+                        )
                 failure_detail = {
                     "turn": turn_number,
                     "provider_invocation": provider_invocations,
@@ -307,6 +315,25 @@ class AgentHarness:
             turns += 1
             last_turn_usage = turn.usage
             usage = self._add_usage(usage, turn.usage)
+            if turn.diagnostic:
+                diagnostic = turn.diagnostic
+                logger.warning(
+                    "structured_output_terminal workflow_id=%s agent_run_id=%s agent=%s "
+                    "provider=%s model=%s classification=%s handler=%s request_ids=%s "
+                    "response_ids=%s usage_status=%s retryable=%s developer_message=%s",
+                    request.workflow_id,
+                    run_id,
+                    diagnostic.agent_role,
+                    diagnostic.provider,
+                    diagnostic.configured_model,
+                    diagnostic.failure_classification,
+                    diagnostic.error_handler,
+                    diagnostic.provider_request_ids,
+                    diagnostic.provider_response_ids,
+                    diagnostic.usage.usage_status,
+                    diagnostic.retryable,
+                    diagnostic.developer_message,
+                )
             emit(
                 "provider.turn.completed",
                 "completed",
@@ -315,6 +342,9 @@ class AgentHarness:
                 kind=turn.kind,
                 discovery_substage=discovery_substage,
                 tools_exposed=exposed_tools,
+                structured_output_diagnostic=(
+                    turn.diagnostic.model_dump(mode="json") if turn.diagnostic else None
+                ),
             )
             budget_error = self._budget_error(request, usage)
             if budget_error:
@@ -493,6 +523,42 @@ class AgentHarness:
                     attempt=validation_failures,
                     errors=exc.errors(include_input=False, include_url=False),
                 )
+                if output_model.__name__ == "DatasetSpecificationAgentOutcome":
+                    validated = output_model.model_validate(
+                        {
+                            "schema_version": "1.0.0",
+                            "status": "invalid_model_output",
+                            "specification": None,
+                            "requires_human_review": True,
+                            "decision_summary": (
+                                "The structured response requires revision before source "
+                                "discovery."
+                            ),
+                            "unresolved_questions": [],
+                            "limitations": ["No valid dataset specification was produced."],
+                            "failure_category": "schema_validation_failed",
+                            "safe_failure_summary": (
+                                "Structured output validation failed; no scientific values "
+                                "were inferred."
+                            ),
+                        }
+                    )
+                    emit(
+                        "output.invalid_terminal_outcome",
+                        "revision_required",
+                        failure_classification="schema_validation_failed",
+                        provider_retry_created=False,
+                    )
+                    result = AgentRunResult(
+                        status=AgentRunStatus.COMPLETED,
+                        output=validated.model_dump(mode="json"),
+                        usage=usage,
+                        trace=trace,
+                        turns=turns,
+                        tool_calls=tool_calls,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    break
                 if validation_failures <= 1:
                     history.append(
                         {"validation_error": exc.errors(include_input=False, include_url=False)}
@@ -898,12 +964,32 @@ class AgentHarness:
 
     @staticmethod
     def _add_usage(left: UsageReport, right: UsageReport) -> UsageReport:
+        if (
+            left.provider_invocations == 0
+            and left.input_tokens == 0
+            and left.output_tokens == 0
+            and left.cached_tokens == 0
+            and left.cost_cents == 0
+            and not left.provider_request_ids
+            and not left.provider_response_ids
+        ):
+            return right.model_copy(deep=True)
+        statuses = {left.usage_status, right.usage_status}
+        if "usage_partial" in statuses or statuses == {"usage_recorded", "usage_unavailable"}:
+            usage_status = "usage_partial"
+        elif "usage_recorded" in statuses:
+            usage_status = "usage_recorded"
+        else:
+            usage_status = "usage_unavailable"
         return UsageReport(
+            usage_status=usage_status,
             input_tokens=left.input_tokens + right.input_tokens,
             output_tokens=left.output_tokens + right.output_tokens,
             cached_tokens=left.cached_tokens + right.cached_tokens,
             cost_cents=left.cost_cents + right.cost_cents,
             provider_request_ids=left.provider_request_ids + right.provider_request_ids,
+            provider_response_ids=left.provider_response_ids + right.provider_response_ids,
+            provider_invocations=left.provider_invocations + right.provider_invocations,
         )
 
     @staticmethod

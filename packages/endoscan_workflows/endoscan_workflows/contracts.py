@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SCHEMA_VERSION = "1.0.0"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{2,127}$")
@@ -27,6 +27,7 @@ class WorkflowState(str, Enum):
     DRAFT = "DRAFT"
     SPECIFYING_TARGET_DATASET = "SPECIFYING_TARGET_DATASET"
     AWAITING_DATASET_SPECIFICATION_APPROVAL = "AWAITING_DATASET_SPECIFICATION_APPROVAL"
+    AWAITING_DATASET_SPECIFICATION_REVISION = "AWAITING_DATASET_SPECIFICATION_REVISION"
     DERIVING_COMPONENT_REQUIREMENTS = "DERIVING_COMPONENT_REQUIREMENTS"
     DISCOVERING_ACTIVITY_EVIDENCE = "DISCOVERING_ACTIVITY_EVIDENCE"
     DISCOVERING_TRANSCRIPTOMIC_EVIDENCE = "DISCOVERING_TRANSCRIPTOMIC_EVIDENCE"
@@ -257,11 +258,76 @@ class AgentRunRequest(StrictContract):
 
 
 class UsageReport(StrictContract):
+    usage_status: Literal["usage_recorded", "usage_unavailable", "usage_partial"] = (
+        "usage_unavailable"
+    )
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     cached_tokens: int = Field(default=0, ge=0)
     cost_cents: float = Field(default=0.0, ge=0)
     provider_request_ids: list[str] = Field(default_factory=list)
+    provider_response_ids: list[str] = Field(default_factory=list)
+    provider_invocations: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def infer_legacy_recorded_usage(self) -> UsageReport:
+        evidence = bool(
+            self.input_tokens
+            or self.output_tokens
+            or self.cached_tokens
+            or self.cost_cents
+            or self.provider_request_ids
+            or self.provider_response_ids
+        )
+        if evidence and "usage_status" not in self.model_fields_set:
+            object.__setattr__(self, "usage_status", "usage_recorded")
+        if evidence and not self.provider_invocations:
+            object.__setattr__(
+                self,
+                "provider_invocations",
+                max(1, len(self.provider_request_ids), len(self.provider_response_ids)),
+            )
+        return self
+
+
+class StructuredOutputDiagnostic(StrictContract):
+    """Bounded, allowlisted SDK metadata; never raw prompts or model output."""
+
+    exception_class: str = Field(min_length=1, max_length=160)
+    developer_message: str = Field(min_length=1, max_length=800)
+    sdk_version: str = Field(min_length=1, max_length=80)
+    provider: str = Field(min_length=1, max_length=80)
+    configured_model: str = Field(min_length=1, max_length=160)
+    agent_role: str = Field(min_length=1, max_length=120)
+    last_agent_name: str | None = Field(default=None, max_length=120)
+    output_schema_name: str = Field(min_length=1, max_length=160)
+    output_schema_version: str = Field(min_length=1, max_length=40)
+    output_schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    adapter_operation: str = Field(min_length=1, max_length=120)
+    provider_request_ids: list[str] = Field(default_factory=list, max_length=20)
+    provider_response_ids: list[str] = Field(default_factory=list, max_length=20)
+    provider_parameter: str | None = Field(default=None, max_length=120)
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    response_status: str | None = Field(default=None, max_length=120)
+    incomplete_reason: str | None = Field(default=None, max_length=240)
+    refusal_present: bool = False
+    output_item_types: list[str] = Field(default_factory=list, max_length=40)
+    raw_response_count: int = Field(default=0, ge=0, le=100)
+    usage: UsageReport = Field(default_factory=UsageReport)
+    duration_ms: int = Field(default=0, ge=0)
+    retryable: bool = False
+    failure_classification: Literal[
+        "malformed_json",
+        "schema_validation_failed",
+        "missing_structured_output",
+        "response_incomplete",
+        "model_refusal",
+        "unexpected_tool_call",
+        "unknown_model_behavior",
+    ]
+    provider_response_received: bool = False
+    error_handler: Literal["invalid_final_output", "model_refusal", "none"] = "none"
+    handler_outcome: str | None = Field(default=None, max_length=120)
 
 
 class SourceToolDiagnostic(StrictContract):
@@ -421,3 +487,4 @@ class ProviderTurn(StrictContract):
     approval: ApprovalRequest | None = None
     usage: UsageReport = Field(default_factory=UsageReport)
     error: NormalizedAgentError | None = None
+    diagnostic: StructuredOutputDiagnostic | None = None
