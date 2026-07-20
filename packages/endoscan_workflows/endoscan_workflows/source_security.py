@@ -26,6 +26,7 @@ APPROVED_SOURCE_HOSTS = frozenset(
         "lincsproject.org",
         "pubchem.ncbi.nlm.nih.gov",
         "www.ncbi.nlm.nih.gov",
+        "www.epa.gov",
     }
 )
 OFFICIAL_GEO_HOST = "www.ncbi.nlm.nih.gov"

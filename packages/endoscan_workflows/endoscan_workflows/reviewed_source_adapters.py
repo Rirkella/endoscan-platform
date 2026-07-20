@@ -13,8 +13,9 @@ import re
 import time
 from collections.abc import Iterable
 from enum import StrEnum
+from html.parser import HTMLParser
 from typing import Any, Literal
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 from pydantic import Field, field_validator, model_validator
 
@@ -38,6 +39,63 @@ from .training_dataset import (
 )
 
 REVIEW_POLICY_VERSION = "reviewed-source-adapters-v1"
+EPA_TOXCAST_PUBLIC_RELEASE_PAGE = (
+    "https://www.epa.gov/comptox-tools/exploring-toxcast-data-downloadable-data"
+)
+EPA_PUBLIC_DISTRIBUTION_HOSTS = frozenset(
+    {
+        "api.figshare.com",
+        "clowder.edap-cluster.com",
+        "doi.org",
+        "epa.figshare.com",
+        "gaftp.epa.gov",
+        "ndownloader.figshare.com",
+        "www.epa.gov",
+    }
+)
+EPA_AUTHENTICATED_OPERATIONS = frozenset(
+    {
+        "search_epa_assays",
+        "inspect_epa_assay_metadata",
+        "inspect_epa_activity_availability",
+        "inspect_epa_compound_identifier_fields",
+        "inspect_epa_release_manifest",
+        "inspect_epa_related_assay_components",
+    }
+)
+
+
+class _BoundedManifestHTMLParser(HTMLParser):
+    """Collect bounded page text and links without executing or fetching embedded content."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.text_parts: list[str] = []
+        self.links: list[tuple[str, str]] = []
+        self._active_href: str | None = None
+        self._active_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.casefold() != "a" or len(self.links) >= 100:
+            return
+        href = next((value for name, value in attrs if name.casefold() == "href"), None)
+        if href:
+            self._active_href = href[:2_000]
+            self._active_text = []
+
+    def handle_data(self, data: str) -> None:
+        if sum(len(item) for item in self.text_parts) < 100_000:
+            self.text_parts.append(data[:10_000])
+        if self._active_href is not None and sum(len(item) for item in self._active_text) < 500:
+            self._active_text.append(data[:500])
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() != "a" or self._active_href is None:
+            return
+        label = " ".join(" ".join(self._active_text).split())[:500]
+        self.links.append((self._active_href, label))
+        self._active_href = None
+        self._active_text = []
 
 
 class AdapterReviewStatus(StrEnum):
@@ -173,6 +231,7 @@ def _definition(
     operations: list[str],
     domains: list[str],
     parser: str,
+    accepted_mime_types: list[str] | None = None,
 ) -> ReviewedSourceAdapterDefinition:
     return ReviewedSourceAdapterDefinition(
         adapter_id=adapter_id,
@@ -183,7 +242,7 @@ def _definition(
         allowlisted_domains=domains,
         request_builder=f"{adapter_id}.build_request.v1",
         typed_response_parser=parser,
-        accepted_mime_types=sorted(ALLOWED_CONTENT_TYPES),
+        accepted_mime_types=accepted_mime_types or sorted(ALLOWED_CONTENT_TYPES),
         maximum_response_bytes=500_000,
         request_timeout_seconds=15,
         maximum_redirects=2,
@@ -264,6 +323,28 @@ EPA_COMPTOX_TOXCAST_ADAPTER = _definition(
     parser="epa_comptox_toxcast_assay_json_v1",
 )
 
+EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER = _definition(
+    adapter_id="epa-toxcast-public-downloads",
+    system="EPA ToxCast public data releases",
+    roles=[
+        ComponentRole.ENDPOINT_ACTIVITY,
+        ComponentRole.ASSAY_METADATA,
+        ComponentRole.SOURCE_ID_MAPPING,
+        ComponentRole.PROVENANCE_LICENSE,
+    ],
+    operations=[
+        "inspect_epa_public_invitrodb_release",
+        "inspect_epa_public_database_package",
+        "inspect_epa_public_assay_annotations",
+        "inspect_epa_public_assay_target_mapping",
+        "inspect_epa_public_summary_files",
+        "inspect_epa_public_chemical_archive",
+    ],
+    domains=["www.epa.gov"],
+    parser="epa_toxcast_public_release_manifest_html_v1",
+    accepted_mime_types=["text/html"],
+)
+
 LINCS_L1000_ADAPTER = _definition(
     adapter_id="lincs-l1000",
     system="LINCS L1000",
@@ -328,6 +409,7 @@ NCBI_SUPPORTING_METADATA_ADAPTER = _definition(
 
 REVIEWED_ADAPTER_DEFINITIONS = (
     PUBCHEM_BIOASSAY_ADAPTER,
+    EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER,
     EPA_COMPTOX_TOXCAST_ADAPTER,
     NCBI_GEO_ADAPTER,
     LINCS_L1000_ADAPTER,
@@ -361,6 +443,19 @@ class ReviewedSourceAdapter:
         invocation: ToolInvocation,
     ) -> VerifiedSourceObservationBatch:
         return self.execute_with_telemetry(operation, request, invocation).batch
+
+    def operation_runtime_status(self, operation: str) -> Literal[
+        "ready", "authenticated_api_unavailable", "unapproved_operation"
+    ]:
+        if operation not in self.definition.approved_operations:
+            return "unapproved_operation"
+        if (
+            self.definition.adapter_id == "epa-comptox-toxcast"
+            and operation in EPA_AUTHENTICATED_OPERATIONS
+            and not self._epa_comptox_api_key
+        ):
+            return "authenticated_api_unavailable"
+        return "ready"
 
     def execute_with_telemetry(
         self,
@@ -623,6 +718,12 @@ class ReviewedSourceAdapter:
                 accepted_mime_types=["application/json"],
                 required_credential="epa_comptox_api_key",
             )
+        if self.definition.adapter_id == "epa-toxcast-public-downloads":
+            return SourceHttpRequest(
+                url=EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
+                params={},
+                accepted_mime_types=["text/html"],
+            )
         if self.definition.adapter_id == "lincs-l1000":
             if operation == "check_lincs_geo_distribution_health":
                 return SourceHttpRequest(
@@ -817,6 +918,115 @@ class ReviewedSourceAdapter:
             if not isinstance(payload.get("einforesult"), dict):
                 raise ValueError("LINCS GEO distribution health response is malformed")
             return []
+        if self.definition.adapter_id == "epa-toxcast-public-downloads":
+            if content_type != "text/html":
+                raise ValueError("EPA public release manifest must be official HTML")
+            parser = _BoundedManifestHTMLParser()
+            parser.feed(content.decode("utf-8", errors="replace"))
+            page_text = " ".join(" ".join(parser.text_parts).split())
+            if not re.search(r"\b(?:ToxCast|invitrodb)\b", page_text, flags=re.I):
+                raise ValueError("EPA public release page lacks a ToxCast or invitrodb marker")
+            release_match = re.search(
+                r"\binvitrodb(?:\s+database)?(?:\s+(?:release|version))?\s+v?([0-9]+(?:\.[0-9]+)+)",
+                page_text,
+                flags=re.I,
+            )
+            date_match = re.search(
+                r"\b(?:release(?:d|\s+date)?|updated)\s*(?:on|:)?\s*"
+                r"((?:19|20)[0-9]{2}-[01][0-9]-[0-3][0-9]|"
+                r"(?:January|February|March|April|May|June|July|August|September|October|"
+                r"November|December)\s+[0-3]?[0-9],?\s+(?:19|20)[0-9]{2})",
+                page_text,
+                flags=re.I,
+            )
+            official_links: list[tuple[str, str]] = []
+            for href, label in parser.links:
+                resolved = urljoin(EPA_TOXCAST_PUBLIC_RELEASE_PAGE, href)
+                parsed = urlparse(resolved)
+                host = (parsed.hostname or "").casefold().rstrip(".")
+                if (
+                    parsed.scheme == "https"
+                    and parsed.username is None
+                    and parsed.password is None
+                    and host in EPA_PUBLIC_DISTRIBUTION_HOSTS
+                ):
+                    combined = f"{label} {parsed.path}".casefold()
+                    if any(
+                        marker in combined
+                        for marker in (
+                            "assay",
+                            "chemical",
+                            "database",
+                            "download",
+                            "figshare",
+                            "invitrodb",
+                            "summary",
+                            "toxcast",
+                        )
+                    ):
+                        official_links.append(
+                            (resolved[:2_000], label or parsed.path.rsplit("/", 1)[-1])
+                        )
+            deduplicated_links = list(dict.fromkeys(url for url, _label in official_links))[:25]
+            artifact_labels = list(
+                dict.fromkeys(label for _url, label in official_links if label)
+            )[:25]
+            release_version = release_match.group(1) if release_match else None
+            release_date = date_match.group(1) if date_match else None
+            return [
+                {
+                    "stable_identifier": (
+                        f"invitrodb-v{release_version}"
+                        if release_version
+                        else "invitrodb-public-release"
+                    ),
+                    "source_release_version": release_version,
+                    "source_release_date": release_date,
+                    "manifest_verification_status": "public_manifest_verified",
+                    "measurement_fields": [
+                        "activity-call availability",
+                        "continuous-measurement availability",
+                    ],
+                    "identifier_fields": ["official chemical identity/archive metadata"],
+                    "downloadable_artifacts": artifact_labels
+                    or [
+                        "database package",
+                        "assay annotations",
+                        "assay target mapping",
+                        "summary files",
+                        "chemical identity archive",
+                    ],
+                    "official_evidence_references": [
+                        EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
+                        *deduplicated_links,
+                    ],
+                    "access_status": "requires_download",
+                    "count_status": "not_computed",
+                    "licence_access_status": "metadata_only",
+                    "strengths": [
+                        "Official EPA public release page was parsed as a bounded manifest."
+                    ],
+                    "limitations": [
+                        "The full invitrodb database and activity tables were not downloaded.",
+                        (
+                            "Exact assay and compound counts were not computed from the "
+                            "bounded manifest."
+                        ),
+                    ],
+                    "unresolved_fields": [
+                        field
+                        for field, value in (
+                            ("release version", release_version),
+                            ("release date", release_date),
+                            ("official downloadable artifact links", deduplicated_links),
+                        )
+                        if not value
+                    ],
+                    "next_required_ingestion_action": (
+                        "Human review must authorize any separately bounded download and ingestion."
+                    ),
+                }
+            ]
         if content_type in {"text/plain", "geo/text"} and self.definition.adapter_id in {
             "ncbi-geo-series",
             "lincs-l1000",
@@ -1086,7 +1296,19 @@ class ReviewedSourceAdapter:
         raw_counts = record.get("exact_counts", {})
         if not isinstance(raw_counts, dict):
             raw_counts = {}
-        reference = source_url
+        references = [source_url]
+        if self.definition.adapter_id == "epa-toxcast-public-downloads":
+            for value in record.get("official_evidence_references", []):
+                parsed = urlparse(str(value))
+                host = (parsed.hostname or "").casefold().rstrip(".")
+                if (
+                    parsed.scheme == "https"
+                    and parsed.username is None
+                    and parsed.password is None
+                    and host in EPA_PUBLIC_DISTRIBUTION_HOSTS
+                ):
+                    references.append(str(value)[:2_000])
+        references = list(dict.fromkeys(references))[:100]
         return VerifiedSourceObservation(
             observation_id=deterministic_id("obs", self.definition.adapter_id, digest),
             adapter_id=self.definition.adapter_id,
@@ -1118,10 +1340,15 @@ class ReviewedSourceAdapter:
                 and value >= 0
             },
             count_status=ObservationCountStatus(record.get("count_status", "not_computed")),
+            source_release_version=safe_text(
+                record.get("source_release_version"), "source_release_version"
+            ),
+            source_release_date=safe_text(record.get("source_release_date"), "source_release_date"),
+            manifest_verification_status=record.get("manifest_verification_status"),
             licence_access_status=CapabilityStatus(
                 record.get("licence_access_status", "metadata_only")
             ),
-            official_evidence_references=[reference],
+            official_evidence_references=references,
             retrieved_at=utc_text(),
             response_artifact_hash=artifact_hash,
             response_artifact_id=artifact_id,
@@ -1165,6 +1392,16 @@ class ReviewedSourceAdapterRegistry:
             ComponentRole.PROVENANCE_LICENSE,
         }
     )
+    MANDATORY_ADAPTER_IDS = frozenset(
+        {
+            "pubchem-bioassay",
+            "epa-toxcast-public-downloads",
+            "ncbi-geo-series",
+            "lincs-l1000",
+            "pubchem-compound",
+            "ncbi-supporting-metadata",
+        }
+    )
 
     def __init__(self, adapters: Iterable[ReviewedSourceAdapter] = ()) -> None:
         self._adapters: dict[str, ReviewedSourceAdapter] = {}
@@ -1193,9 +1430,16 @@ class ReviewedSourceAdapterRegistry:
         }
         missing = sorted(self.MANDATORY_ROLES - covered, key=lambda item: item.value)
         approved = self.approved()
+        approved_by_id = {item.definition.adapter_id: item for item in approved}
+        missing_adapters = sorted(self.MANDATORY_ADAPTER_IDS - approved_by_id.keys())
+        authenticated_epa = approved_by_id.get("epa-comptox-toxcast")
+        authenticated_epa_available = bool(
+            authenticated_epa and authenticated_epa._epa_comptox_api_key
+        )
+        public_epa_ready = "epa-toxcast-public-downloads" in approved_by_id
         return {
-            "schema_version": "1.0.0",
-            "ready": not missing,
+            "schema_version": "1.1.0",
+            "ready": not missing and not missing_adapters,
             "review_policy_version": REVIEW_POLICY_VERSION,
             "approved_adapter_count": len(approved),
             "approved_adapter_ids": sorted(item.definition.adapter_id for item in approved),
@@ -1207,11 +1451,56 @@ class ReviewedSourceAdapterRegistry:
             ).hexdigest(),
             "covered_roles": sorted(item.value for item in covered),
             "missing_roles": [item.value for item in missing],
+            "missing_required_adapter_ids": missing_adapters,
+            "epa_authenticated_api": {
+                "adapter_id": "epa-comptox-toxcast",
+                "status": (
+                    "available" if authenticated_epa_available else "authenticated_api_unavailable"
+                ),
+                "required_for_discovery": False,
+            },
+            "epa_public_data_releases": {
+                "adapter_id": "epa-toxcast-public-downloads",
+                "status": "ready" if public_epa_ready else "not_ready",
+                "sufficient_for_first_controlled_discovery": public_epa_ready,
+            },
+            "lincs_public_releases": {
+                "adapter_id": "lincs-l1000",
+                "status": "ready" if "lincs-l1000" in approved_by_id else "not_ready",
+                "requires_api_key": False,
+            },
             "source_retries": 0,
         }
 
     def public_inventory(self) -> list[dict[str, Any]]:
-        return [item.definition.model_dump(mode="json") for item in self.approved()]
+        return [
+            {
+                **item.definition.model_dump(mode="json"),
+                "operation_runtime_status": {
+                    operation: item.operation_runtime_status(operation)
+                    for operation in item.definition.approved_operations
+                },
+            }
+            for item in self.approved()
+        ]
+
+    def operation_is_available(self, operation: str) -> bool:
+        candidates = [
+            item for item in self.approved() if operation in item.definition.approved_operations
+        ]
+        return len(candidates) == 1 and candidates[0].operation_runtime_status(operation) == "ready"
+
+    def filter_available_operations(self, operations: Iterable[str]) -> list[str]:
+        reviewed_operations = {
+            operation
+            for adapter in self.approved()
+            for operation in adapter.definition.approved_operations
+        }
+        return [
+            operation
+            for operation in operations
+            if operation not in reviewed_operations or self.operation_is_available(operation)
+        ]
 
     def execute(
         self,

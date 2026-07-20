@@ -465,6 +465,20 @@ def test_reviewed_source_authorization_is_explicit_optimistic_and_idempotent(
     assert readiness["ready"] is True
     assert readiness["provider_retries"] == 0
     assert readiness["reviewed_adapters"]["ready"] is True
+    assert readiness["reviewed_adapters"]["epa_authenticated_api"]["status"] == (
+        "authenticated_api_unavailable"
+    )
+    assert readiness["reviewed_adapters"]["epa_public_data_releases"]["status"] == "ready"
+    assert readiness["epa_authenticated_api"]["status"] == "authenticated_api_unavailable"
+    assert readiness["epa_public_data_releases"]["status"] == "ready"
+    assert readiness["lincs_public_releases"]["status"] == "ready"
+    activity_agent = next(
+        item
+        for item in service.training_dataset_workflow(build.id)["planned_discovery_agents"]
+        if item["agent_name"] == "Activity Evidence Discovery Agent"
+    )
+    assert "inspect_epa_public_invitrodb_release" in activity_agent["allowed_tools"]
+    assert "search_epa_assays" not in activity_agent["allowed_tools"]
 
     with pytest.raises(StaleWorkflowVersion):
         service.authorize_source_discovery(

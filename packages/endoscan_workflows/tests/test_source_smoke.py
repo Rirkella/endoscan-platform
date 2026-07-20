@@ -75,7 +75,7 @@ def test_first_call_writes_artifact_then_cache_and_second_call_is_offline(caplog
     with isolated_reviewed_source_smoke_runtime(repo_root=REPO_ROOT, client=client) as runtime:
         assert runtime.database.capability()["foreign_keys"] is True
         assert runtime.artifacts.database is runtime.cache.database is runtime.database
-        assert runtime.registry.readiness()["approved_adapter_count"] == 6
+        assert runtime.registry.readiness()["approved_adapter_count"] == 7
         assert all(
             adapter.artifacts.database is adapter.cache.database is runtime.database
             for adapter in runtime.registry.approved()

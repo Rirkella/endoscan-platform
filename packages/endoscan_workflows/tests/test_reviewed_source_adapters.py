@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from endoscan_workflows.contracts import EndpointBuildCreate, ToolInvocation, WorkflowState
 from endoscan_workflows.reviewed_source_adapters import (
     EPA_COMPTOX_TOXCAST_ADAPTER,
+    EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER,
+    EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
     LINCS_L1000_ADAPTER,
     NCBI_GEO_ADAPTER,
     NCBI_SUPPORTING_METADATA_ADAPTER,
@@ -95,19 +97,40 @@ def test_registry_exposes_only_reviewed_adapters_and_covers_mandatory_roles() ->
     readiness = registry.readiness()
     assert readiness["ready"] is True
     assert readiness["source_retries"] == 0
-    assert readiness["approved_adapter_count"] == 6
+    assert readiness["approved_adapter_count"] == 7
     assert all(
         item.allows_bulk_downloads_during_discovery is False
         for item in REVIEWED_ADAPTER_DEFINITIONS
     )
     assert set(readiness["approved_adapter_ids"]) == {
         "pubchem-bioassay",
+        "epa-toxcast-public-downloads",
         "epa-comptox-toxcast",
         "ncbi-geo-series",
         "lincs-l1000",
         "pubchem-compound",
         "ncbi-supporting-metadata",
     }
+    assert readiness["epa_authenticated_api"] == {
+        "adapter_id": "epa-comptox-toxcast",
+        "status": "authenticated_api_unavailable",
+        "required_for_discovery": False,
+    }
+    assert readiness["epa_public_data_releases"] == {
+        "adapter_id": "epa-toxcast-public-downloads",
+        "status": "ready",
+        "sufficient_for_first_controlled_discovery": True,
+    }
+    assert readiness["lincs_public_releases"]["status"] == "ready"
+    assert registry.operation_is_available("search_epa_assays") is False
+    assert registry.operation_is_available("inspect_epa_public_invitrodb_release") is True
+    assert registry.filter_available_operations(
+        [
+            "search_epa_assays",
+            "inspect_epa_public_invitrodb_release",
+            "non_source_local_tool",
+        ]
+    ) == ["inspect_epa_public_invitrodb_release", "non_source_local_tool"]
     assert adapter_registry_fingerprint(registry) == adapter_registry_fingerprint(registry)
 
     pending = PUBCHEM_COMPOUND_ADAPTER.model_copy(
@@ -123,7 +146,36 @@ def test_registry_exposes_only_reviewed_adapters_and_covers_mandatory_roles() ->
     )
     assert without_identity.readiness()["ready"] is False
     assert ComponentRole.CHEMICAL_STRUCTURE.value in without_identity.readiness()["missing_roles"]
+    assert "epa-toxcast-public-downloads" in without_identity.readiness()[
+        "missing_required_adapter_ids"
+    ]
     assert "pending-compound" not in without_identity.readiness()["approved_adapter_ids"]
+
+
+def test_authenticated_epa_path_becomes_available_without_changing_public_fallback() -> None:
+    adapters = [
+        (
+            ReviewedSourceAdapter(
+                definition,
+                object(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+                epa_comptox_api_key="offline-test-credential",
+            )
+            if definition.adapter_id == "epa-comptox-toxcast"
+            else _adapter(definition)
+        )
+        for definition in REVIEWED_ADAPTER_DEFINITIONS
+    ]
+    registry = ReviewedSourceAdapterRegistry(adapters)
+
+    readiness = registry.readiness()
+    assert readiness["ready"] is True
+    assert readiness["epa_authenticated_api"]["status"] == "available"
+    assert readiness["epa_authenticated_api"]["required_for_discovery"] is False
+    assert readiness["epa_public_data_releases"]["status"] == "ready"
+    assert registry.operation_is_available("search_epa_assays") is True
+    assert registry.operation_is_available("inspect_epa_public_invitrodb_release") is True
 
 
 def test_model_cannot_supply_urls_or_unapproved_operations() -> None:
@@ -356,6 +408,17 @@ def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None
     assert EPA_COMPTOX_TOXCAST_ADAPTER.source_retry_count == 0
     assert EPA_COMPTOX_TOXCAST_ADAPTER.maximum_response_bytes == 500_000
 
+    public_release = _adapter(EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER)._build_request(
+        "inspect_epa_public_invitrodb_release",
+        ReviewedSourceOperationInput(),
+    )
+    assert public_release.url == EPA_TOXCAST_PUBLIC_RELEASE_PAGE
+    assert public_release.params == {}
+    assert public_release.accepted_mime_types == ["text/html"]
+    assert public_release.required_credential is None
+    assert EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER.source_retry_count == 0
+    assert EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER.maximum_response_bytes == 500_000
+
     lincs_search = _adapter(LINCS_L1000_ADAPTER)._build_request(
         "search_lincs_resources",
         ReviewedSourceOperationInput(query="chemical perturbation", maximum_results=5),
@@ -553,6 +616,107 @@ def test_epa_scientific_operation_without_key_fails_before_transport(workflow_ru
             ),
         )
     assert source_calls == 0
+    client.close()
+
+
+def test_epa_public_release_manifest_is_bounded_official_and_cacheable(workflow_runtime) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    source_calls = 0
+    manifest = b"""
+    <html><body>
+      <h1>ToxCast data downloadable data</h1>
+      <p>invitrodb release v4.2, released on July 1, 2026.</p>
+      <a href="https://epa.figshare.com/articles/dataset/invitrodb_v4_2/12345">
+        invitrodb v4.2 database package
+      </a>
+      <a href="https://clowder.edap-cluster.com/files/assay_annotations.csv">
+        Assay annotations and target mapping
+      </a>
+      <a href="https://attacker.invalid/full-database.zip">unreviewed download</a>
+    </body></html>
+    """
+
+    def official_epa_page(request: httpx.Request) -> httpx.Response:
+        nonlocal source_calls
+        source_calls += 1
+        assert request.method == "GET"
+        assert str(request.url) == EPA_TOXCAST_PUBLIC_RELEASE_PAGE
+        assert "x-api-key" not in request.headers
+        return httpx.Response(
+            200,
+            content=manifest,
+            headers={"content-type": "text/html; charset=utf-8"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(official_epa_page),
+        maximum_attempts=1,
+        maximum_bytes=500_000,
+        sleep=lambda _seconds: None,
+    )
+    adapter = ReviewedSourceAdapter(
+        EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER,
+        client,
+        SourceResponseCache(database),
+        store,
+    )
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Public EPA manifest",
+            endpoint_slug="public-epa-manifest",
+            biological_goal="Verify bounded public release metadata without a database download.",
+            created_by="test-admin",
+            idempotency_key="public-epa-manifest-build",
+        )
+    )
+    step = service.create_step(
+        build.id,
+        WorkflowState.DRAFT,
+        idempotency_key="public-epa-manifest-step",
+        input_payload={"fixture": True},
+    )
+    request = ReviewedSourceOperationInput()
+    invocation = ToolInvocation(
+        tool_name="inspect_epa_public_invitrodb_release",
+        arguments={},
+        workflow_id=build.id,
+        step_id=step.id,
+        workflow_stage=WorkflowState.DRAFT,
+        idempotency_key="public-epa-manifest-call",
+    )
+
+    result = adapter.execute_with_telemetry(
+        "inspect_epa_public_invitrodb_release", request, invocation
+    )
+    observation = result.batch.observations[0]
+    assert source_calls == 1
+    assert result.telemetry.http_status == 200
+    assert result.telemetry.response_bytes == len(manifest)
+    assert result.telemetry.retry_count == 0
+    assert observation.source_release_version == "4.2"
+    assert observation.source_release_date == "July 1, 2026"
+    assert observation.manifest_verification_status == "public_manifest_verified"
+    assert observation.data_access_status is CapabilityStatus.REQUIRES_DOWNLOAD
+    assert observation.count_status is ObservationCountStatus.NOT_COMPUTED
+    assert observation.exact_counts == {}
+    assert EPA_TOXCAST_PUBLIC_RELEASE_PAGE in observation.official_evidence_references
+    assert any("epa.figshare.com" in item for item in observation.official_evidence_references)
+    assert any(
+        "clowder.edap-cluster.com" in item
+        for item in observation.official_evidence_references
+    )
+    assert all("attacker.invalid" not in item for item in observation.official_evidence_references)
+    assert any("not downloaded" in item for item in observation.limitations)
+
+    cached = adapter.execute_with_telemetry(
+        "inspect_epa_public_invitrodb_release",
+        request,
+        invocation.model_copy(update={"idempotency_key": "public-epa-manifest-cache-call"}),
+    )
+    assert source_calls == 1
+    assert cached.batch.cache_status == "cached"
+    assert cached.batch.source_request_count == 0
     client.close()
 
 

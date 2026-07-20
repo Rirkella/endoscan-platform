@@ -94,28 +94,38 @@ and identifier types, never endpoint-specific answers. Arbitrary URLs and paths 
 production adapter must be explicitly injected and match the reviewed host definition; an
 unconfigured adapter fails closed as `unresolved`.
 
-The production registry has six universal reviewed source families: PubChem BioAssay; EPA CompTox
-/ ToxCast; general NCBI GEO studies; dedicated LINCS L1000 metadata and release manifests; PubChem
-Compound; and NCBI supporting metadata. Activity discovery can inspect PubChem/Tox21-accessible and
-EPA CompTox/ToxCast records without assuming they are identical. Transcriptomic discovery can
-inspect both general GEO chemical-perturbation studies and dedicated LINCS L1000 resources without
-assuming LINCS is the selected source. Stable identifiers, release provenance and possible
-duplicates remain source-bound until deterministic comparison. Discovery performs bounded metadata
-GETs only; it does not download bulk activity tables or expression matrices.
+The production registry has six mandatory universal source families and seven reviewed adapters:
+PubChem BioAssay; public EPA ToxCast/invitrodb releases; the optional authenticated EPA CompTox CTX
+API; general NCBI GEO studies; dedicated public LINCS L1000 metadata and release manifests; PubChem
+Compound; and NCBI supporting metadata. Activity discovery uses PubChem/Tox21-accessible records,
+then public EPA manifests and annotations, and may additionally use the authenticated EPA API when
+its deployment credential is present. It does not assume those sources contain identical records.
+Transcriptomic discovery can inspect both general GEO chemical-perturbation studies and dedicated
+LINCS L1000 resources without assuming LINCS is selected. Stable identifiers, release provenance
+and possible duplicates remain source-bound until deterministic comparison. Discovery performs
+bounded metadata GETs only; it does not download bulk activity tables or expression matrices.
 
-EPA discovery uses the official CTX Bioactivity API under `/ctx-api/bioactivity`. Scientific assay
-search and metadata operations require the deployment-injected `EPA_COMPTOX_API_KEY`, which is sent
-only as the official `x-api-key` header and is excluded from URLs, cache keys, artifacts, and safe
-diagnostics. The reviewed unauthenticated `/bioactivity/health` operation is technical-only and
-produces no scientific source observation. Its documented deployment currently returns an empty
-`200` without a MIME header; that status-only response is accepted solely for the exact health URL,
-stored as an immutable empty technical artifact, and never relaxes normal scientific-source MIME
-validation.
+The `epa-toxcast-public-downloads@1.0.0` adapter reads only the fixed official EPA downloadable-data
+page and validates bounded manifest links against reviewed EPA, EPA Figshare, EPA-linked Clowder,
+and DOI hosts. It records the originating page, official artifact locations, release metadata,
+retrieval time, immutable response hash and `requires_download` state. It never downloads the full
+invitrodb database, assay tables or chemical archive during discovery, and it reports exact counts
+as not computed unless the bounded official metadata provides them deterministically.
+
+The separate authenticated adapter uses the official CTX Bioactivity API under
+`/ctx-api/bioactivity`. Its scientific assay operations require the optional deployment-injected
+`EPA_COMPTOX_API_KEY`, sent only as `x-api-key` and excluded from URLs, cache keys, artifacts, and
+safe diagnostics. When absent, readiness reports `authenticated_api_unavailable`, removes those
+operations from the agent's permitted tool set, and continues through the public release adapter;
+discovery is not blocked. The unauthenticated `/bioactivity/health` operation remains
+technical-only. Its empty `200` status-only response is accepted solely for that exact URL and never
+relaxes normal scientific-source MIME validation.
 
 LINCS technical readiness uses the official NCBI EInfo operation for the GEO DataSets (`gds`)
 distribution channel. It supplies no search term, accession, endpoint hint, or source candidate and
 produces no scientific source observation; normal LINCS discovery remains a separate reviewed
-operation.
+operation. LINCS discovery requires no API key and inspects only bounded public metadata and file
+manifests; multi-gigabyte matrices remain a later explicitly authorized ingestion concern.
 
 Initial discovery inspects bounded metadata and availability. Large result tables and expression
 matrices are not downloaded. Literature may clarify terms or locate a primary identifier, but it

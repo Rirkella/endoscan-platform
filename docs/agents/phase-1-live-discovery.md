@@ -37,6 +37,7 @@ Console therefore report agent runs, model turns, provider retries, and tool cal
 The complete placeholder set is in `.env.example`. Core settings are:
 
 - `OPENAI_API_KEY`
+- optional `EPA_COMPTOX_API_KEY` for authenticated CTX API operations only
 - `ENDOSCAN_AGENT_PROVIDER=fake|openai`
 - `ENDOSCAN_AGENT_MODEL`
 - `ENDOSCAN_AGENT_MODE=live|cached|replay`
@@ -47,6 +48,13 @@ Startup never requires an API key. A requested live configuration without a key 
 replay, reports that live mode is unavailable, and never displays the secret. The Admin Console's
 configuration panel reports provider, model, key presence, source-tool availability, tracing, and
 configured budgets.
+
+Live source-discovery readiness does not require an EPA credential. Without one, the Admin Console
+reports the authenticated EPA adapter as `authenticated_api_unavailable`, keeps its operations out
+of the bounded agent tool set, and requires the reviewed `epa-toxcast-public-downloads@1.0.0`
+manifest path instead. Public EPA releases and public LINCS/GEO metadata remain available without
+authentication; the public adapters never download full invitrodb packages or expression matrices
+during discovery.
 
 ## Run modes
 
@@ -200,6 +208,7 @@ Use a monitored development environment, never a shared production deployment:
    `ENDOSCAN_AGENT_MODE=live`, `OPENAI_API_KEY`, and the controlled acceptance limits: six model
    turns, eight tool calls, 20,000 cumulative input tokens, 2,500 cumulative output tokens, `$0.20`,
    zero provider retries, and 120 seconds.
+   `EPA_COMPTOX_API_KEY` is optional; a missing key must leave public EPA discovery ready.
 2. Start the normal API and web development services.
 3. Create one **Oxidative stress** endpoint build and start it once.
 4. Confirm every tool call is in the inventory, every GSE accession resolves at official GEO, source

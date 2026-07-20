@@ -1349,6 +1349,11 @@ class VerifiedSourceObservation(StrictContract):
     downloadable_artifact_types: list[str] = Field(default_factory=list, max_length=100)
     exact_counts: dict[str, int] = Field(default_factory=dict, max_length=50)
     count_status: ObservationCountStatus = ObservationCountStatus.NOT_COMPUTED
+    source_release_version: str | None = Field(default=None, max_length=160)
+    source_release_date: str | None = Field(default=None, max_length=160)
+    manifest_verification_status: (
+        Literal["public_manifest_verified", "artifact_available", "requires_download"] | None
+    ) = None
     licence_access_status: CapabilityStatus = CapabilityStatus.UNRESOLVED
     official_evidence_references: list[str] = Field(min_length=1, max_length=100)
     retrieved_at: str = Field(min_length=10, max_length=80)
@@ -2319,6 +2324,12 @@ SPECIALIZED_AGENT_SEQUENCE = [
             "inspect_activity_identifier_fields",
             "summarize_activity_outcomes",
             "inspect_counter_screen_relationships",
+            "inspect_epa_public_invitrodb_release",
+            "inspect_epa_public_database_package",
+            "inspect_epa_public_assay_annotations",
+            "inspect_epa_public_assay_target_mapping",
+            "inspect_epa_public_summary_files",
+            "inspect_epa_public_chemical_archive",
             "search_epa_assays",
             "inspect_epa_assay_metadata",
             "inspect_epa_activity_availability",

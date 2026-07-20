@@ -56,7 +56,7 @@ def test_production_reviewed_source_persistence_uses_one_database(
             adapter.artifacts.database is adapter.cache.database is database
             for adapter in client.app.state.reviewed_source_adapters.approved()
         )
-        assert client.app.state.reviewed_source_adapters.readiness()["approved_adapter_count"] == 6
+        assert client.app.state.reviewed_source_adapters.readiness()["approved_adapter_count"] == 7
 
 
 def test_training_dataset_draft_api_is_hint_free_and_strategy_locked(

@@ -574,7 +574,9 @@ class WorkflowService:
                 "agent_name": item.agent_name,
                 "provider": configuration.worker_provider,
                 "model": configuration.worker_model,
-                "allowed_tools": item.allowed_tools,
+                "allowed_tools": self.reviewed_source_adapters.filter_available_operations(
+                    item.allowed_tools
+                ),
                 "allowed_official_source_adapters": adapter_labels[item.agent_name],
                 "maximum_turns": configuration.maximum_turns,
                 "maximum_tool_calls": configuration.maximum_tool_calls,
@@ -1025,6 +1027,9 @@ class WorkflowService:
             "provider_retries": configuration.retry_count,
             "reviewed_adapters": adapter_readiness,
             "reviewed_adapter_inventory": self.reviewed_source_adapters.public_inventory(),
+            "epa_authenticated_api": adapter_readiness["epa_authenticated_api"],
+            "epa_public_data_releases": adapter_readiness["epa_public_data_releases"],
+            "lincs_public_releases": adapter_readiness["lincs_public_releases"],
             "specification_approved": specification_ready,
             "component_requirements_present": requirements_ready,
             "stage_ready": stage_ready,
@@ -1450,6 +1455,13 @@ class WorkflowService:
                 "reviewed_adapter_capabilities": self.reviewed_source_adapters.public_inventory(),
             }
         step_key = f"source-discovery:{stage.value}:step"
+        available_definition = definition.model_copy(
+            update={
+                "allowed_tools": self.reviewed_source_adapters.filter_available_operations(
+                    definition.allowed_tools
+                )
+            }
+        )
         step = self.create_step(
             workflow_id,
             stage,
@@ -1463,7 +1475,7 @@ class WorkflowService:
         )
         configuration = self.agent_configuration.controlled_source_discovery()
         request = specialized_agent_request(
-            definition=definition,
+            definition=available_definition,
             workflow_id=workflow_id,
             step_id=step.id,
             workflow_stage=stage,
