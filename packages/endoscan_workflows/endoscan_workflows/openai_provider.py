@@ -218,6 +218,7 @@ class OpenAIAgentProvider:
             "api_surface": "responses",
             "configured_model": request.model.model_identifier,
             "tool_count": len(request.available_tools),
+            "tool_names": sorted(request.available_tools),
             "tool_choice_mode": "auto" if request.available_tools else "none",
             "model_settings": settings,
         }
@@ -235,6 +236,11 @@ class OpenAIAgentProvider:
                 else AgentOutputSchema(expected_output_type)
             )
             expected_schema = canonical_json(expected_output_schema.json_schema()).encode()
+            expected_tool_names = expected_contract.get(
+                "tool_names", configuration["tool_names"]
+            )
+            if not isinstance(expected_tool_names, list):
+                expected_tool_names = configuration["tool_names"]
             boundary_configuration = {
                 **configuration,
                 "agent_name": expected_contract.get("agent_name"),
@@ -243,6 +249,7 @@ class OpenAIAgentProvider:
                 "api_surface": expected_contract.get("api_surface"),
                 "configured_model": expected_contract.get("configured_model"),
                 "tool_count": expected_contract.get("tool_count"),
+                "tool_names": sorted(str(name) for name in expected_tool_names),
                 "tool_choice_mode": expected_contract.get("tool_choice_mode"),
             }
         boundary_hash = hashlib.sha256(canonical_json(boundary_configuration).encode()).hexdigest()

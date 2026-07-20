@@ -168,14 +168,12 @@ class AgentHarness:
             turn_request = request.model_copy(
                 update={
                     "available_tools": exposed_tools,
-                    "context": {
-                        **request.context,
-                        "discovery_substage": discovery_substage,
-                        "tools_exposed": exposed_tools,
-                        "tool_budget_remaining": max(
-                            0, request.budget.maximum_tool_calls - tool_calls
-                        ),
-                    },
+                    "context": self._stage_scoped_turn_context(
+                        request,
+                        discovery_substage=discovery_substage,
+                        exposed_tools=exposed_tools,
+                        tool_calls=tool_calls,
+                    ),
                 }
             )
             context_components = self._context_component_estimates(provider, turn_request, history)
@@ -1035,6 +1033,35 @@ class AgentHarness:
                 to_state=build.current_stage,
             )
         return call_id
+
+    @staticmethod
+    def _stage_scoped_turn_context(
+        request: AgentRunRequest,
+        *,
+        discovery_substage: str,
+        exposed_tools: list[str],
+        tool_calls: int,
+    ) -> dict:
+        """Bind the provider boundary proof to the deterministic per-stage tool scope."""
+
+        context = {
+            **request.context,
+            "discovery_substage": discovery_substage,
+            "tools_exposed": exposed_tools,
+            "tool_budget_remaining": max(0, request.budget.maximum_tool_calls - tool_calls),
+        }
+        stage_tool_sets = request.context.get("stage_tool_sets")
+        expected_contract = request.context.get("structured_output_boundary_contract")
+        if isinstance(stage_tool_sets, dict) and stage_tool_sets and isinstance(
+            expected_contract, dict
+        ):
+            context["structured_output_boundary_contract"] = {
+                **expected_contract,
+                "tool_count": len(exposed_tools),
+                "tool_names": sorted(exposed_tools),
+                "tool_choice_mode": "auto" if exposed_tools else "none",
+            }
+        return context
 
     @staticmethod
     def _discovery_turn_policy(

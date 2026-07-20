@@ -201,6 +201,36 @@ def test_discovery_substage_exposes_only_the_next_valid_tool() -> None:
         "search_planning",
         ["search_geo_series"],
     )
+    expected_contract = {
+        "agent_name": request.agent_name,
+        "output_schema_name": request.output_schema_name,
+        "api_surface": "responses",
+        "configured_model": request.model.model_identifier,
+        "tool_count": len(request.available_tools),
+        "tool_names": sorted(request.available_tools),
+        "tool_choice_mode": "auto",
+    }
+    request = request.model_copy(
+        update={
+            "context": {
+                **request.context,
+                "structured_output_boundary_contract": expected_contract,
+            }
+        }
+    )
+    scoped_context = AgentHarness._stage_scoped_turn_context(
+        request,
+        discovery_substage="search_planning",
+        exposed_tools=["search_geo_series"],
+        tool_calls=0,
+    )
+    assert scoped_context["structured_output_boundary_contract"] == {
+        **expected_contract,
+        "tool_count": 1,
+        "tool_names": ["search_geo_series"],
+        "tool_choice_mode": "auto",
+    }
+    assert request.context["structured_output_boundary_contract"] == expected_contract
     histories = [
         {
             "tool_name": "search_geo_series",

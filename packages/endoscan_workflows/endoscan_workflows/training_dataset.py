@@ -3112,6 +3112,7 @@ def specialized_agent_request(
                 "api_surface": "responses",
                 "configured_model": model,
                 "tool_count": len(definition.allowed_tools),
+                "tool_names": sorted(definition.allowed_tools),
                 "tool_choice_mode": "auto" if definition.allowed_tools else "none",
             },
         },

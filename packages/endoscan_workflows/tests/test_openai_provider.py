@@ -21,6 +21,7 @@ from pydantic import SecretStr
 
 from endoscan_workflows.config import AgentConfiguration, AgentRunMode
 from endoscan_workflows.contracts import AgentBudget, AgentRunRequest, ModelConfiguration
+from endoscan_workflows.harness import AgentHarness
 from endoscan_workflows.openai_provider import TOOL_ENVELOPE, OpenAIAgentProvider, sdk_output_schema
 from endoscan_workflows.providers import ProviderFailure, ProviderTimeout
 from endoscan_workflows.tools import phase0_tool_registry
@@ -448,6 +449,7 @@ def test_structured_output_request_fingerprint_records_safe_runtime_contract() -
         "api_surface": "responses",
         "configured_model": base.model.model_identifier,
         "tool_count": len(base.available_tools),
+        "tool_names": sorted(base.available_tools),
         "tool_choice_mode": "auto",
     }
     fingerprint = item.structured_output_fingerprint(
@@ -468,6 +470,87 @@ def test_structured_output_request_fingerprint_records_safe_runtime_contract() -
     assert "raw_response" not in persisted
 
 
+def test_structured_output_fingerprint_detects_wrong_tool_with_same_count() -> None:
+    item = provider(lambda *_args, **_kwargs: result(valid_output()))
+    base = request()
+    expected = {
+        "agent_name": base.agent_name,
+        "output_schema_name": base.output_schema_name,
+        "api_surface": "responses",
+        "configured_model": base.model.model_identifier,
+        "tool_count": len(base.available_tools),
+        "tool_names": ["different_allowlisted_tool"],
+        "tool_choice_mode": "auto",
+    }
+    fingerprint = item.structured_output_fingerprint(
+        base.model_copy(
+            update={"context": {**base.context, "structured_output_boundary_contract": expected}}
+        )
+    )
+    assert fingerprint.boundary_runtime_contracts_match is False
+    assert fingerprint.runtime_configuration_hash != fingerprint.boundary_probe_configuration_hash
+
+
+@pytest.mark.parametrize(
+    ("substage", "exposed_tools", "tool_choice_mode"),
+    [
+        ("candidate_search", ["search_activity_sources", "inspect_activity_source"], "auto"),
+        ("final_output", [], "none"),
+    ],
+)
+def test_stage_scoped_boundary_fingerprint_matches_exact_exposed_tools(
+    substage: str, exposed_tools: list[str], tool_choice_mode: str
+) -> None:
+    item = provider(lambda *_args, **_kwargs: result(valid_output()))
+    base = request().model_copy(
+        update={
+            "available_tools": [
+                "search_activity_sources",
+                "inspect_activity_source",
+                "validate_activity_source",
+            ],
+        }
+    )
+    expected = {
+        "agent_name": base.agent_name,
+        "output_schema_name": base.output_schema_name,
+        "api_surface": "responses",
+        "configured_model": base.model.model_identifier,
+        "tool_count": len(base.available_tools),
+        "tool_names": sorted(base.available_tools),
+        "tool_choice_mode": "auto",
+    }
+    base = base.model_copy(
+        update={
+            "context": {
+                **base.context,
+                "stage_tool_sets": {
+                    "candidate_search": [
+                        "search_activity_sources",
+                        "inspect_activity_source",
+                    ],
+                    "final_output": [],
+                },
+                "structured_output_boundary_contract": expected,
+            }
+        }
+    )
+    scoped_context = AgentHarness._stage_scoped_turn_context(
+        base,
+        discovery_substage=substage,
+        exposed_tools=exposed_tools,
+        tool_calls=0,
+    )
+    scoped_request = base.model_copy(
+        update={"available_tools": exposed_tools, "context": scoped_context}
+    )
+    fingerprint = item.structured_output_fingerprint(scoped_request)
+    assert fingerprint.tool_count == len(exposed_tools)
+    assert fingerprint.tool_choice_mode == tool_choice_mode
+    assert fingerprint.boundary_runtime_contracts_match is True
+    assert fingerprint.runtime_configuration_hash == fingerprint.boundary_probe_configuration_hash
+
+
 def test_structured_output_request_fingerprint_detects_wrong_runtime_schema() -> None:
     item = provider(lambda *_args, **_kwargs: result(valid_output()))
     base = request()
@@ -477,6 +560,7 @@ def test_structured_output_request_fingerprint_detects_wrong_runtime_schema() ->
         "api_surface": "responses",
         "configured_model": base.model.model_identifier,
         "tool_count": len(base.available_tools),
+        "tool_names": sorted(base.available_tools),
         "tool_choice_mode": "auto",
     }
     fingerprint = item.structured_output_fingerprint(
