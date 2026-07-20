@@ -20,6 +20,7 @@ from endoscan_workflows.reviewed_source_adapters import (
     PUBCHEM_BIOASSAY_ADAPTER,
     PUBCHEM_COMPOUND_ADAPTER,
     REVIEWED_ADAPTER_DEFINITIONS,
+    ActivitySearchOperationInput,
     AdapterReviewStatus,
     ReviewedSourceAdapter,
     ReviewedSourceAdapterDefinition,
@@ -40,6 +41,7 @@ from endoscan_workflows.source_security import (
     SourceTimeoutError,
 )
 from endoscan_workflows.source_smoke import isolated_reviewed_source_smoke_runtime
+from endoscan_workflows.tools import normalize_activity_search_arguments
 from endoscan_workflows.training_dataset import (
     ActivityRepresentation,
     CapabilityStatus,
@@ -96,6 +98,49 @@ def _specification() -> TrainingDatasetSpecification:
 
 def _fixtures() -> dict[str, list[dict]]:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def test_activity_search_contract_normalizes_only_harmless_controlled_aliases() -> None:
+    normalized = normalize_activity_search_arguments(
+        {
+            "biological_target": "Example receptor",
+            "endpoint_modality": "binding assay",
+            "maximum_results": 3,
+        }
+    )
+    assert normalized.arguments["endpoint_modality"] == "binding"
+    assert [item.code for item in normalized.warnings] == [
+        "activity_modality_alias_canonicalized"
+    ]
+    assert ActivitySearchOperationInput.model_validate(normalized.arguments).endpoint_modality == (
+        "binding"
+    )
+    with pytest.raises(ValidationError):
+        ActivitySearchOperationInput(
+            biological_target="Example receptor",
+            endpoint_modality="binding, agonism, antagonism",
+        )
+
+
+def test_source_neutral_contract_regression_fixture_contains_no_solution_hints() -> None:
+    fixture_path = (
+        REPO_ROOT
+        / "packages"
+        / "endoscan_workflows"
+        / "endoscan_workflows"
+        / "fixtures"
+        / "source_discovery_contract_regression.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    assert fixture["endpoint"]["candidate_modalities"] == [
+        "binding",
+        "agonism",
+        "antagonism",
+    ]
+    serialized = json.dumps(fixture).casefold()
+    assert "thyroid" not in serialized
+    assert "accession" not in serialized
+    assert "assay id" not in serialized
 
 
 def _epa_manifest_fixtures() -> dict[str, str]:

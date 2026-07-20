@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -21,6 +22,7 @@ from .contracts import (
     ToolCallStatus,
     ToolDefinition,
     ToolInvocation,
+    ToolInvocationFailureDiagnostic,
     ToolNormalizationWarning,
     ToolResult,
     WorkflowState,
@@ -34,6 +36,7 @@ from .source_security import SourceTimeoutError, SourceToolError
 
 logger = logging.getLogger("uvicorn.error.endoscan.workflow.source_tool")
 SEARCH_TERM_NORMALIZATION_POLICY_VERSION = "phase1-search-term-normalization-v1"
+ACTIVITY_MODALITY_POLICY_VERSION = "activity-modality-v1"
 
 
 class ToolInput(BaseModel):
@@ -235,6 +238,41 @@ def normalize_geo_search_arguments(arguments: dict[str, Any]) -> NormalizedToolA
     )
 
 
+def normalize_activity_search_arguments(arguments: dict[str, Any]) -> NormalizedToolArguments:
+    """Canonicalize only harmless aliases for one controlled activity modality."""
+
+    value = arguments.get("endpoint_modality")
+    if not isinstance(value, str):
+        return NormalizedToolArguments(arguments=dict(arguments))
+    comparison = " ".join(value.strip().casefold().replace("_", " ").split())
+    aliases = {
+        "binding": "binding",
+        "binding assay": "binding",
+        "agonism": "agonism",
+        "agonist": "agonism",
+        "agonist activity": "agonism",
+        "antagonism": "antagonism",
+        "antagonist": "antagonism",
+        "antagonist activity": "antagonism",
+    }
+    canonical = aliases.get(comparison, comparison)
+    normalized = dict(arguments)
+    normalized["endpoint_modality"] = canonical
+    warnings: tuple[ToolNormalizationWarning, ...] = ()
+    if canonical != value:
+        warnings = (
+            ToolNormalizationWarning(
+                code="activity_modality_alias_canonicalized",
+                field="endpoint_modality",
+                original_index=0,
+                original=value,
+                normalized=canonical,
+                policy_version=ACTIVITY_MODALITY_POLICY_VERSION,
+            ),
+        )
+    return NormalizedToolArguments(arguments=normalized, warnings=warnings)
+
+
 class RegisteredTool:
     def __init__(
         self,
@@ -274,10 +312,53 @@ class ToolRegistry:
     def definitions(self) -> list[ToolDefinition]:
         return [self._tools[name].definition for name in sorted(self._tools)]
 
+    @staticmethod
+    def _failure_diagnostic(
+        invocation: ToolInvocation,
+        tool: RegisteredTool | None,
+        original_arguments: dict[str, Any],
+        normalized_arguments: dict[str, Any],
+        exc: Exception,
+        *,
+        invocation_stage: str,
+        validation_error_category: str,
+        adapter_resolution_status: str = "not_started",
+        field_errors: list[dict[str, str]] | None = None,
+        safe_message: str,
+    ) -> ToolInvocationFailureDiagnostic:
+        schema = tool.input_model.model_json_schema() if tool is not None else {}
+        schema_hash = hashlib.sha256(
+            json.dumps(schema, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return ToolInvocationFailureDiagnostic(
+            tool_name=invocation.tool_name,
+            tool_schema_version=(
+                tool.definition.implementation_version if tool is not None else "unresolved"
+            ),
+            tool_schema_hash=schema_hash,
+            agent_role=str(invocation.run_context.get("agent_role") or "unknown-agent"),
+            invocation_stage=invocation_stage,
+            supplied_argument_field_names=sorted(original_arguments),
+            normalized_argument_field_names=sorted(normalized_arguments),
+            validation_error_category=validation_error_category,
+            field_errors=list(field_errors or [])[:30],
+            dependency_status=str(
+                invocation.run_context.get("dependency_status") or "not_applicable"
+            )[:120],
+            adapter_resolution_status=adapter_resolution_status,
+            source_transport_started=bool(
+                getattr(exc, "source_transport_started", False)
+            ),
+            exception_class=type(exc).__name__,
+            safe_message=safe_message[:1000],
+            retryable=bool(getattr(exc, "retryable", False)),
+        )
+
     def invoke(self, invocation: ToolInvocation) -> ToolResult:
         started = time.monotonic()
         original_arguments = dict(invocation.arguments)
         normalized = NormalizedToolArguments(arguments=original_arguments)
+        tool: RegisteredTool | None = None
         try:
             tool = self.get(invocation.tool_name)
             if invocation.workflow_stage not in tool.definition.allowed_workflow_stages:
@@ -288,6 +369,37 @@ class ToolRegistry:
                 normalized = tool.argument_normalizer(original_arguments)
             typed_input = tool.input_model.model_validate(normalized.arguments)
         except (ValidationError, AgentPolicyError) as exc:
+            if isinstance(exc, ValidationError):
+                field_errors = [
+                    {
+                        "field": ".".join(str(item) for item in error.get("loc", ())) or "input",
+                        "category": str(error.get("type", "validation_error"))[:120],
+                        "message": str(error.get("msg", "Invalid value."))[:300],
+                    }
+                    for error in exc.errors(include_input=False, include_url=False)[:30]
+                ]
+                safe_message = "Tool input validation failed for: " + ", ".join(
+                    item["field"] for item in field_errors
+                )
+                stage = "input_validation"
+                category = "input_schema_validation"
+            else:
+                field_errors = []
+                safe_message = str(exc)[:1000]
+                stage = "policy_validation"
+                category = "tool_policy_rejected"
+            diagnostic = self._failure_diagnostic(
+                invocation,
+                tool,
+                original_arguments,
+                normalized.arguments,
+                exc,
+                invocation_stage=stage,
+                validation_error_category=category,
+                adapter_resolution_status="not_started",
+                field_errors=field_errors,
+                safe_message=safe_message,
+            )
             return ToolResult(
                 tool_name=invocation.tool_name,
                 status=ToolCallStatus.PROHIBITED
@@ -297,9 +409,10 @@ class ToolRegistry:
                     code="prohibited_tool"
                     if isinstance(exc, AgentPolicyError)
                     else "tool_input_invalid",
-                    safe_message=str(exc),
+                    safe_message=safe_message,
                     retryable=False,
                     category="policy" if isinstance(exc, AgentPolicyError) else "validation",
+                    tool_diagnostic=diagnostic,
                 ),
                 duration_ms=int((time.monotonic() - started) * 1000),
                 original_arguments=original_arguments,
@@ -392,19 +505,47 @@ class ToolRegistry:
                     source_diagnostic=diagnostic,
                 )
             except Exception as exc:
+                safe_message = str(
+                    getattr(exc, "safe_message", "Tool invocation failed before source transport.")
+                )[:1000]
+                invocation_stage = str(
+                    getattr(exc, "invocation_stage", "tool_implementation")
+                )
+                validation_category = str(
+                    getattr(exc, "validation_error_category", "tool_implementation_failure")
+                )
+                diagnostic = self._failure_diagnostic(
+                    invocation,
+                    tool,
+                    original_arguments,
+                    normalized.arguments,
+                    exc,
+                    invocation_stage=invocation_stage,
+                    validation_error_category=validation_category,
+                    adapter_resolution_status=str(
+                        getattr(exc, "adapter_resolution_status", "not_started")
+                    ),
+                    field_errors=getattr(exc, "field_errors", []),
+                    safe_message=safe_message,
+                )
                 logger.warning(
-                    "tool_failure tool_name=%s exception_class=%s retryable=false",
+                    "tool_failure tool_name=%s exception_class=%s stage=%s category=%s "
+                    "source_transport_started=%s retryable=false",
                     invocation.tool_name,
                     type(exc).__name__,
+                    diagnostic.invocation_stage,
+                    diagnostic.validation_error_category,
+                    diagnostic.source_transport_started,
                 )
                 return ToolResult(
                     tool_name=invocation.tool_name,
                     status=ToolCallStatus.FAILED,
                     error=NormalizedAgentError(
                         code="tool_failure",
-                        safe_message="Tool failed without exposing internal details.",
+                        safe_message=safe_message,
                         retryable=False,
                         category="tool",
+                        tool_diagnostic=diagnostic,
                     ),
                     duration_ms=int((time.monotonic() - started) * 1000),
                     original_arguments=original_arguments,
@@ -706,8 +847,11 @@ def extend_training_dataset_tool_registry(
     """Add reviewed, typed multi-source tools without enabling arbitrary network access."""
 
     from .reviewed_source_adapters import (
+        ActivitySearchOperationInput,
+        CompoundSourceOperationInput,
         ReviewedSourceAdapterRegistry,
         ReviewedSourceOperationInput,
+        SupportingSourceOperationInput,
     )
     from .training_dataset import VerifiedSourceObservationBatch
     from .training_dataset_tools import (
@@ -748,6 +892,7 @@ def extend_training_dataset_tool_registry(
         stages,
         effect=SideEffectClassification.NONE,
         contextual=False,
+        argument_normalizer=None,
     ):
         registry.register(
             RegisteredTool(
@@ -767,6 +912,7 @@ def extend_training_dataset_tool_registry(
                 output_model,
                 implementation,
                 contextual=contextual,
+                argument_normalizer=argument_normalizer,
             )
         )
 
@@ -814,10 +960,28 @@ def extend_training_dataset_tool_registry(
         "inspect_source_access",
     ]
     for operation in source_operations:
+        input_model = ReviewedSourceOperationInput
+        argument_normalizer = None
+        if operation == "search_activity_sources":
+            input_model = ActivitySearchOperationInput
+            argument_normalizer = normalize_activity_search_arguments
+        elif operation in {
+            "inspect_source_identity_fields",
+            "inspect_source_record_availability",
+            "resolve_compound_identity_sample",
+        }:
+            input_model = CompoundSourceOperationInput
+        elif operation in {
+            "inspect_supporting_metadata",
+            "inspect_official_file_listing",
+            "inspect_linked_publications",
+            "inspect_source_access",
+        }:
+            input_model = SupportingSourceOperationInput
         register(
             operation,
             "Execute one typed operation through an approved reviewed official-source adapter.",
-            ReviewedSourceOperationInput,
+            input_model,
             VerifiedSourceObservationBatch,
             lambda request, invocation, selected=operation: adapters.execute(
                 selected, request, invocation
@@ -825,6 +989,7 @@ def extend_training_dataset_tool_registry(
             discovery_stages,
             SideEffectClassification.EXTERNAL_READ,
             contextual=True,
+            argument_normalizer=argument_normalizer,
         )
     register(
         "compare_verified_identity_fields",

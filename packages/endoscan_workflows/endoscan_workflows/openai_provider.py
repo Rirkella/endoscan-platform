@@ -903,6 +903,37 @@ class OpenAIAgentProvider:
                     ],
                     "evidence_references": output.get("evidence_references", [])[:6],
                 }
+            elif "adapter_id" in output and "operation" in output:
+                compact_output = {
+                    "adapter_id": output.get("adapter_id"),
+                    "source_system": output.get("source_system"),
+                    "operation": output.get("operation"),
+                    "search_outcome": output.get("search_outcome"),
+                    "result_count": output.get("result_count", 0),
+                    "query_scope": output.get("query_scope"),
+                    "source_request_artifact_ids": output.get(
+                        "source_request_artifact_ids", []
+                    )[:5],
+                    "observations": [
+                        {
+                            key: observation.get(key)
+                            for key in (
+                                "observation_id",
+                                "source_system",
+                                "stable_source_identifier",
+                                "source_roles",
+                                "target",
+                                "modality",
+                                "identifier_fields",
+                                "structure_fields",
+                                "experimental_context_fields",
+                            )
+                        }
+                        for observation in output.get("observations", [])[:5]
+                        if isinstance(observation, dict)
+                    ],
+                    "limitations": output.get("limitations", [])[:10],
+                }
             else:
                 compact_output = {}
             compacted.append(
@@ -933,6 +964,11 @@ class OpenAIAgentProvider:
         ][:5]
         comparisons = [
             item["output"] for item in compact if item["tool_name"] == "compare_dataset_candidates"
+        ]
+        reviewed_source_results = [
+            item["output"]
+            for item in compact
+            if item["output"].get("adapter_id")
         ]
         accessions = list(
             dict.fromkeys(
@@ -972,6 +1008,7 @@ class OpenAIAgentProvider:
             "remaining_unresolved_questions": unresolved,
             "tool_budget_remaining": request.context.get("tool_budget_remaining"),
             "evidence_references": evidence,
+            "reviewed_source_results": reviewed_source_results[-6:],
         }
 
     def estimate_context_components(

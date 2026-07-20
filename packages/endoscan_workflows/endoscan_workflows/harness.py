@@ -180,9 +180,17 @@ class AgentHarness:
             )
             context_components = self._context_component_estimates(provider, turn_request, history)
             component_estimate = sum(context_components.values())
-            estimated_next_input = max(
-                component_estimate,
-                last_turn_usage.input_tokens if last_turn_usage else 0,
+            # Stage-specific tool schemas and compact prior results can make a later turn
+            # materially smaller than the first. Estimate the actual next request rather
+            # than conservatively replaying the previous measured input size.
+            provider_estimator = getattr(provider, "estimate_context_components", None)
+            estimated_next_input = (
+                component_estimate
+                if callable(provider_estimator)
+                else max(
+                    component_estimate,
+                    last_turn_usage.input_tokens if last_turn_usage is not None else 0,
+                )
             )
             emit(
                 "agent_run.context_precheck",
@@ -415,7 +423,32 @@ class AgentHarness:
                     break
                 tool_calls += 1
                 requested = turn.tool_request
-                if requested.tool_name not in turn_request.available_tools:
+                duplicate_query = any(
+                    item.get("tool_name") == requested.tool_name
+                    and canonical_json(item.get("original_arguments") or {})
+                    == canonical_json(requested.arguments)
+                    for item in history
+                )
+                if duplicate_query:
+                    tool_result = ToolResult(
+                        tool_name=requested.tool_name,
+                        status=ToolCallStatus.PROHIBITED,
+                        error=NormalizedAgentError(
+                            code="duplicate_tool_query",
+                            safe_message=(
+                                "An identical completed tool request cannot be repeated in the "
+                                "same bounded agent run."
+                            ),
+                            retryable=False,
+                            category="policy",
+                        ),
+                        original_arguments=requested.arguments,
+                        normalized_arguments=requested.arguments,
+                    )
+                    call_id = self._record_prohibited_call(
+                        run_id, turn_request, requested, tool_result, tool_calls
+                    )
+                elif requested.tool_name not in turn_request.available_tools:
                     tool_result = ToolResult(
                         tool_name=requested.tool_name,
                         status=ToolCallStatus.PROHIBITED,
@@ -494,12 +527,19 @@ class AgentHarness:
                         if tool_result.source_diagnostic
                         else None
                     ),
+                    tool_diagnostic=(
+                        tool_result.error.tool_diagnostic.model_dump(mode="json")
+                        if tool_result.error and tool_result.error.tool_diagnostic
+                        else None
+                    ),
                     source_diagnostics=source_diagnostics,
                 )
                 history.append(
                     {
                         "tool_name": requested.tool_name,
                         "status": tool_result.status.value,
+                        "original_arguments": tool_result.original_arguments,
+                        "normalized_arguments": tool_result.normalized_arguments,
                         "output": tool_result.output,
                         "error": tool_result.error.model_dump(mode="json")
                         if tool_result.error
@@ -529,6 +569,9 @@ class AgentHarness:
                             tool_result.error.category if tool_result.error else "agent_runtime"
                         ),
                         source_diagnostic=tool_result.source_diagnostic,
+                        tool_diagnostic=(
+                            tool_result.error.tool_diagnostic if tool_result.error else None
+                        ),
                     )
                 continue
             if turn.kind == "approval":
@@ -785,6 +828,11 @@ class AgentHarness:
                                     if result.error.source_diagnostic
                                     else None
                                 ),
+                                tool_diagnostic=(
+                                    result.error.tool_diagnostic.model_dump(mode="json")
+                                    if result.error.tool_diagnostic
+                                    else None
+                                ),
                             )
                         ),
                         created_at=utc_text(),
@@ -878,6 +926,10 @@ class AgentHarness:
                 permission_scope=request.context.get("permission_scope", []),
                 run_context={
                     "run_mode": request.context.get("run_mode", "replay"),
+                    "agent_role": request.agent_name,
+                    "dependency_status": request.context.get(
+                        "dependency_status", "prerequisites_satisfied"
+                    ),
                     "refresh_source_metadata": bool(
                         request.context.get("refresh_source_metadata", False)
                     ),
@@ -937,6 +989,11 @@ class AgentHarness:
                         if isinstance(item, dict)
                         and isinstance(item.get("source_diagnostic"), dict)
                     ],
+                    "tool_diagnostic": (
+                        result.error.tool_diagnostic.model_dump(mode="json")
+                        if result.error and result.error.tool_diagnostic
+                        else None
+                    ),
                 },
                 from_state=build.current_stage,
                 to_state=build.current_stage,
@@ -990,6 +1047,82 @@ class AgentHarness:
             return "provider_default", list(request.available_tools)
 
         tool_history = [item for item in history if isinstance(item.get("tool_name"), str)]
+        completed = [item for item in tool_history if item.get("status") == "completed"]
+        if request.agent_name == "Activity Evidence Discovery Agent":
+            modalities = {
+                str((item.get("normalized_arguments") or {}).get("endpoint_modality"))
+                for item in completed
+                if item.get("tool_name") == "search_activity_sources"
+                and (item.get("normalized_arguments") or {}).get("endpoint_modality")
+            }
+            required = {
+                str(item) for item in request.context.get("candidate_modalities", [])
+            } or {"binding", "agonism", "antagonism"}
+            if modalities != required:
+                substage = "candidate_search"
+            elif any((item.get("output") or {}).get("observations") for item in completed):
+                validation_calls = [
+                    item
+                    for item in completed
+                    if item.get("tool_name") != "search_activity_sources"
+                ]
+                substage = "final_output" if validation_calls else "candidate_validation"
+            else:
+                substage = "final_output"
+            configured_tools = configured.get(substage, [])
+            return substage, [
+                name for name in configured_tools if name in set(request.available_tools)
+            ]
+
+        if request.agent_name == "Transcriptomic Evidence Discovery Agent":
+            required_searches = {
+                "search_transcriptomic_sources",
+                "search_lincs_resources",
+            }
+            completed_names = {item["tool_name"] for item in completed}
+            if not required_searches.issubset(completed_names):
+                substage = "source_family_search"
+                configured_tools = [
+                    name
+                    for name in configured.get(substage, [])
+                    if name not in completed_names
+                ]
+            elif not any((item.get("output") or {}).get("observations") for item in completed):
+                substage = "final_output"
+                configured_tools = configured.get(substage, [])
+            elif any(
+                item.get("tool_name") in configured.get("context_inspection", [])
+                for item in completed
+            ):
+                substage = "final_output"
+                configured_tools = configured.get(substage, [])
+            elif any(
+                item.get("tool_name") in configured.get("candidate_validation", [])
+                for item in completed
+            ):
+                substage = "context_inspection"
+                configured_tools = configured.get(substage, [])
+            else:
+                substage = "candidate_validation"
+                configured_tools = configured.get(substage, [])
+            return substage, [
+                name for name in configured_tools if name in set(request.available_tools)
+            ]
+
+        if request.agent_name == "Chemical Identity and Structure Source Discovery Agent":
+            substage = "identity_inspection" if not completed else "final_output"
+            configured_tools = configured.get(substage, [])
+            return substage, [
+                name for name in configured_tools if name in set(request.available_tools)
+            ]
+
+        if request.agent_name == "Supporting Metadata Discovery Agent":
+            substage = "metadata_inspection" if not completed else "final_output"
+            configured_tools = configured.get(substage, [])
+            return substage, [
+                name for name in configured_tools if name in set(request.available_tools)
+            ]
+
         substage = "search_planning"
         if tool_history:
             latest = tool_history[-1]
@@ -1159,6 +1292,7 @@ class AgentHarness:
         retryable: bool | None = None,
         category: str = "agent_runtime",
         source_diagnostic=None,
+        tool_diagnostic=None,
     ):
         return AgentRunResult(
             status=status,
@@ -1174,6 +1308,7 @@ class AgentHarness:
                 ),
                 category=category,
                 source_diagnostic=source_diagnostic,
+                tool_diagnostic=tool_diagnostic,
             ),
             turns=turns,
             tool_calls=tool_calls,

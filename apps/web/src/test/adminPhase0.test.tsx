@@ -622,6 +622,109 @@ describe("Phase-0 build detail information architecture", () => {
     expect(screen.queryByRole("button", { name: /train/i })).not.toBeInTheDocument();
   });
 
+  it("distinguishes incomplete source execution from a scientific no-data conclusion", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      legacy: false,
+      source_discovery_execution: {
+        status: "discovery_execution_incomplete",
+        execution_complete: false,
+        scope_revision_required: false,
+        next_action: "Correct the bounded tool contract before a separately authorized run.",
+      },
+      source_search_outcomes: [{
+        search_outcome: {
+          outcome_id: "search-zero",
+          source_family: "NCBI GEO",
+          operation: "search_transcriptomic_sources",
+          rendered_query: "bounded synthetic query",
+          query_scope: { perturbation_type: "chemical" },
+          result_count: 0,
+          outcome: "completed_no_candidates",
+          cache_status: "fixture",
+        },
+      }],
+      source_fragments: [{
+        agent_name: "Activity Evidence Discovery Agent",
+        fragment: {
+          fragment_id: "fragment-rejected",
+          agent_review_status: "tool_invocation_rejected",
+          agent_terminal_outcome: "tool_invocation_rejected",
+          observation_ids: [],
+          scientific_source_requests: 0,
+          incomplete_stage: "candidate_search",
+          limitations: ["The request was rejected before source transport."],
+        },
+      }, {
+        agent_name: "Chemical Identity and Structure Source Discovery Agent",
+        fragment: {
+          fragment_id: "fragment-skipped",
+          agent_review_status: "skipped_dependency_not_met",
+          agent_terminal_outcome: "skipped_dependency_not_met",
+          observation_ids: [],
+          scientific_source_requests: 0,
+          missing_prerequisites: ["stable source identifier"],
+        },
+      }],
+      verified_source_inventory: { sources: [] },
+      capability_matrix: { cells: [], field_cells: [] },
+      gap_report: {
+        classification: "discovery_execution_incomplete",
+        requires_human_scope_review: false,
+        gaps: [],
+      },
+      assembly_strategies: null,
+    };
+    const diagnosticError: AdminWorkflowError = {
+      schema_version: "1.0.0",
+      id: "error-contract",
+      step_id: "step-activity",
+      code: "tool_input_invalid",
+      category: "validation",
+      retryable: false,
+      safe_message: "Tool input validation failed for: endpoint_modality",
+      detail: {
+        tool_diagnostic: {
+          tool_name: "search_activity_sources",
+          tool_schema_version: "reviewed-source-v1",
+          tool_schema_hash: "f".repeat(64),
+          agent_role: "Activity Evidence Discovery Agent",
+          invocation_stage: "input_validation",
+          supplied_argument_field_names: ["endpoint_modality", "query"],
+          normalized_argument_field_names: ["endpoint_modality", "query"],
+          validation_error_category: "input_schema_validation",
+          field_errors: [{ field: "endpoint_modality", category: "enum", message: "Use one controlled modality." }],
+          dependency_status: "prerequisites_satisfied",
+          adapter_resolution_status: "not_started",
+          source_transport_started: false,
+          exception_class: "ValidationError",
+          safe_message: "Tool input validation failed for: endpoint_modality",
+          retryable: false,
+        },
+      },
+      created_at: now,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_SOURCE_INVENTORY_REVIEW", 12, {
+        workflow_kind: "training_dataset_discovery",
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/errors`]: { body: [diagnosticError] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByTestId("source-discovery-incomplete")).toHaveTextContent("Source discovery did not complete");
+    expect(screen.getByText(/No conclusion about public-data availability/)).toBeInTheDocument();
+    expect(screen.getByText(/Completed no candidates/)).toBeInTheDocument();
+    expect(screen.getByText(/Skipped dependency not met/)).toBeInTheDocument();
+    expect(screen.getByText("Scientific request").parentElement).toHaveTextContent("Not started");
+    expect(screen.getByText("Invocation stage").parentElement).toHaveTextContent("Input validation");
+    expect(screen.queryByText("No usable sources exist")).not.toBeInTheDocument();
+  });
+
   it("shows compact build and current-run IDs and copies their complete values", async () => {
     installFetchMock(detailRoutes(() => build()));
     renderApp(`/admin/endpoints/${buildId}`);

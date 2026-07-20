@@ -58,6 +58,8 @@ export interface AdminTrainingDatasetWorkflow {
   source_discovery_budget?: Record<string, unknown> | null;
   source_discovery_readiness?: Record<string, unknown> | null;
   source_observations?: Array<Record<string, unknown>>;
+  source_search_outcomes?: Array<Record<string, unknown>>;
+  source_discovery_execution?: Record<string, unknown> | null;
   source_fragments?: Array<Record<string, unknown>>;
   verified_source_inventory?: Record<string, unknown> | null;
   capability_matrix?: Record<string, unknown> | null;
@@ -191,8 +193,27 @@ export interface AdminWorkflowError {
   safe_message: string;
   detail?: {
     source_diagnostic?: AdminSourceToolDiagnostic | null;
+    tool_diagnostic?: AdminToolInvocationFailureDiagnostic | null;
   };
   created_at: string;
+}
+
+export interface AdminToolInvocationFailureDiagnostic {
+  tool_name: string;
+  tool_schema_version: string;
+  tool_schema_hash: string;
+  agent_role: string;
+  invocation_stage: string;
+  supplied_argument_field_names: string[];
+  normalized_argument_field_names: string[];
+  validation_error_category: string;
+  field_errors: Array<{ field: string; category: string; message: string }>;
+  dependency_status: string;
+  adapter_resolution_status: string;
+  source_transport_started: boolean;
+  exception_class: string;
+  safe_message: string;
+  retryable: boolean;
 }
 
 export interface AdminSourceToolDiagnostic {

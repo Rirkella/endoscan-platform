@@ -37,6 +37,7 @@ from .training_dataset import (
     SourceValidationStatus,
     VerifiedSourceObservation,
     VerifiedSourceObservationBatch,
+    VerifiedSourceSearchOutcome,
 )
 
 REVIEW_POLICY_VERSION = "reviewed-source-adapters-v1"
@@ -182,6 +183,61 @@ class ReviewedSourceOperationInput(StrictContract):
             if "://" in value or len(value) > 300:
                 raise ValueError("identifier lists must contain bounded non-URL values")
         return values
+
+
+class ActivityDiscoveryModality(StrEnum):
+    BINDING = "binding"
+    AGONISM = "agonism"
+    ANTAGONISM = "antagonism"
+
+
+class ActivitySearchOperationInput(ReviewedSourceOperationInput):
+    """One controlled activity modality per bounded official-source search."""
+
+    source_system: Literal["pubchem-bioassay", "PubChem BioAssay"] | None = None
+    endpoint_modality: ActivityDiscoveryModality
+
+
+class CompoundSourceOperationInput(ReviewedSourceOperationInput):
+    source_system: Literal["pubchem-compound", "PubChem Compound"] | None = None
+
+    @model_validator(mode="after")
+    def require_bounded_compound_identifiers(self) -> CompoundSourceOperationInput:
+        if not self.sampled_identifiers and not self.stable_identifier:
+            raise ValueError("compound inspection requires stable sampled identifiers")
+        return self
+
+
+class SupportingSourceOperationInput(ReviewedSourceOperationInput):
+    source_system: Literal["ncbi-supporting-metadata", "NCBI linked metadata"] | None = None
+
+    @model_validator(mode="after")
+    def require_linked_source_identifier(self) -> SupportingSourceOperationInput:
+        if not self.source_identifiers and not self.stable_identifier:
+            raise ValueError("supporting metadata inspection requires stable source identifiers")
+        return self
+
+
+class ReviewedSourceInvocationError(ValueError):
+    """Safe contract failure raised before a scientific-source request starts."""
+
+    def __init__(
+        self,
+        safe_message: str,
+        *,
+        invocation_stage: str,
+        validation_error_category: str,
+        adapter_resolution_status: str = "not_started",
+        field_errors: list[dict[str, str]] | None = None,
+    ) -> None:
+        super().__init__(safe_message[:1000])
+        self.safe_message = safe_message[:1000]
+        self.invocation_stage = invocation_stage
+        self.validation_error_category = validation_error_category
+        self.adapter_resolution_status = adapter_resolution_status
+        self.field_errors = list(field_errors or [])[:30]
+        self.source_transport_started = False
+        self.retryable = False
 
 
 class SourceHttpRequest(StrictContract):
@@ -522,6 +578,14 @@ class ReviewedSourceAdapter:
             batch = VerifiedSourceObservationBatch.model_validate(cached.parsed_output).model_copy(
                 update={"cache_status": "cached", "source_request_count": 0}
             )
+            if batch.search_outcome is not None:
+                batch = batch.model_copy(
+                    update={
+                        "search_outcome": batch.search_outcome.model_copy(
+                            update={"cache_status": "cached"}
+                        )
+                    }
+                )
             stored = cached.http_metadata.get("execution_telemetry", {})
             telemetry = ReviewedSourceExecutionTelemetry.model_validate(
                 {
@@ -555,7 +619,22 @@ class ReviewedSourceAdapter:
                 }
             )
             return ReviewedSourceExecutionResult(batch=batch, telemetry=telemetry)
-        source_request = self._build_request(operation, request)
+        try:
+            source_request = self._build_request(operation, request)
+        except ValueError as exc:
+            raise ReviewedSourceInvocationError(
+                str(exc),
+                invocation_stage="request_construction",
+                validation_error_category="required_argument_missing_or_invalid",
+                adapter_resolution_status=f"resolved:{self.definition.adapter_id}",
+                field_errors=[
+                    {
+                        "field": "operation_arguments",
+                        "category": "request_construction_rejected",
+                        "message": str(exc)[:300],
+                    }
+                ],
+            ) from exc
         request_host = (urlparse(source_request.url).hostname or "").lower().rstrip(".")
         if request_host not in self.definition.allowlisted_domains:
             raise ValueError("reviewed adapter request host is outside its definition allowlist")
@@ -696,6 +775,41 @@ class ReviewedSourceAdapter:
             raise ReviewedSourceExecutionError(
                 "Reviewed source parser rejected the bounded response.", telemetry
             ) from exc
+        search_outcome = None
+        if operation.startswith("search_"):
+            search_outcome = VerifiedSourceSearchOutcome(
+                outcome_id=deterministic_id(
+                    "search-outcome",
+                    self.definition.adapter_id,
+                    operation,
+                    artifact.sha256,
+                    response.url,
+                ),
+                adapter_id=self.definition.adapter_id,
+                adapter_version=self.definition.adapter_version,
+                source_system=self.definition.official_source_system,
+                operation=operation,
+                rendered_query=response.url,
+                query_scope={
+                    key: value
+                    for key, value in {
+                        "biological_target": request.biological_target,
+                        "endpoint_modality": request.endpoint_modality,
+                        "query": request.query,
+                        "maximum_results": request.maximum_results,
+                    }.items()
+                    if value is not None
+                },
+                result_count=len(observations),
+                outcome=(
+                    "completed_with_candidates"
+                    if observations
+                    else "completed_no_candidates"
+                ),
+                http_status=response.status_code,
+                cache_status="live",
+                source_request_artifact_ids=[artifact.id],
+            )
         batch = VerifiedSourceObservationBatch(
             adapter_id=self.definition.adapter_id,
             adapter_version=self.definition.adapter_version,
@@ -704,6 +818,7 @@ class ReviewedSourceAdapter:
             observations=observations,
             source_request_artifact_ids=[artifact.id],
             source_request_count=1,
+            search_outcome=search_outcome,
         )
         diagnostic = (
             response.diagnostic.model_copy(
@@ -1802,22 +1917,7 @@ class ReviewedSourceAdapterRegistry:
         request: ReviewedSourceOperationInput,
         invocation: ToolInvocation,
     ) -> VerifiedSourceObservationBatch:
-        candidates = [
-            item
-            for item in self.approved()
-            if operation in item.definition.approved_operations
-            and (
-                request.source_system is None
-                or request.source_system.casefold()
-                in {
-                    item.definition.adapter_id.casefold(),
-                    item.definition.official_source_system.casefold(),
-                }
-            )
-        ]
-        if len(candidates) != 1:
-            raise ValueError("operation does not resolve to exactly one approved source adapter")
-        return candidates[0].execute(operation, request, invocation)
+        return self._resolve(operation, request).execute(operation, request, invocation)
 
     def execute_with_telemetry(
         self,
@@ -1825,22 +1925,61 @@ class ReviewedSourceAdapterRegistry:
         request: ReviewedSourceOperationInput,
         invocation: ToolInvocation,
     ) -> ReviewedSourceExecutionResult:
-        candidates = [
+        return self._resolve(operation, request).execute_with_telemetry(
+            operation, request, invocation
+        )
+
+    def _resolve(
+        self, operation: str, request: ReviewedSourceOperationInput
+    ) -> ReviewedSourceAdapter:
+        operation_candidates = [
             item
             for item in self.approved()
             if operation in item.definition.approved_operations
-            and (
-                request.source_system is None
-                or request.source_system.casefold()
-                in {
-                    item.definition.adapter_id.casefold(),
-                    item.definition.official_source_system.casefold(),
-                }
-            )
+        ]
+        candidates = [
+            item
+            for item in operation_candidates
+            if request.source_system is None
+            or request.source_system.casefold()
+            in {
+                item.definition.adapter_id.casefold(),
+                item.definition.official_source_system.casefold(),
+            }
         ]
         if len(candidates) != 1:
-            raise ValueError("operation does not resolve to exactly one approved source adapter")
-        return candidates[0].execute_with_telemetry(operation, request, invocation)
+            expected = sorted(
+                {
+                    item.definition.adapter_id
+                    for item in operation_candidates
+                }
+            )
+            supplied = request.source_system or "not supplied"
+            category = (
+                "source_system_does_not_match_operation"
+                if operation_candidates
+                else "operation_not_approved"
+            )
+            raise ReviewedSourceInvocationError(
+                (
+                    f"Source system {supplied!r} is not approved for {operation}; "
+                    f"expected one of: {', '.join(expected) or 'none'}."
+                ),
+                invocation_stage="adapter_resolution",
+                validation_error_category=category,
+                adapter_resolution_status="not_resolved",
+                field_errors=[
+                    {
+                        "field": "source_system",
+                        "category": category,
+                        "message": (
+                            f"Supplied {supplied!r}; approved adapter IDs are "
+                            f"{', '.join(expected) or 'none'}."
+                        )[:300],
+                    }
+                ],
+            )
+        return candidates[0]
 
 
 def production_reviewed_source_registry(

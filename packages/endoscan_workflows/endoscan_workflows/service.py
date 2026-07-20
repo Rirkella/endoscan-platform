@@ -23,6 +23,7 @@ from .contracts import (
     ApprovalType,
     EndpointBuildCreate,
     StepStatus,
+    ToolInvocationFailureDiagnostic,
     TransitionRequest,
     WorkflowKind,
     WorkflowSnapshot,
@@ -62,7 +63,11 @@ from .repository import (
     utc_text,
     versioned_payload,
 )
-from .reviewed_source_adapters import ReviewedSourceAdapterRegistry
+from .reviewed_source_adapters import (
+    ReviewedSourceAdapterRegistry,
+    ReviewedSourceInvocationError,
+    ReviewedSourceOperationInput,
+)
 from .state_machine import TransitionSpec, WorkflowGraph
 from .training_dataset import (
     BLIND_TRAINING_DATASET_DISCOVERY,
@@ -90,6 +95,7 @@ from .training_dataset import (
     VerifiedSourceInventoryFragment,
     VerifiedSourceObservation,
     VerifiedSourceObservationBatch,
+    VerifiedSourceSearchOutcome,
     build_capability_matrix,
     build_source_assembly_gap_report,
     compile_verified_source_fragment,
@@ -449,6 +455,11 @@ class WorkflowService:
                     "legacy": True,
                     "label": "Legacy single-source discovery",
                 }
+            source_items = (
+                _load_training_document(row.source_observations_json).get("items", [])
+                if row.source_observations_json
+                else []
+            )
             return {
                 "schema_version": SCHEMA_VERSION,
                 "contract_version": row.contract_version,
@@ -507,10 +518,14 @@ class WorkflowService:
                     if row.source_discovery_budget_json
                     else None
                 ),
-                "source_observations": (
-                    _load_training_document(row.source_observations_json).get("items", [])
-                    if row.source_observations_json
-                    else []
+                "source_observations": [
+                    item for item in source_items if isinstance(item.get("observation"), dict)
+                ],
+                "source_search_outcomes": [
+                    item for item in source_items if isinstance(item.get("search_outcome"), dict)
+                ],
+                "source_discovery_execution": self._source_discovery_execution_summary(
+                    session, workflow_id
                 ),
                 "source_fragments": (
                     _load_training_document(row.source_fragments_json).get("items", [])
@@ -597,6 +612,156 @@ class WorkflowService:
             for item in SPECIALIZED_AGENT_SEQUENCE
             if item.agent_name in names
         ]
+
+    def _compact_reviewed_adapter_capabilities(
+        self, allowed_tools: list[str]
+    ) -> list[dict[str, object]]:
+        """Return only stage-relevant public adapter metadata for model context."""
+
+        allowed = set(allowed_tools)
+        compact = []
+        for adapter in self.reviewed_source_adapters.public_inventory():
+            operations = [
+                item for item in adapter.get("approved_operations", []) if item in allowed
+            ]
+            if not operations:
+                continue
+            compact.append(
+                {
+                    "adapter_id": adapter.get("adapter_id"),
+                    "official_source_system": adapter.get("official_source_system"),
+                    "supported_component_roles": adapter.get("supported_component_roles", []),
+                    "approved_operations": operations,
+                }
+            )
+        return compact
+
+    def _historical_tool_diagnostic(
+        self, run: AgentRunRow, call: ToolCallRow, result_payload: dict
+    ) -> dict | None:
+        error = result_payload.get("error") or {}
+        existing = error.get("tool_diagnostic")
+        if isinstance(existing, dict):
+            return existing
+        if error.get("code") != "tool_failure":
+            return None
+        arguments_payload = load_versioned_json(call.arguments_json)
+        normalized = arguments_payload.get("normalized_arguments") or arguments_payload.get(
+            "arguments", {}
+        )
+        original = arguments_payload.get("original_arguments") or arguments_payload.get(
+            "arguments", {}
+        )
+        try:
+            request = ReviewedSourceOperationInput.model_validate(normalized)
+            self.reviewed_source_adapters._resolve(call.tool_name, request)
+        except ReviewedSourceInvocationError as exc:
+            schema = ReviewedSourceOperationInput.model_json_schema()
+            return ToolInvocationFailureDiagnostic(
+                tool_name=call.tool_name,
+                tool_schema_version=call.tool_version,
+                tool_schema_hash=hashlib.sha256(canonical_json(schema).encode()).hexdigest(),
+                agent_role=run.agent_name,
+                invocation_stage=exc.invocation_stage,
+                supplied_argument_field_names=sorted(original),
+                normalized_argument_field_names=sorted(normalized),
+                validation_error_category=exc.validation_error_category,
+                field_errors=exc.field_errors,
+                dependency_status="historical_prerequisites_not_enforced",
+                adapter_resolution_status=exc.adapter_resolution_status,
+                source_transport_started=False,
+                exception_class=type(exc).__name__,
+                safe_message=exc.safe_message,
+                retryable=False,
+            ).model_dump(mode="json")
+        except Exception:
+            return None
+        return None
+
+    def _source_discovery_execution_summary(
+        self, session: Session, workflow_id: str
+    ) -> dict[str, object]:
+        names = {
+            "Activity Evidence Discovery Agent",
+            "Transcriptomic Evidence Discovery Agent",
+            "Chemical Identity and Structure Source Discovery Agent",
+            "Supporting Metadata Discovery Agent",
+        }
+        runs = session.scalars(
+            select(AgentRunRow)
+            .where(
+                AgentRunRow.workflow_id == workflow_id,
+                AgentRunRow.agent_name.in_(names),
+            )
+            .order_by(AgentRunRow.created_at, AgentRunRow.id)
+        ).all()
+        stages = []
+        execution_incomplete = False
+        for run in runs:
+            calls = session.scalars(
+                select(ToolCallRow)
+                .where(ToolCallRow.agent_run_id == run.id)
+                .order_by(ToolCallRow.created_at, ToolCallRow.id)
+            ).all()
+            diagnostics = []
+            source_requests = 0
+            for call in calls:
+                result_payload = (
+                    load_versioned_json(call.result_json) if call.result_json else {}
+                )
+                diagnostic = self._historical_tool_diagnostic(run, call, result_payload)
+                if diagnostic:
+                    diagnostics.append(diagnostic)
+                source_requests += int(
+                    ((result_payload.get("output") or {}).get("source_request_count", 0)) or 0
+                )
+            result = load_versioned_json(run.result_json) if run.result_json else {}
+            error = result.get("error") or {}
+            stage_status = (
+                "agent_budget_stopped"
+                if run.status == AgentRunStatus.BUDGET_EXCEEDED.value
+                else (
+                    "tool_invocation_rejected_before_transport"
+                    if diagnostics
+                    else run.status
+                )
+            )
+            execution_incomplete = execution_incomplete or stage_status in {
+                "agent_budget_stopped",
+                "tool_invocation_rejected_before_transport",
+                "failed",
+            }
+            stages.append(
+                {
+                    "agent_name": run.agent_name,
+                    "run_id": run.id,
+                    "status": stage_status,
+                    "provider_invocations": load_versioned_json(run.usage_json).get(
+                        "provider_invocations", 0
+                    ),
+                    "tool_calls": len(calls),
+                    "scientific_source_requests": source_requests,
+                    "safe_error_code": error.get("code"),
+                    "safe_message": error.get("safe_message"),
+                    "tool_diagnostics": diagnostics,
+                }
+            )
+        return {
+            "status": (
+                "discovery_execution_incomplete"
+                if execution_incomplete
+                else "discovery_execution_complete"
+            ),
+            "execution_complete": not execution_incomplete,
+            "scope_revision_required": False,
+            "safe_summary": (
+                "Source discovery did not complete; the empty inventory is not evidence that "
+                "no usable public sources exist."
+                if execution_incomplete
+                else "Source discovery completed under the bounded reviewed-source policy."
+            ),
+            "stages": stages,
+        }
 
     def persist_training_dataset_document(
         self,
@@ -1233,6 +1398,20 @@ class WorkflowService:
                     }
                 )
                 known.add(observation.observation_id)
+            if batch.search_outcome is not None and not any(
+                item.get("search_outcome", {}).get("outcome_id")
+                == batch.search_outcome.outcome_id
+                for item in current
+                if isinstance(item, dict)
+            ):
+                current.append(
+                    {
+                        "agent_name": agent_name,
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "search_outcome": batch.search_outcome.model_dump(mode="json"),
+                    }
+                )
             row.source_observations_json = canonical_json(
                 versioned_payload(document={"items": current})
             )
@@ -1249,6 +1428,11 @@ class WorkflowService:
                     "tool_call_id": tool_call_id,
                     "observation_ids": [item.observation_id for item in batch.observations],
                     "source_request_artifact_ids": batch.source_request_artifact_ids,
+                    "search_outcome": (
+                        batch.search_outcome.model_dump(mode="json")
+                        if batch.search_outcome
+                        else None
+                    ),
                 },
                 from_state=build.current_stage,
                 to_state=build.current_stage,
@@ -1266,6 +1450,21 @@ class WorkflowService:
             VerifiedSourceObservation.model_validate(item["observation"])
             for item in items
             if item.get("agent_name") == agent_name and isinstance(item.get("observation"), dict)
+        ]
+
+    def _agent_search_outcomes(
+        self, workflow_id: str, agent_name: str
+    ) -> list[VerifiedSourceSearchOutcome]:
+        with self.database.session() as session:
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None or not row.source_observations_json:
+                return []
+            items = _load_training_document(row.source_observations_json).get("items", [])
+        return [
+            VerifiedSourceSearchOutcome.model_validate(item["search_outcome"])
+            for item in items
+            if item.get("agent_name") == agent_name
+            and isinstance(item.get("search_outcome"), dict)
         ]
 
     def _persist_source_fragment(
@@ -1443,20 +1642,43 @@ class WorkflowService:
                 if row.source_fragments_json
                 else []
             )
+        missing_prerequisites = self._source_discovery_missing_prerequisites(
+            definition.agent_name, prior_fragments
+        )
+        if missing_prerequisites:
+            return self._skip_source_discovery_agent(
+                workflow_id,
+                definition=definition,
+                stage=stage,
+                next_stage=next_stage,
+                snapshot=snapshot,
+                requirements=requirements,
+                missing_prerequisites=missing_prerequisites,
+            )
+        requirement_summary = [
+            {
+                "role": item.role.value,
+                "mandatory": item.mandatory,
+                "minimum_metadata": item.minimum_metadata,
+                "acceptable_identifier_types": item.acceptable_identifier_types,
+            }
+            for item in requirements.requirements
+        ]
         validated_artifacts: dict[str, object] = {
-            "training_dataset_specification": specification.model_dump(mode="json"),
             "endpoint_discovery_scope": (
                 specification.endpoint_discovery_scope.model_dump(mode="json")
                 if specification.endpoint_discovery_scope
                 else None
             ),
-            "component_requirements": requirements.model_dump(mode="json"),
+            "requirement_summary": requirement_summary,
             "approved_scientific_policies": initial_context.approved_scientific_policies,
-            "reviewed_adapter_capabilities": self.reviewed_source_adapters.public_inventory(),
+            "reviewed_adapter_capabilities": self._compact_reviewed_adapter_capabilities(
+                definition.allowed_tools
+            ),
         }
         if definition.agent_name == "Chemical Identity and Structure Source Discovery Agent":
             validated_artifacts = {
-                "component_requirements": requirements.model_dump(mode="json"),
+                "requirement_summary": requirement_summary,
                 "verified_identifier_field_summaries": [
                     {
                         "source_id": record.get("source_id"),
@@ -1465,11 +1687,13 @@ class WorkflowService:
                     for item in prior_fragments
                     for record in item.get("fragment", {}).get("candidate_records", [])
                 ],
-                "reviewed_adapter_capabilities": self.reviewed_source_adapters.public_inventory(),
+                "reviewed_adapter_capabilities": self._compact_reviewed_adapter_capabilities(
+                    definition.allowed_tools
+                ),
             }
         elif definition.agent_name == "Supporting Metadata Discovery Agent":
             validated_artifacts = {
-                "component_requirements": requirements.model_dump(mode="json"),
+                "requirement_summary": requirement_summary,
                 "verified_source_identifiers": sorted(
                     {
                         str(record.get("stable_accession"))
@@ -1478,7 +1702,9 @@ class WorkflowService:
                         if record.get("stable_accession")
                     }
                 ),
-                "reviewed_adapter_capabilities": self.reviewed_source_adapters.public_inventory(),
+                "reviewed_adapter_capabilities": self._compact_reviewed_adapter_capabilities(
+                    definition.allowed_tools
+                ),
             }
         step_key = f"source-discovery:{stage.value}:step"
         available_definition = definition.model_copy(
@@ -1542,6 +1768,30 @@ class WorkflowService:
             else None
         )
         observations = self._agent_observations(workflow_id, definition.agent_name)
+        search_outcomes = self._agent_search_outcomes(workflow_id, definition.agent_name)
+        with self.database.session() as session:
+            calls = session.scalars(
+                select(ToolCallRow).where(ToolCallRow.agent_run_id == run_id)
+            ).all()
+            scientific_source_requests = sum(
+                int(
+                    (
+                        load_versioned_json(call.result_json).get("output") or {}
+                    ).get("source_request_count", 0)
+                    or 0
+                )
+                for call in calls
+                if call.result_json
+            )
+        incomplete_stage = next(
+            (
+                str(event.detail.get("discovery_substage"))
+                for event in reversed(result.trace)
+                if event.event_type == "agent_run.context_precheck"
+                and event.detail.get("discovery_substage")
+            ),
+            None,
+        )
         roles = list(
             dict.fromkeys(
                 role
@@ -1562,6 +1812,18 @@ class WorkflowService:
             component_roles=roles or [requirements.requirements[0].role],
             observations=observations,
             review=review,
+            search_outcomes=search_outcomes,
+            run_status=result.status.value,
+            error_code=result.error.code if result.error else None,
+            error_category=result.error.category if result.error else None,
+            provider_invocations=result.usage.provider_invocations,
+            tool_calls=result.tool_calls,
+            scientific_source_requests=scientific_source_requests,
+            incomplete_stage=(
+                incomplete_stage
+                if result.status is not AgentRunStatus.COMPLETED
+                else None
+            ),
         )
         fragment_hash = self._persist_source_fragment(
             workflow_id,
@@ -1592,6 +1854,131 @@ class WorkflowService:
                 initiator=ActorType.ORCHESTRATOR,
                 initiator_id="source-discovery-orchestrator",
                 reason=f"{definition.agent_name} completed or terminated without retry.",
+                artifact_hashes=[fragment_hash],
+            ),
+        )
+
+    @staticmethod
+    def _source_discovery_missing_prerequisites(
+        agent_name: str, prior_fragments: list[dict]
+    ) -> list[str]:
+        records = [
+            record
+            for item in prior_fragments
+            for record in item.get("fragment", {}).get("candidate_records", [])
+            if isinstance(record, dict)
+        ]
+        if agent_name == "Chemical Identity and Structure Source Discovery Agent":
+            if not records:
+                return ["verified activity or transcriptomic source candidate"]
+            has_identifier_manifest = any(
+                (
+                    record.get("stable_accession")
+                    not in {None, "", "unresolved", "linked-metadata"}
+                )
+                or bool(record.get("identifier_fields"))
+                for record in records
+            )
+            if not has_identifier_manifest:
+                return ["stable source identifier or identifier-field manifest"]
+        if agent_name == "Supporting Metadata Discovery Agent":
+            has_linked_source = any(
+                (
+                    record.get("stable_accession")
+                    not in {None, "", "unresolved", "linked-metadata"}
+                )
+                or bool(record.get("downloadable_artifacts"))
+                or bool(record.get("source_references"))
+                for record in records
+            )
+            if not has_linked_source:
+                return ["verified source candidate with stable identifier or linked artifact"]
+        return []
+
+    def _skip_source_discovery_agent(
+        self,
+        workflow_id: str,
+        *,
+        definition: SpecializedAgentDefinition,
+        stage: WorkflowState,
+        next_stage: WorkflowState,
+        snapshot: WorkflowSnapshot,
+        requirements: TrainingDatasetComponentRequirements,
+        missing_prerequisites: list[str],
+    ) -> WorkflowSnapshot:
+        step = self.create_step(
+            workflow_id,
+            stage,
+            idempotency_key=f"source-discovery:{stage.value}:step",
+            input_payload={
+                "agent_name": definition.agent_name,
+                "dependency_status": "skipped_dependency_not_met",
+                "missing_prerequisites": missing_prerequisites,
+            },
+        )
+        relevant_roles = [
+            item.role
+            for item in requirements.requirements
+            if (
+                definition.agent_name.startswith("Chemical Identity")
+                and item.role.value
+                in {"compound_identity", "chemical_structure", "source_id_mapping"}
+            )
+            or (
+                definition.agent_name.startswith("Supporting Metadata")
+                and item.role.value
+                in {
+                    "assay_metadata",
+                    "transcriptomic_conditions",
+                    "sample_metadata",
+                    "provenance_license",
+                    "counter_screen",
+                    "methodological_evidence",
+                }
+            )
+        ]
+        fragment = compile_verified_source_fragment(
+            fragment_id=deterministic_id("fragment", workflow_id, definition.agent_name),
+            component_roles=relevant_roles or [requirements.requirements[0].role],
+            observations=[],
+            review=None,
+            run_status="skipped_dependency_not_met",
+            provider_invocations=0,
+            tool_calls=0,
+            scientific_source_requests=0,
+            missing_prerequisites=missing_prerequisites,
+            incomplete_stage=stage.value,
+        )
+        fragment_hash = self._persist_source_fragment(
+            workflow_id,
+            definition=definition,
+            step_id=step.id,
+            fragment=fragment,
+        )
+        self.complete_step(
+            step.id,
+            output_payload={
+                "agent_run_id": None,
+                "agent_run_status": "skipped_dependency_not_met",
+                "fragment_id": fragment.fragment_id,
+                "fragment_hash": fragment_hash,
+                "observation_count": 0,
+                "provider_invocations": 0,
+                "tool_calls": 0,
+                "scientific_source_requests": 0,
+                "missing_prerequisites": missing_prerequisites,
+            },
+            idempotency_key=f"source-discovery:{stage.value}:step-complete",
+        )
+        return self.transition(
+            workflow_id,
+            TransitionRequest(
+                target_state=next_stage,
+                expected_version=snapshot.version,
+                idempotency_key=f"source-discovery:{stage.value}:transition",
+                initiator=ActorType.ORCHESTRATOR,
+                initiator_id="source-discovery-orchestrator",
+                reason=f"{definition.agent_name} skipped because dependencies were not met.",
                 artifact_hashes=[fragment_hash],
             ),
         )
@@ -1653,6 +2040,7 @@ class WorkflowService:
             report_id=deterministic_id("gap", workflow_id, inventory.inventory_id),
             inventory=inventory,
             matrix=matrix,
+            fragments=fragments,
         )
         documents = [
             ("source_inventory", inventory.model_dump(mode="json")),
@@ -3348,20 +3736,41 @@ class WorkflowService:
                 .where(WorkflowErrorRow.workflow_id == workflow_id)
                 .order_by(WorkflowErrorRow.created_at, WorkflowErrorRow.id)
             ).all()
-            return [
-                {
+            errors = []
+            for row in rows:
+                detail = load_versioned_json(row.detail_json)
+                safe_message = row.safe_message
+                run_id = detail.get("agent_run_id")
+                if row.code == "tool_failure" and isinstance(run_id, str):
+                    run = session.get(AgentRunRow, run_id)
+                    call = session.scalar(
+                        select(ToolCallRow)
+                        .where(ToolCallRow.agent_run_id == run_id)
+                        .order_by(ToolCallRow.created_at, ToolCallRow.id)
+                        .limit(1)
+                    )
+                    if run is not None and call is not None and call.result_json:
+                        result_payload = load_versioned_json(call.result_json)
+                        diagnostic = self._historical_tool_diagnostic(
+                            run, call, result_payload
+                        )
+                        if diagnostic:
+                            detail = {**detail, "tool_diagnostic": diagnostic}
+                            safe_message = diagnostic["safe_message"]
+                errors.append(
+                    {
                     "schema_version": SCHEMA_VERSION,
                     "id": row.id,
                     "step_id": row.step_id,
                     "code": row.code,
                     "category": row.category,
                     "retryable": bool(row.retryable),
-                    "safe_message": row.safe_message,
-                    "detail": load_versioned_json(row.detail_json),
+                    "safe_message": safe_message,
+                    "detail": detail,
                     "created_at": row.created_at,
-                }
-                for row in rows
-            ]
+                    }
+                )
+            return errors
 
     def simulate_failure(
         self, workflow_id: str, *, expected_version: int, actor: str, idempotency_key: str
@@ -4130,8 +4539,9 @@ class WorkflowService:
             "error_id": row.error_id,
         }
 
-    @staticmethod
-    def _agent_run_dict(session: Session, row: AgentRunRow, *, include_trace: bool) -> dict:
+    def _agent_run_dict(
+        self, session: Session, row: AgentRunRow, *, include_trace: bool
+    ) -> dict:
         request_payload = load_versioned_json(row.request_json)
         context = request_payload.get("context")
         run_mode = context.get("run_mode") if isinstance(context, dict) else None
@@ -4142,6 +4552,18 @@ class WorkflowService:
             .where(ToolCallRow.agent_run_id == row.id)
             .order_by(ToolCallRow.created_at, ToolCallRow.id)
         ).all()
+
+        def public_tool_result(call: ToolCallRow) -> dict | None:
+            if not call.result_json:
+                return None
+            payload = load_versioned_json(call.result_json)
+            diagnostic = self._historical_tool_diagnostic(row, call, payload)
+            if diagnostic:
+                error = dict(payload.get("error") or {})
+                error["safe_message"] = diagnostic["safe_message"]
+                error["tool_diagnostic"] = diagnostic
+                payload = {**payload, "error": error}
+            return payload
         result = {
             "schema_version": SCHEMA_VERSION,
             "id": row.id,
@@ -4186,9 +4608,7 @@ class WorkflowService:
                         "status": call.status,
                         "permission_scope": load_versioned_json(call.permission_scope_json),
                         "arguments": load_versioned_json(call.arguments_json),
-                        "result": load_versioned_json(call.result_json)
-                        if call.result_json
-                        else None,
+                        "result": public_tool_result(call),
                         "duration_ms": call.duration_ms,
                     }
                     for call in tool_calls

@@ -354,6 +354,11 @@ class AgentReviewStatus(StrEnum):
     REFUSED = "refused"
     INVALID_OUTPUT = "invalid_output"
     PARTIAL = "partial"
+    BUDGET_STOPPED = "budget_stopped"
+    COMPLETED_NO_CANDIDATES = "completed_no_candidates"
+    TOOL_INVOCATION_REJECTED = "tool_invocation_rejected"
+    SOURCE_REQUEST_FAILED = "source_request_failed"
+    SKIPPED_DEPENDENCY_NOT_MET = "skipped_dependency_not_met"
 
 
 class SourceValidationStatus(StrEnum):
@@ -1719,6 +1724,23 @@ class VerifiedSourceObservation(StrictContract):
     next_required_ingestion_action: str = Field(min_length=3, max_length=2000)
 
 
+class VerifiedSourceSearchOutcome(StrictContract):
+    """Durable provenance for a bounded search, including valid zero-result searches."""
+
+    outcome_id: str = Field(min_length=3, max_length=160)
+    adapter_id: str = Field(min_length=3, max_length=160)
+    adapter_version: str = Field(min_length=1, max_length=40)
+    source_system: str = Field(min_length=2, max_length=160)
+    operation: str = Field(min_length=2, max_length=160)
+    rendered_query: str = Field(min_length=1, max_length=2000)
+    query_scope: dict[str, Any] = Field(default_factory=dict, max_length=30)
+    result_count: int = Field(ge=0)
+    outcome: Literal["completed_with_candidates", "completed_no_candidates"]
+    http_status: int = Field(ge=100, le=599)
+    cache_status: Literal["live", "cached", "fixture"]
+    source_request_artifact_ids: list[str] = Field(default_factory=list, max_length=10)
+
+
 class VerifiedSourceObservationBatch(StrictContract):
     adapter_id: str
     adapter_version: str
@@ -1728,6 +1750,7 @@ class VerifiedSourceObservationBatch(StrictContract):
     source_request_artifact_ids: list[str] = Field(default_factory=list, max_length=10)
     source_request_count: int = Field(ge=0, le=10)
     limitations: list[str] = Field(default_factory=list, max_length=50)
+    search_outcome: VerifiedSourceSearchOutcome | None = None
 
 
 class SourceCapability(StrictContract):
@@ -1812,8 +1835,22 @@ class VerifiedSourceInventoryFragment(StrictContract):
     adapter_provenance: list[str] = Field(default_factory=list, max_length=100)
     agent_review_status: AgentReviewStatus = AgentReviewStatus.UNAVAILABLE
     agent_terminal_outcome: Literal[
-        "completed", "invalid_model_output", "model_refused", "unavailable"
+        "completed",
+        "invalid_model_output",
+        "model_refused",
+        "unavailable",
+        "budget_stopped",
+        "completed_no_candidates",
+        "tool_invocation_rejected",
+        "source_request_failed",
+        "skipped_dependency_not_met",
     ] = "unavailable"
+    search_outcomes: list[VerifiedSourceSearchOutcome] = Field(default_factory=list, max_length=50)
+    missing_prerequisites: list[str] = Field(default_factory=list, max_length=30)
+    provider_invocations: int = Field(default=0, ge=0)
+    tool_calls: int = Field(default=0, ge=0)
+    scientific_source_requests: int = Field(default=0, ge=0)
+    incomplete_stage: str | None = Field(default=None, max_length=160)
     model_annotations: dict[str, str] = Field(default_factory=dict, max_length=100)
 
 
@@ -1895,16 +1932,25 @@ def compile_verified_source_fragment(
     component_roles: list[ComponentRole],
     observations: list[VerifiedSourceObservation],
     review: DiscoveryAgentReviewOutcome | None,
+    search_outcomes: list[VerifiedSourceSearchOutcome] | None = None,
+    run_status: str | None = None,
+    error_code: str | None = None,
+    error_category: str | None = None,
+    provider_invocations: int = 0,
+    tool_calls: int = 0,
+    scientific_source_requests: int = 0,
+    missing_prerequisites: list[str] | None = None,
+    incomplete_stage: str | None = None,
 ) -> VerifiedSourceInventoryFragment:
     """Compile a source fragment without allowing model text to overwrite verified facts."""
 
     status = AgentReviewStatus.UNAVAILABLE
-    terminal_outcome: Literal[
-        "completed", "invalid_model_output", "model_refused", "unavailable"
-    ] = "unavailable"
+    terminal_outcome = "unavailable"
     annotations: dict[str, str] = {}
     limitations: list[str] = []
     unresolved: list[str] = []
+    search_outcomes = list(search_outcomes or [])
+    missing_prerequisites = list(missing_prerequisites or [])
     if review is not None:
         terminal_outcome = review.status
         status = (
@@ -1922,8 +1968,37 @@ def compile_verified_source_fragment(
             if item.observation_id in valid_ids
         }
         unresolved.extend(review.unresolved_scientific_concerns)
-    if not observations:
+    if run_status == "skipped_dependency_not_met":
+        status = AgentReviewStatus.SKIPPED_DEPENDENCY_NOT_MET
+        terminal_outcome = "skipped_dependency_not_met"
+        limitations.append("Agent stage was skipped because upstream prerequisites were absent.")
+    elif run_status == "budget_exceeded":
+        status = AgentReviewStatus.BUDGET_STOPPED
+        terminal_outcome = "budget_stopped"
+        limitations.append(
+            "Agent review stopped at the configured budget; earlier tool-derived evidence and "
+            "search provenance remain authoritative."
+        )
+    elif error_category == "source_tool":
+        status = AgentReviewStatus.SOURCE_REQUEST_FAILED
+        terminal_outcome = "source_request_failed"
+    elif error_code in {"tool_failure", "tool_input_invalid", "prohibited_tool"}:
+        status = AgentReviewStatus.TOOL_INVOCATION_REJECTED
+        terminal_outcome = "tool_invocation_rejected"
+    elif (
+        not observations
+        and search_outcomes
+        and all(item.outcome == "completed_no_candidates" for item in search_outcomes)
+    ):
+        status = AgentReviewStatus.COMPLETED_NO_CANDIDATES
+        terminal_outcome = "completed_no_candidates"
+    if not observations and not search_outcomes and not missing_prerequisites:
         limitations.append("No tool-verified source observations were produced for this role.")
+    elif not observations and search_outcomes:
+        limitations.append(
+            "Bounded official searches completed without candidates; this does not establish "
+            "that the source families contain no relevant public data."
+        )
     if terminal_outcome in {"invalid_model_output", "model_refused"}:
         limitations.append(
             "Agent review was unavailable; persisted tool-derived observations remain "
@@ -1956,6 +2031,12 @@ def compile_verified_source_fragment(
         agent_review_status=status,
         agent_terminal_outcome=terminal_outcome,
         model_annotations=annotations,
+        search_outcomes=search_outcomes,
+        missing_prerequisites=missing_prerequisites,
+        provider_invocations=provider_invocations,
+        tool_calls=tool_calls,
+        scientific_source_requests=scientific_source_requests,
+        incomplete_stage=incomplete_stage,
     )
 
 
@@ -2495,6 +2576,15 @@ class AssemblyGapReport(StrictContract):
     discovery_round: int = Field(ge=0)
     maximum_discovery_rounds: int = Field(ge=0, le=10)
     requires_human_scope_review: bool = False
+    classification: Literal[
+        "inventory_gaps",
+        "scientific_scope_ambiguity",
+        "discovery_execution_incomplete",
+        "source_access_failure",
+        "completed_no_candidates",
+    ] = "inventory_gaps"
+    discovery_execution_complete: bool = True
+    recommended_next_action: str | None = Field(default=None, max_length=1000)
 
     def next_queries(self, already_executed: set[str]) -> list[str]:
         if self.discovery_round >= self.maximum_discovery_rounds:
@@ -2511,6 +2601,7 @@ def build_source_assembly_gap_report(
     report_id: str,
     inventory: VerifiedSourceInventory,
     matrix: SourceCapabilityMatrix,
+    fragments: list[VerifiedSourceInventoryFragment] | None = None,
 ) -> AssemblyGapReport:
     """Describe only deterministic pre-ingestion gaps; never launch a follow-up search."""
 
@@ -2573,6 +2664,41 @@ def build_source_assembly_gap_report(
                 ),
             )
         )
+    fragments = list(fragments or [])
+    statuses = {item.agent_review_status for item in fragments}
+    if AgentReviewStatus.SOURCE_REQUEST_FAILED in statuses:
+        classification = "source_access_failure"
+        execution_complete = False
+        next_action = "Resolve the recorded source-access failure before scientific review."
+    elif statuses & {
+        AgentReviewStatus.TOOL_INVOCATION_REJECTED,
+        AgentReviewStatus.BUDGET_STOPPED,
+    }:
+        classification = "discovery_execution_incomplete"
+        execution_complete = False
+        next_action = (
+            "Correct the recorded tool-contract or execution-budget failure; do not redefine "
+            "the biological scope."
+        )
+    elif (
+        not inventory.sources
+        and fragments
+        and all(
+            item.agent_review_status
+            in {
+                AgentReviewStatus.COMPLETED_NO_CANDIDATES,
+                AgentReviewStatus.SKIPPED_DEPENDENCY_NOT_MET,
+            }
+            for item in fragments
+        )
+    ):
+        classification = "completed_no_candidates"
+        execution_complete = True
+        next_action = "Review searched scopes before authorizing any revised bounded discovery."
+    else:
+        classification = "inventory_gaps"
+        execution_complete = True
+        next_action = "Review verified inventory gaps without changing scope automatically."
     return AssemblyGapReport(
         report_id=report_id,
         inventory_id=inventory.inventory_id,
@@ -2580,7 +2706,10 @@ def build_source_assembly_gap_report(
         gaps=gaps,
         discovery_round=0,
         maximum_discovery_rounds=0,
-        requires_human_scope_review=bool(gaps),
+        requires_human_scope_review=(classification == "scientific_scope_ambiguity"),
+        classification=classification,
+        discovery_execution_complete=execution_complete,
+        recommended_next_action=next_action,
     )
 
 
@@ -2777,6 +2906,66 @@ SPECIALIZED_AGENT_SEQUENCE = [
 ]
 
 
+SOURCE_DISCOVERY_STAGE_TOOL_SETS: dict[str, dict[str, list[str]]] = {
+    "Activity Evidence Discovery Agent": {
+        "candidate_search": [
+            "search_activity_sources",
+            "inspect_epa_public_assay_target_mapping",
+        ],
+        "candidate_validation": [
+            "validate_activity_source",
+            "fetch_activity_source_metadata",
+            "inspect_activity_result_availability",
+            "inspect_activity_identifier_fields",
+            "inspect_epa_public_assay_annotations",
+        ],
+        "final_output": [],
+    },
+    "Transcriptomic Evidence Discovery Agent": {
+        "source_family_search": [
+            "search_transcriptomic_sources",
+            "search_lincs_resources",
+        ],
+        "candidate_validation": [
+            "validate_transcriptomic_source",
+            "fetch_transcriptomic_source_metadata",
+            "inspect_lincs_release_manifest",
+        ],
+        "context_inspection": [
+            "inspect_perturbation_design",
+            "inspect_transcriptomic_identity_fields",
+            "inspect_signature_conditions",
+            "inspect_processed_matrix_availability",
+            "inspect_raw_matrix_availability",
+            "inspect_feature_schema",
+            "inspect_lincs_perturbagen_catalogue",
+            "inspect_lincs_signature_metadata",
+            "inspect_lincs_feature_space",
+            "inspect_lincs_processed_signature_availability",
+        ],
+        "final_output": [],
+    },
+    "Chemical Identity and Structure Source Discovery Agent": {
+        "identity_inspection": [
+            "inspect_source_identity_fields",
+            "inspect_source_record_availability",
+            "resolve_compound_identity_sample",
+        ],
+        "mapping_review": ["build_compound_mapping_manifest"],
+        "final_output": [],
+    },
+    "Supporting Metadata Discovery Agent": {
+        "metadata_inspection": [
+            "inspect_supporting_metadata",
+            "inspect_official_file_listing",
+            "inspect_linked_publications",
+            "inspect_source_access",
+        ],
+        "final_output": [],
+    },
+}
+
+
 SPECIALIZED_AGENT_INSTRUCTIONS = {
     "Dataset Specification Agent": (
         "Legacy compatibility path only. Return one DatasetSpecificationAgentOutcome and no "
@@ -2797,13 +2986,17 @@ SPECIALIZED_AGENT_INSTRUCTIONS = {
         "endpoint specification. Use only exposed tools. Distinguish antagonism, agonism, "
         "binding, downstream effects, cytotoxicity, and assay interference. For broad receptor "
         "discovery, retain binding, agonism, and antagonism separately without preselecting a "
-        "winning modality or aggregating labels. Return only source review annotations for "
+        "winning modality or aggregating labels. Search one controlled modality per activity "
+        "request; never compress multiple modalities into one string. Use the PubChem search "
+        "operation only with its reviewed source system and use dedicated EPA manifest tools "
+        "for EPA evidence. Return only source review annotations for "
         "persisted observation IDs only; an empty review is valid."
     ),
     "Transcriptomic Evidence Discovery Agent": (
         "Discover bounded official public chemical-perturbation transcriptomic sources using "
         "only exposed tools. Reject disease cohorts and genetic perturbations as substitutes "
-        "for compound-induced responses. Return only annotations for persisted observation IDs; "
+        "for compound-induced responses. Search general GEO and LINCS as independent source "
+        "families before validation. Return only annotations for persisted observation IDs; "
         "an empty review is valid."
     ),
     "Chemical Identity and Structure Source Discovery Agent": (
@@ -2876,6 +3069,13 @@ def specialized_agent_request(
         effective_artifacts["endpoint_request_semantic_hints"] = semantic_hints.model_dump(
             mode="json"
         )
+    stage_tool_sets = SOURCE_DISCOVERY_STAGE_TOOL_SETS.get(definition.agent_name, {})
+    endpoint_scope = effective_artifacts.get("endpoint_discovery_scope")
+    candidate_modalities = (
+        endpoint_scope.get("candidate_modalities", [])
+        if isinstance(endpoint_scope, dict)
+        else []
+    )
     return AgentRunRequest(
         workflow_id=workflow_id,
         step_id=step_id,
@@ -2900,6 +3100,10 @@ def specialized_agent_request(
             "workflow_stage": workflow_stage.value,
             "run_mode": configuration.run_mode.value,
             "permission_scope": permissions,
+            "dependency_status": "prerequisites_satisfied",
+            "stage_tool_sets": stage_tool_sets,
+            "stage_sequence": list(stage_tool_sets),
+            "candidate_modalities": candidate_modalities,
             "validated_artifacts": effective_artifacts,
             "source_hints": [],
             "structured_output_boundary_contract": {

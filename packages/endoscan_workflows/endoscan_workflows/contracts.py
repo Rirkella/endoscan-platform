@@ -391,12 +391,42 @@ class SourceToolDiagnostic(StrictContract):
     developer_message: str | None = Field(default=None, max_length=500)
 
 
+class ToolInvocationFailureDiagnostic(StrictContract):
+    """Body-free diagnostic for failures before a reviewed source transport starts."""
+
+    tool_name: str = Field(pattern=r"^[a-z][a-z0-9_]{2,79}$")
+    tool_schema_version: str = Field(min_length=1, max_length=40)
+    tool_schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    agent_role: str = Field(min_length=1, max_length=120)
+    invocation_stage: Literal[
+        "tool_lookup",
+        "policy_validation",
+        "argument_normalization",
+        "input_validation",
+        "dependency_validation",
+        "adapter_resolution",
+        "request_construction",
+        "tool_implementation",
+    ]
+    supplied_argument_field_names: list[str] = Field(default_factory=list, max_length=80)
+    normalized_argument_field_names: list[str] = Field(default_factory=list, max_length=80)
+    validation_error_category: str = Field(min_length=1, max_length=120)
+    field_errors: list[dict[str, str]] = Field(default_factory=list, max_length=30)
+    dependency_status: str = Field(default="not_applicable", max_length=120)
+    adapter_resolution_status: str = Field(default="not_started", max_length=120)
+    source_transport_started: bool = False
+    exception_class: str = Field(min_length=1, max_length=160)
+    safe_message: str = Field(min_length=1, max_length=1000)
+    retryable: bool = False
+
+
 class NormalizedAgentError(StrictContract):
     code: str = Field(min_length=1, max_length=120)
     safe_message: str = Field(min_length=1, max_length=2000)
     retryable: bool = False
     category: str = Field(default="provider", max_length=80)
     source_diagnostic: SourceToolDiagnostic | None = None
+    tool_diagnostic: ToolInvocationFailureDiagnostic | None = None
 
 
 class ProviderPreflightResult(StrictContract):

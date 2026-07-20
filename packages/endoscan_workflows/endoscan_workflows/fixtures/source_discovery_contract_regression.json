@@ -1,0 +1,59 @@
+{
+  "fixture_id": "source-neutral-four-agent-contract-regression-v1",
+  "benchmark_mode": "blind_training_dataset_discovery",
+  "endpoint": {
+    "biological_target": "Example receptor",
+    "candidate_modalities": ["binding", "agonism", "antagonism"],
+    "preserve_modalities_separately": true,
+    "aggregation_during_discovery": false
+  },
+  "production_contracts": {
+    "instruction_version": "training-dataset-orchestration-v1",
+    "review_output_schema": "DiscoveryAgentReviewOutcome",
+    "activity_input_schema": "ActivitySearchOperationInput",
+    "identity_input_schema": "CompoundSourceOperationInput",
+    "metadata_input_schema": "SupportingSourceOperationInput"
+  },
+  "historical_failure_shapes": [
+    {
+      "agent_role": "Activity Evidence Discovery Agent",
+      "tool_name": "search_activity_sources",
+      "model_arguments": {
+        "source_system": "Unrelated activity catalogue label",
+        "query": "Example receptor binding agonism antagonism",
+        "biological_target": "Example receptor",
+        "endpoint_modality": "binding, agonism, antagonism",
+        "maximum_results": 8
+      },
+      "expected_transport_started": false
+    },
+    {
+      "agent_role": "Transcriptomic Evidence Discovery Agent",
+      "completed_stage": "general_source_search",
+      "intended_next_stage": "independent_lincs_search",
+      "expected_partial_evidence_preserved": true
+    },
+    {
+      "agent_role": "Chemical Identity and Structure Source Discovery Agent",
+      "tool_name": "inspect_source_record_availability",
+      "model_arguments": {
+        "source_system": "Upstream activity source",
+        "query": "Inspect discovered compound records",
+        "sampled_identifiers": [],
+        "maximum_results": 8
+      },
+      "expected_dependency_outcome": "skipped_dependency_not_met"
+    },
+    {
+      "agent_role": "Supporting Metadata Discovery Agent",
+      "tool_name": "inspect_source_access",
+      "model_arguments": {
+        "source_system": "Upstream activity source",
+        "query": "Inspect linked public access",
+        "source_identifiers": [],
+        "maximum_results": 8
+      },
+      "expected_dependency_outcome": "skipped_dependency_not_met"
+    }
+  ]
+}

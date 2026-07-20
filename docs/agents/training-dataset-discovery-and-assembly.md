@@ -92,6 +92,21 @@ compact validated documents move forward; prior conversations and hidden chain-o
 The trace exposes decision summaries, evidence, unresolved questions, tools, safe diagnostics,
 usage, cost, and duration.
 
+Activity discovery receives the target and candidate modalities, but each bounded activity search
+accepts exactly one controlled modality. Harmless aliases are normalized deterministically and
+unknown or combined values are rejected before transport with a typed diagnostic. Transcriptomic
+discovery searches general GEO and LINCS independently. On later turns it receives only a compact
+requirement summary, the previous bounded result, and the schemas for the active substage; completed
+search schemas and full workflow artifacts are not replayed into model context.
+
+Identity discovery runs only after a verified activity or transcriptomic candidate exposes a stable
+source identifier or identifier-field manifest. Supporting-metadata discovery likewise requires a
+verified stable identifier or official linked artifact. A missing prerequisite produces a durable
+`skipped_dependency_not_met` fragment with zero provider, tool, and source calls; it is not an agent
+failure. Successful zero-result official searches are persisted as `completed_no_candidates` with
+their query, status, cache/provenance and searched scope. Earlier verified observations survive a
+later structured-output failure or token-budget stop.
+
 Planner and worker providers/models are independently configured with
 `ENDOSCAN_PLANNER_PROVIDER`, `ENDOSCAN_PLANNER_MODEL`, `ENDOSCAN_WORKER_PROVIDER`, and
 `ENDOSCAN_WORKER_MODEL`. Domain logic contains no provider model name. Per-agent and global turn,
@@ -199,6 +214,12 @@ requires-download, requires-mapping, or not-computable and list the required wor
 modality, coverage, licence, or provenance into bounded searches. Duplicate requests are
 suppressed, rounds are capped, and material scope changes require human review. Updated inventory
 and matrix versions make old strategies stale until regenerated.
+
+Gap classification distinguishes biological scope ambiguity from an incomplete execution, a
+source-access failure, completed searches with no candidates, and dependency-skipped stages. A
+pre-transport contract failure or budget stop is `discovery_execution_incomplete`; it does not ask
+the reviewer to redefine an otherwise valid biological scope and does not imply that public data
+are absent.
 
 ## Preparation and approval
 

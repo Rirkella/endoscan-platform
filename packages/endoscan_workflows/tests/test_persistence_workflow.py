@@ -645,16 +645,58 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
         def run_turn(self, request, history, *, interruption_requested):
             assert interruption_requested is False
             calls.append((request.agent_name, len(history)))
+            if request.agent_name == "Activity Evidence Discovery Agent" and len(history) < 3:
+                modality = ("binding", "agonism", "antagonism")[len(history)]
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request={
+                        "tool_name": "search_activity_sources",
+                        "arguments": {
+                            "source_system": "pubchem-bioassay",
+                            "query": f"example receptor {modality}",
+                            "biological_target": "Example receptor",
+                            "endpoint_modality": modality,
+                            "maximum_results": 2,
+                        },
+                        "idempotency_key": f"offline-search-activity-{modality}",
+                    },
+                    usage=UsageReport(
+                        input_tokens=10,
+                        output_tokens=2,
+                        cached_tokens=0,
+                        cost_cents=0.001,
+                        provider_invocations=1,
+                    ),
+                )
+            if (
+                request.agent_name == "Transcriptomic Evidence Discovery Agent"
+                and len(history) < 2
+            ):
+                operation = (
+                    "search_transcriptomic_sources"
+                    if not history
+                    else "search_lincs_resources"
+                )
+                return ProviderTurn(
+                    kind="tool",
+                    tool_request={
+                        "tool_name": operation,
+                        "arguments": {
+                            "query": "example chemical perturbation",
+                            "maximum_results": 2,
+                        },
+                        "idempotency_key": f"offline-{operation}",
+                    },
+                    usage=UsageReport(
+                        input_tokens=10,
+                        output_tokens=2,
+                        cached_tokens=0,
+                        cost_cents=0.001,
+                        provider_invocations=1,
+                    ),
+                )
             if not history:
                 operation, arguments = {
-                    "Activity Evidence Discovery Agent": (
-                        "search_activity_sources",
-                        {"query": "example enzyme inhibition", "maximum_results": 2},
-                    ),
-                    "Transcriptomic Evidence Discovery Agent": (
-                        "search_transcriptomic_sources",
-                        {"query": "example chemical perturbation", "maximum_results": 2},
-                    ),
                     "Chemical Identity and Structure Source Discovery Agent": (
                         "resolve_compound_identity_sample",
                         {
@@ -766,7 +808,7 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
 
     build = service.create_build(
         EndpointBuildCreate(
-            endpoint_name="Example enzyme inhibition",
+            endpoint_name="Receptor X binding, agonism, and antagonism",
             endpoint_slug="offline-four-role-orchestration",
             biological_goal=(
                 "Construct a compound-level public training dataset with transcriptomic responses."
@@ -811,7 +853,7 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
     assert completed.current_stage is WorkflowState.AWAITING_SOURCE_INVENTORY_REVIEW
     assert completed.status.value == "waiting"
     assert len(service.agent_runs(build.id)) == 4
-    assert len(calls) == 8
+    assert len(calls) == 11
     assert {agent for agent, _history in calls} == {
         "Activity Evidence Discovery Agent",
         "Transcriptomic Evidence Discovery Agent",
@@ -823,7 +865,8 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
         for run in service.agent_runs(build.id)
     )
     workflow = service.training_dataset_workflow(build.id)
-    assert len(workflow["source_observations"]) == 4
+    assert len(workflow["source_observations"]) == 5
+    assert len(workflow["source_search_outcomes"]) == 5
     assert len(workflow["source_fragments"]) == 4
     transcript_fragment = next(
         item["fragment"]
