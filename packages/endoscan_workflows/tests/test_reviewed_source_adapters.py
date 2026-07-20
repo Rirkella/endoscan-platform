@@ -236,6 +236,35 @@ def test_source_security_rejects_domain_redirect_mime_size_timeout_and_http_erro
         assert failure.value.diagnostic.safe_url_path == "/entrez/eutils/esearch.fcgi"
 
 
+def test_source_credentials_are_not_forwarded_across_approved_host_redirects() -> None:
+    secret = "credential-never-forward-across-hosts"
+    calls = 0
+
+    def redirected(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if request.url.host == "comptox.epa.gov":
+            assert request.headers["x-api-key"] == secret
+            return httpx.Response(
+                302,
+                headers={"location": "https://eutils.ncbi.nlm.nih.gov/health"},
+                request=request,
+            )
+        assert request.url.host == "eutils.ncbi.nlm.nih.gov"
+        assert "x-api-key" not in request.headers
+        return httpx.Response(200, json={"status": "UP"}, request=request)
+
+    with ScientificSourceClient(
+        transport=httpx.MockTransport(redirected), sleep=lambda _seconds: None
+    ) as client:
+        response = client.get(
+            "https://comptox.epa.gov/ctx-api/bioactivity/health",
+            headers={"x-api-key": secret},
+        )
+    assert calls == 2
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize(
     ("fixture_group", "definition", "operation"),
     [
@@ -276,9 +305,25 @@ def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None
         ),
     )
     assert epa_request.url == (
-        "https://comptox.epa.gov/dashboard-api/ccdapp2/assay-endpoints/search"
+        "https://comptox.epa.gov/ctx-api/bioactivity/search/contain/"
+        "example%20receptor%20functional%20activity"
     )
-    assert epa_request.params["size"] == 4
+    assert epa_request.params["top"] == 4
+    assert epa_request.required_credential == "epa_comptox_api_key"
+    epa_metadata = _adapter(EPA_COMPTOX_TOXCAST_ADAPTER)._build_request(
+        "inspect_epa_assay_metadata",
+        ReviewedSourceOperationInput(stable_identifier="AEID:3032"),
+    )
+    assert epa_metadata.url == (
+        "https://comptox.epa.gov/ctx-api/bioactivity/assay/search/by-aeid/3032"
+    )
+    assert epa_metadata.params == {"projection": "assay-all"}
+    epa_health = _adapter(EPA_COMPTOX_TOXCAST_ADAPTER)._build_request(
+        "check_epa_bioactivity_health",
+        ReviewedSourceOperationInput(),
+    )
+    assert epa_health.url == "https://comptox.epa.gov/ctx-api/bioactivity/health"
+    assert epa_health.required_credential is None
     assert EPA_COMPTOX_TOXCAST_ADAPTER.source_retry_count == 0
     assert EPA_COMPTOX_TOXCAST_ADAPTER.maximum_response_bytes == 500_000
 
@@ -295,6 +340,154 @@ def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None
     assert lincs_metadata.url == "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
     assert lincs_metadata.params["acc"] == "GSE12345"
     assert LINCS_L1000_ADAPTER.source_retry_count == 0
+
+
+def test_epa_health_parser_is_technical_only_and_creates_no_observation() -> None:
+    adapter = _adapter(EPA_COMPTOX_TOXCAST_ADAPTER)
+    assert (
+        adapter._normalized_records(
+            "check_epa_bioactivity_health",
+            ReviewedSourceOperationInput(),
+            b'{"status":"UP"}',
+            "application/json",
+        )
+        == []
+    )
+    assert (
+        adapter._normalized_records(
+            "check_epa_bioactivity_health",
+            ReviewedSourceOperationInput(),
+            b"UP",
+            "text/plain",
+        )
+        == []
+    )
+
+
+def test_epa_official_api_key_is_header_only_and_never_persisted(workflow_runtime) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    secret = "epa-offline-secret-never-persist"
+    source_calls = 0
+
+    def official_epa(request: httpx.Request) -> httpx.Response:
+        nonlocal source_calls
+        source_calls += 1
+        assert request.url.raw_path.startswith(
+            b"/ctx-api/bioactivity/search/contain/example%20receptor"
+        )
+        assert request.url.params["top"] == "3"
+        assert request.headers["x-api-key"] == secret
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "aeid": 3032,
+                    "searchName": "assay_component_endpoint_name",
+                    "searchValue": "Example receptor response",
+                    "searchValueDesc": "Reviewed assay search result",
+                }
+            ],
+            request=request,
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(official_epa),
+        maximum_attempts=1,
+        sleep=lambda _seconds: None,
+    )
+    adapter = ReviewedSourceAdapter(
+        EPA_COMPTOX_TOXCAST_ADAPTER,
+        client,
+        SourceResponseCache(database),
+        store,
+        epa_comptox_api_key=secret,
+    )
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="EPA credential boundary",
+            endpoint_slug="epa-credential-boundary",
+            biological_goal="Verify reviewed EPA header injection without secret persistence.",
+            created_by="test-admin",
+            idempotency_key="epa-credential-boundary-build",
+        )
+    )
+    step = service.create_step(
+        build.id,
+        WorkflowState.DRAFT,
+        idempotency_key="epa-credential-boundary-step",
+        input_payload={"fixture": True},
+    )
+    result = adapter.execute_with_telemetry(
+        "search_epa_assays",
+        ReviewedSourceOperationInput(query="example receptor", maximum_results=3),
+        ToolInvocation(
+            tool_name="search_epa_assays",
+            arguments={"query": "example receptor"},
+            workflow_id=build.id,
+            step_id=step.id,
+            workflow_stage=WorkflowState.DRAFT,
+            idempotency_key="epa-credential-boundary-call",
+        ),
+    )
+    assert source_calls == 1
+    assert result.batch.observations[0].stable_source_identifier == "3032"
+    assert secret not in json.dumps(result.model_dump(mode="json"))
+    descriptor, content = store.get(result.telemetry.raw_artifact_id or "")
+    assert secret not in descriptor.model_dump_json()
+    assert secret.encode() not in content
+    client.close()
+
+
+def test_epa_scientific_operation_without_key_fails_before_transport(workflow_runtime) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    source_calls = 0
+
+    def forbidden_transport(_request: httpx.Request) -> httpx.Response:
+        nonlocal source_calls
+        source_calls += 1
+        raise AssertionError("missing EPA credential must fail before transport")
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(forbidden_transport),
+        maximum_attempts=1,
+        sleep=lambda _seconds: None,
+    )
+    adapter = ReviewedSourceAdapter(
+        EPA_COMPTOX_TOXCAST_ADAPTER,
+        client,
+        SourceResponseCache(database),
+        store,
+    )
+    build = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="EPA missing credential",
+            endpoint_slug="epa-missing-credential",
+            biological_goal="Verify fail-closed EPA authentication.",
+            created_by="test-admin",
+            idempotency_key="epa-missing-credential-build",
+        )
+    )
+    step = service.create_step(
+        build.id,
+        WorkflowState.DRAFT,
+        idempotency_key="epa-missing-credential-step",
+        input_payload={"fixture": True},
+    )
+    with pytest.raises(ValueError, match="EPA_COMPTOX_API_KEY"):
+        adapter.execute(
+            "search_epa_assays",
+            ReviewedSourceOperationInput(query="example receptor"),
+            ToolInvocation(
+                tool_name="search_epa_assays",
+                arguments={"query": "example receptor"},
+                workflow_id=build.id,
+                step_id=step.id,
+                workflow_stage=WorkflowState.DRAFT,
+                idempotency_key="epa-missing-credential-call",
+            ),
+        )
+    assert source_calls == 0
+    client.close()
 
 
 def test_epa_parser_preserves_assay_component_modality_and_release_gaps() -> None:

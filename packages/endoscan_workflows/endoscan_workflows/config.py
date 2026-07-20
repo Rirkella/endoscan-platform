@@ -48,6 +48,7 @@ class AgentConfiguration(BaseModel):
     source_requests_per_second: float = Field(default=2.5, gt=0, le=10)
     ncbi_email: str | None = None
     ncbi_api_key: SecretStr | None = None
+    epa_comptox_api_key: SecretStr | None = None
 
     @field_validator("provider", "planner_provider", "worker_provider")
     @classmethod
@@ -132,6 +133,11 @@ class AgentConfiguration(BaseModel):
             ncbi_api_key=(
                 SecretStr(os.environ["NCBI_API_KEY"]) if os.environ.get("NCBI_API_KEY") else None
             ),
+            epa_comptox_api_key=(
+                SecretStr(os.environ["EPA_COMPTOX_API_KEY"])
+                if os.environ.get("EPA_COMPTOX_API_KEY")
+                else None
+            ),
         )
 
     @property
@@ -186,6 +192,7 @@ class AgentConfiguration(BaseModel):
             "api_key_present": self.api_key_present,
             "live_mode_enabled": self.live_enabled,
             "source_tools_available": True,
+            "epa_comptox_api_key_present": self.epa_comptox_api_key is not None,
             "tracing_enabled": self.tracing_enabled,
             "configured_budget": {
                 "maximum_turns": self.maximum_turns,

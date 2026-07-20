@@ -124,6 +124,7 @@ def test_configuration_honors_bounded_live_settings(monkeypatch) -> None:
     monkeypatch.setenv("ENDOSCAN_AGENT_PROVIDER", "openai")
     monkeypatch.setenv("ENDOSCAN_AGENT_MODE", "live")
     monkeypatch.setenv("OPENAI_API_KEY", "unit-test-key-never-display")
+    monkeypatch.setenv("EPA_COMPTOX_API_KEY", "epa-unit-test-key-never-display")
     configuration = AgentConfiguration.from_env()
     assert configuration.run_mode is AgentRunMode.LIVE
     assert configuration.maximum_turns == 6
@@ -135,6 +136,8 @@ def test_configuration_honors_bounded_live_settings(monkeypatch) -> None:
     assert configuration.retry_count == 0
     assert configuration.public_status()["configured_budget"]["retry_count"] == 0
     assert "unit-test-key-never-display" not in json.dumps(configuration.public_status())
+    assert configuration.public_status()["epa_comptox_api_key_present"] is True
+    assert "epa-unit-test-key-never-display" not in json.dumps(configuration.public_status())
 
 
 def test_configuration_separates_planner_worker_and_global_budgets(monkeypatch) -> None:

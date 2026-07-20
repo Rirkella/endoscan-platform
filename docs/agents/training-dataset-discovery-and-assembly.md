@@ -103,6 +103,12 @@ assuming LINCS is the selected source. Stable identifiers, release provenance an
 duplicates remain source-bound until deterministic comparison. Discovery performs bounded metadata
 GETs only; it does not download bulk activity tables or expression matrices.
 
+EPA discovery uses the official CTX Bioactivity API under `/ctx-api/bioactivity`. Scientific assay
+search and metadata operations require the deployment-injected `EPA_COMPTOX_API_KEY`, which is sent
+only as the official `x-api-key` header and is excluded from URLs, cache keys, artifacts, and safe
+diagnostics. The reviewed unauthenticated `/bioactivity/health` operation is technical-only and
+produces no scientific source observation.
+
 Initial discovery inspects bounded metadata and availability. Large result tables and expression
 matrices are not downloaded. Literature may clarify terms or locate a primary identifier, but it
 cannot replace public primary records or turn prose into exact counts or labels.

@@ -35,6 +35,8 @@ GSE_ACCESSION = re.compile(r"^GSE[1-9][0-9]{1,8}$", re.I)
 ALLOWED_CONTENT_TYPES = frozenset(
     {
         "application/json",
+        "application/vnd.spring-boot.actuator.v2+json",
+        "application/vnd.spring-boot.actuator.v3+json",
         "application/xml",
         "text/xml",
         "text/plain",
@@ -168,6 +170,7 @@ class ScientificSourceClient:
         accepted_types: set[str] | frozenset[str] = ALLOWED_CONTENT_TYPES,
         allow_official_geo_text: bool = False,
         maximum_bytes: int | None = None,
+        headers: dict[str, str] | None = None,
     ) -> ScientificResponse:
         response_limit = self.maximum_bytes if maximum_bytes is None else maximum_bytes
         if response_limit < 1 or response_limit > self.maximum_bytes:
@@ -194,6 +197,7 @@ class ScientificSourceClient:
                 response, redirect_count = self._get_with_approved_redirects(
                     url,
                     params=params,
+                    headers=headers,
                     tool_name=tool_name,
                     attempt_number=attempt_number,
                     started=started,
@@ -373,14 +377,21 @@ class ScientificSourceClient:
         url: str,
         *,
         params: dict[str, str | int] | None,
+        headers: dict[str, str] | None,
         tool_name: str,
         attempt_number: int,
         started: float,
     ) -> tuple[httpx.Response, int]:
         current_url = url
         current_params = params
+        current_headers = headers
+        credential_host = (urlparse(url).hostname or "").lower().rstrip(".")
         for redirect_count in range(self.maximum_redirects + 1):
-            response = self.client.get(current_url, params=current_params)
+            response = self.client.get(
+                current_url,
+                params=current_params,
+                headers=current_headers,
+            )
             if not response.is_redirect:
                 return response, redirect_count
             location = response.headers.get("location", "")
@@ -422,6 +433,9 @@ class ScientificSourceClient:
                 ) from exc
             current_url = redirected
             current_params = None
+            redirected_host = (urlparse(redirected).hostname or "").lower().rstrip(".")
+            if redirected_host != credential_host:
+                current_headers = None
         raise SourcePolicyError(
             "Scientific source exceeded the approved redirect limit.",
             diagnostic=self._diagnostic(

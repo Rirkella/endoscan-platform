@@ -114,6 +114,7 @@ class SourceHttpRequest(StrictContract):
     params: dict[str, str | int]
     accepted_mime_types: list[str]
     allow_official_geo_text: bool = False
+    required_credential: Literal["epa_comptox_api_key"] | None = None
 
     @model_validator(mode="after")
     def no_credentials_or_model_urls(self) -> SourceHttpRequest:
@@ -249,6 +250,7 @@ EPA_COMPTOX_TOXCAST_ADAPTER = _definition(
         ComponentRole.PROVENANCE_LICENSE,
     ],
     operations=[
+        "check_epa_bioactivity_health",
         "search_epa_assays",
         "inspect_epa_assay_metadata",
         "inspect_epa_activity_availability",
@@ -340,11 +342,14 @@ class ReviewedSourceAdapter:
         client: ScientificSourceClient,
         cache: SourceResponseCache,
         artifacts: LocalArtifactStore,
+        *,
+        epa_comptox_api_key: str | None = None,
     ) -> None:
         self.definition = definition
         self.client = client
         self.cache = cache
         self.artifacts = artifacts
+        self._epa_comptox_api_key = epa_comptox_api_key
 
     def execute(
         self,
@@ -419,6 +424,7 @@ class ReviewedSourceAdapter:
             accepted_types=frozenset(source_request.accepted_mime_types),
             allow_official_geo_text=source_request.allow_official_geo_text,
             maximum_bytes=self.definition.maximum_response_bytes,
+            headers=self._credential_headers(source_request),
         )
         artifact = self.artifacts.put_bytes(
             workflow_id=invocation.workflow_id,
@@ -574,17 +580,42 @@ class ReviewedSourceAdapter:
             item for item in (request.biological_target, request.endpoint_modality) if item
         )
         if self.definition.adapter_id == "epa-comptox-toxcast":
+            if operation == "check_epa_bioactivity_health":
+                return SourceHttpRequest(
+                    url="https://comptox.epa.gov/ctx-api/bioactivity/health",
+                    params={},
+                    accepted_mime_types=[
+                        "application/json",
+                        "application/vnd.spring-boot.actuator.v2+json",
+                        "application/vnd.spring-boot.actuator.v3+json",
+                        "text/plain",
+                    ],
+                )
             search_term = query or request.stable_identifier
             if not search_term:
                 raise ValueError("EPA assay operations require a typed query or stable identifier")
+            if operation == "search_epa_assays":
+                return SourceHttpRequest(
+                    url=(
+                        "https://comptox.epa.gov/ctx-api/bioactivity/search/contain/"
+                        f"{quote(search_term, safe='')}"
+                    ),
+                    params={"top": request.maximum_results},
+                    accepted_mime_types=["application/json"],
+                    required_credential="epa_comptox_api_key",
+                )
+            stable_identifier = self._required_identifier(request)
+            aeid = stable_identifier.removeprefix("AEID:").removeprefix("aeid:")
+            if not re.fullmatch(r"[1-9][0-9]{0,9}", aeid):
+                raise ValueError("EPA metadata operations require a numeric AEID")
             return SourceHttpRequest(
-                url="https://comptox.epa.gov/dashboard-api/ccdapp2/assay-endpoints/search",
-                params={
-                    "search": search_term,
-                    "page": 0,
-                    "size": request.maximum_results,
-                },
+                url=(
+                    "https://comptox.epa.gov/ctx-api/bioactivity/assay/search/by-aeid/"
+                    f"{aeid}"
+                ),
+                params={"projection": "assay-all"},
                 accepted_mime_types=["application/json"],
+                required_credential="epa_comptox_api_key",
             )
         if self.definition.adapter_id == "lincs-l1000":
             if operation == "search_lincs_resources":
@@ -712,6 +743,18 @@ class ReviewedSourceAdapter:
             raise ValueError("operation requires a stable source identifier")
         return request.stable_identifier
 
+    def _credential_headers(self, request: SourceHttpRequest) -> dict[str, str] | None:
+        if request.required_credential is None:
+            return None
+        if request.required_credential != "epa_comptox_api_key":
+            raise ValueError("reviewed source request uses an unsupported credential binding")
+        if not self._epa_comptox_api_key:
+            raise ValueError(
+                "EPA CTX Bioactivity operations require EPA_COMPTOX_API_KEY; "
+                "the unauthenticated health operation remains available."
+            )
+        return {"x-api-key": self._epa_comptox_api_key}
+
     def _parse_response(
         self,
         operation: str,
@@ -741,6 +784,16 @@ class ReviewedSourceAdapter:
         content: bytes,
         content_type: str,
     ) -> list[dict[str, Any]]:
+        if (
+            self.definition.adapter_id == "epa-comptox-toxcast"
+            and operation == "check_epa_bioactivity_health"
+        ):
+            if content_type == "text/plain":
+                if not content.decode("utf-8", errors="strict").strip():
+                    raise ValueError("EPA health response is empty")
+            else:
+                json.loads(content.decode("utf-8"))
+            return []
         if content_type in {"text/plain", "geo/text"} and self.definition.adapter_id in {
             "ncbi-geo-series",
             "lincs-l1000",
@@ -828,12 +881,15 @@ class ReviewedSourceAdapter:
             return [
                 {
                     "stable_identifier": str(
-                        item.get("assayEndpointId")
+                        item.get("aeid")
+                        or item.get("assayEndpointId")
                         or item.get("endpointId")
                         or item.get("id")
                         or "unresolved"
                     ),
                     "title": item.get("assayEndpointName")
+                    or item.get("searchValue")
+                    or item.get("searchValueDesc")
                     or item.get("endpointName")
                     or item.get("name"),
                     "target": item.get("biologicalTarget") or item.get("target"),
@@ -1186,9 +1242,16 @@ def production_reviewed_source_registry(
     client: ScientificSourceClient,
     cache: SourceResponseCache,
     artifacts: LocalArtifactStore,
+    epa_comptox_api_key: str | None = None,
 ) -> ReviewedSourceAdapterRegistry:
     return ReviewedSourceAdapterRegistry(
-        ReviewedSourceAdapter(definition, client, cache, artifacts)
+        ReviewedSourceAdapter(
+            definition,
+            client,
+            cache,
+            artifacts,
+            epa_comptox_api_key=epa_comptox_api_key,
+        )
         for definition in REVIEWED_ADAPTER_DEFINITIONS
     )
 

@@ -211,6 +211,11 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         client=source_client,
         cache=source_cache,
         artifacts=artifact_store,
+        epa_comptox_api_key=(
+            agent_configuration.epa_comptox_api_key.get_secret_value()
+            if agent_configuration.epa_comptox_api_key
+            else None
+        ),
     )
     tool_registry = phase1_tool_registry(root, discovery_tools, reviewed_source_adapters)
     provider_registry = ProviderRegistry()
