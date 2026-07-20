@@ -40,9 +40,7 @@ from .training_dataset import (
 )
 
 REVIEW_POLICY_VERSION = "reviewed-source-adapters-v1"
-EPA_TOXCAST_PUBLIC_RELEASE_PAGE = (
-    "https://www.epa.gov/comptox-tools/exploring-toxcast-data-downloadable-data"
-)
+EPA_TOXCAST_PUBLIC_RELEASE_PAGE = "https://clowder.edap-cluster.com/spaces/687e388ce4b02565bc3e28e4"
 EPA_PUBLIC_DISTRIBUTION_HOSTS = frozenset(
     {
         "api.figshare.com",
@@ -51,7 +49,6 @@ EPA_PUBLIC_DISTRIBUTION_HOSTS = frozenset(
         "epa.figshare.com",
         "gaftp.epa.gov",
         "ndownloader.figshare.com",
-        "www.epa.gov",
     }
 )
 EPA_AUTHENTICATED_OPERATIONS = frozenset(
@@ -73,11 +70,19 @@ class _BoundedManifestHTMLParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.text_parts: list[str] = []
         self.links: list[tuple[str, str]] = []
+        self.metadata: list[str] = []
         self._active_href: str | None = None
         self._active_text: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.casefold() != "a" or len(self.links) >= 100:
+        normalized_tag = tag.casefold()
+        if normalized_tag == "meta" and len(self.metadata) < 50:
+            attributes = {name.casefold(): value for name, value in attrs if value}
+            name = (attributes.get("name") or attributes.get("property") or "").casefold()
+            if name in {"description", "og:description", "og:title", "twitter:title"}:
+                self.metadata.append((attributes.get("content") or "")[:2_000])
+            return
+        if normalized_tag != "a" or len(self.links) >= 100:
             return
         href = next((value for name, value in attrs if name.casefold() == "href"), None)
         if href:
@@ -187,9 +192,10 @@ class SourceHttpRequest(StrictContract):
     required_credential: Literal["epa_comptox_api_key"] | None = None
     allow_empty_health_response: bool = False
     accept_header: Literal["text/html"] | None = None
+    approved_request_hosts: list[str] = Field(default_factory=list, max_length=10)
     approved_redirect_hosts: list[str] = Field(default_factory=list, max_length=10)
 
-    @field_validator("approved_redirect_hosts")
+    @field_validator("approved_request_hosts", "approved_redirect_hosts")
     @classmethod
     def redirect_hosts_are_exact_hosts(cls, values: list[str]) -> list[str]:
         for value in values:
@@ -476,9 +482,9 @@ class ReviewedSourceAdapter:
     ) -> VerifiedSourceObservationBatch:
         return self.execute_with_telemetry(operation, request, invocation).batch
 
-    def operation_runtime_status(self, operation: str) -> Literal[
-        "ready", "authenticated_api_unavailable", "unapproved_operation"
-    ]:
+    def operation_runtime_status(
+        self, operation: str
+    ) -> Literal["ready", "authenticated_api_unavailable", "unapproved_operation"]:
         if operation not in self.definition.approved_operations:
             return "unapproved_operation"
         if (
@@ -541,9 +547,7 @@ class ReviewedSourceAdapter:
                     "provenance_record_id": f"source-cache:{cached.cache_key}",
                     "retry_count": self.definition.source_retry_count,
                     "sanitized_diagnostic": stored.get("sanitized_diagnostic"),
-                    "validation_stage_reached": stored.get(
-                        "validation_stage_reached", "complete"
-                    ),
+                    "validation_stage_reached": stored.get("validation_stage_reached", "complete"),
                     "parser_stage_reached": stored.get("parser_stage_reached", "complete"),
                     "failure_category": stored.get("failure_category"),
                     "sanitized_message": stored.get("sanitized_message"),
@@ -565,6 +569,11 @@ class ReviewedSourceAdapter:
                 maximum_bytes=self.definition.maximum_response_bytes,
                 headers=self._request_headers(source_request),
                 allow_empty_health_response=source_request.allow_empty_health_response,
+                approved_request_hosts=(
+                    frozenset(source_request.approved_request_hosts)
+                    if source_request.approved_request_hosts
+                    else None
+                ),
                 approved_redirect_hosts=(
                     frozenset(source_request.approved_redirect_hosts)
                     if source_request.approved_redirect_hosts
@@ -798,8 +807,7 @@ class ReviewedSourceAdapter:
             sanitized_diagnostic=diagnostic,
             validation_stage_reached="response_validated",
             parser_stage_reached=(
-                parser_stage_reached
-                or ("complete" if parser_status == "succeeded" else "failed")
+                parser_stage_reached or ("complete" if parser_status == "succeeded" else "failed")
             ),
             failure_category=failure_category,
             sanitized_message=sanitized_message,
@@ -898,10 +906,7 @@ class ReviewedSourceAdapter:
             if not re.fullmatch(r"[1-9][0-9]{0,9}", aeid):
                 raise ValueError("EPA metadata operations require a numeric AEID")
             return SourceHttpRequest(
-                url=(
-                    "https://comptox.epa.gov/ctx-api/bioactivity/assay/search/by-aeid/"
-                    f"{aeid}"
-                ),
+                url=("https://comptox.epa.gov/ctx-api/bioactivity/assay/search/by-aeid/" f"{aeid}"),
                 params={"projection": "assay-all"},
                 accepted_mime_types=["application/json"],
                 required_credential="epa_comptox_api_key",
@@ -912,6 +917,7 @@ class ReviewedSourceAdapter:
                 params={},
                 accepted_mime_types=["text/html"],
                 accept_header="text/html",
+                approved_request_hosts=["clowder.edap-cluster.com"],
                 approved_redirect_hosts=sorted(EPA_PUBLIC_DISTRIBUTION_HOSTS),
             )
         if self.definition.adapter_id == "lincs-l1000":
@@ -1138,7 +1144,9 @@ class ReviewedSourceAdapter:
                     "html_parsing",
                     "EPA public release HTML could not be parsed safely.",
                 ) from exc
-            page_text = " ".join(" ".join(parser.text_parts).split())
+            page_text = " ".join(" ".join([*parser.text_parts, *parser.metadata]).split())
+            link_manifest_text = " ".join(f"{label} {href}" for href, label in parser.links)
+            bounded_manifest_text = " ".join(f"{page_text} {link_manifest_text}".split())[:150_000]
             if re.search(r"\b(?:log\s*in|sign\s*in)\b", page_text, flags=re.I) and re.search(
                 r"\b(?:password|username|account)\b", page_text, flags=re.I
             ):
@@ -1147,27 +1155,77 @@ class ReviewedSourceAdapter:
                     "release_marker_validation",
                     "EPA public release operation returned a login page.",
                 )
-            if not re.search(r"\bToxCast\b", page_text, flags=re.I) or not re.search(
-                r"\binvitrodb\b", page_text, flags=re.I
+            if re.search(
+                r"\b(?:page\s+not\s+found|access\s+denied|internal\s+server\s+error)\b",
+                page_text,
+                flags=re.I,
             ):
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_error_page",
+                    "release_marker_validation",
+                    "EPA public release operation returned an error page.",
+                )
+            if not re.search(r"\bToxCast\b", bounded_manifest_text, flags=re.I):
                 raise _ReviewedManifestParseError(
                     "epa_manifest_release_marker_missing",
                     "release_marker_validation",
-                    "EPA public release page lacks required ToxCast and invitrodb markers.",
+                    "EPA public release page lacks the required ToxCast source-family marker.",
                 )
             release_match = re.search(
-                r"\binvitrodb(?:\s+database)?(?:\s+(?:release|version))?\s+v?([0-9]+(?:\.[0-9]+)+)",
-                page_text,
+                r"\binvitrodb(?:[\s_-]+database)?(?:[\s_-]+(?:release|version))?"
+                r"[\s_-]*v?([0-9]+(?:\.[0-9]+)+)",
+                bounded_manifest_text,
                 flags=re.I,
             )
+            if release_match is None:
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_release_title_missing",
+                    "release_version_parsing",
+                    "EPA public release page lacks a bounded invitrodb release title and version.",
+                )
             date_match = re.search(
                 r"\b(?:release(?:d|\s+date)?|updated)\s*(?:on|:)?\s*"
                 r"((?:19|20)[0-9]{2}-[01][0-9]-[0-3][0-9]|"
                 r"(?:January|February|March|April|May|June|July|August|September|October|"
-                r"November|December)\s+[0-3]?[0-9],?\s+(?:19|20)[0-9]{2})",
-                page_text,
+                r"November|December)(?:\s+[0-3]?[0-9],?)?\s+(?:19|20)[0-9]{2})",
+                bounded_manifest_text,
                 flags=re.I,
             )
+            doi_match = re.search(
+                r"\b10\.23645/epacomptox\.[0-9]+\.v([0-9]+)\b",
+                bounded_manifest_text,
+                flags=re.I,
+            )
+            if doi_match is None:
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_citation_missing",
+                    "official_link_extraction",
+                    "EPA public release page lacks a bounded official citation DOI.",
+                )
+            citation_doi = doi_match.group(0).lower()
+            citation_url = f"https://doi.org/{citation_doi}"
+            availability_patterns = {
+                "database package": (r"\b(?:database(?:[\s_-]+package)?|invitrodb[\s_-]+files?)\b"),
+                "summary files": r"\bsummary[\s_-]+files?\b",
+                "assay information": (
+                    r"\bassay[\s_-]+(?:information|annotations?|target[\s_-]+mappings?)\b"
+                ),
+                "release notes": r"\brelease[\s_-]+notes?\b",
+                "plots": r"\bplots?\b",
+            }
+            available_artifacts = [
+                label
+                for label, pattern in availability_patterns.items()
+                if re.search(pattern, bounded_manifest_text, flags=re.I)
+            ]
+            if not available_artifacts or not re.search(
+                r"\b(?:public|download|files?|data)\b", bounded_manifest_text, flags=re.I
+            ):
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_public_data_missing",
+                    "official_link_extraction",
+                    "EPA public release page lacks bounded public-data availability markers.",
+                )
             official_links: list[tuple[str, str]] = []
             for href, label in parser.links:
                 resolved = urljoin(source_url, href)
@@ -1187,8 +1245,13 @@ class ReviewedSourceAdapter:
                             "chemical",
                             "database",
                             "download",
+                            "doi.org",
+                            "file",
                             "figshare",
                             "invitrodb",
+                            "note",
+                            "plot",
+                            "release",
                             "summary",
                             "toxcast",
                         )
@@ -1197,23 +1260,8 @@ class ReviewedSourceAdapter:
                             (resolved[:2_000], label or parsed.path.rsplit("/", 1)[-1])
                         )
             deduplicated_links = list(dict.fromkeys(url for url, _label in official_links))[:25]
-            artifact_labels = list(
-                dict.fromkeys(label for _url, label in official_links if label)
-            )[:25]
             release_version = release_match.group(1) if release_match else None
             release_date = date_match.group(1) if date_match else None
-            if release_version is None:
-                raise _ReviewedManifestParseError(
-                    "epa_manifest_release_version_missing",
-                    "release_version_parsing",
-                    "EPA public release page lacks a bounded invitrodb release version.",
-                )
-            if not deduplicated_links:
-                raise _ReviewedManifestParseError(
-                    "epa_manifest_official_links_missing",
-                    "official_link_extraction",
-                    "EPA public release page lacks reviewed official distribution links.",
-                )
             return [
                 {
                     "stable_identifier": (
@@ -1228,25 +1276,24 @@ class ReviewedSourceAdapter:
                         "activity-call availability",
                         "continuous-measurement availability",
                     ],
-                    "identifier_fields": ["official chemical identity/archive metadata"],
-                    "downloadable_artifacts": artifact_labels
-                    or [
-                        "database package",
-                        "assay annotations",
-                        "assay target mapping",
-                        "summary files",
-                        "chemical identity archive",
+                    "identifier_fields": [
+                        "official chemical identity/archive metadata",
+                        f"citation DOI {citation_doi}",
                     ],
+                    "downloadable_artifacts": available_artifacts,
                     "official_evidence_references": [
-                        EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
                         source_url,
+                        citation_url,
                         *deduplicated_links,
                     ],
                     "access_status": "requires_download",
                     "count_status": "not_computed",
                     "licence_access_status": "metadata_only",
                     "strengths": [
-                        "Official EPA public release page was parsed as a bounded manifest."
+                        (
+                            "The reviewed public Clowder release for the EPA ToxCast source "
+                            "family was parsed as a bounded manifest."
+                        )
                     ],
                     "limitations": [
                         "The full invitrodb database and activity tables were not downloaded.",
@@ -1260,9 +1307,14 @@ class ReviewedSourceAdapter:
                         for field, value in (
                             ("release version", release_version),
                             ("release date", release_date),
-                            ("official downloadable artifact links", deduplicated_links),
+                            ("official citation DOI", citation_doi),
                         )
                         if not value
+                    ]
+                    + [
+                        f"availability marker: {label}"
+                        for label in availability_patterns
+                        if label not in available_artifacts
                     ],
                     "next_required_ingestion_action": (
                         "Human review must authorize any separately bounded download and ingestion."

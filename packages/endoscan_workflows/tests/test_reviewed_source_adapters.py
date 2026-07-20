@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from endoscan_workflows.contracts import EndpointBuildCreate, ToolInvocation, WorkflowState
+from endoscan_workflows.models import ArtifactRow, SourceCacheRow
 from endoscan_workflows.reviewed_source_adapters import (
     EPA_COMPTOX_TOXCAST_ADAPTER,
     EPA_PUBLIC_DISTRIBUTION_HOSTS,
@@ -157,9 +158,10 @@ def test_registry_exposes_only_reviewed_adapters_and_covers_mandatory_roles() ->
     )
     assert without_identity.readiness()["ready"] is False
     assert ComponentRole.CHEMICAL_STRUCTURE.value in without_identity.readiness()["missing_roles"]
-    assert "epa-toxcast-public-downloads" in without_identity.readiness()[
-        "missing_required_adapter_ids"
-    ]
+    assert (
+        "epa-toxcast-public-downloads"
+        in without_identity.readiness()["missing_required_adapter_ids"]
+    )
     assert "pending-compound" not in without_identity.readiness()["approved_adapter_ids"]
 
 
@@ -336,19 +338,17 @@ def test_epa_public_html_accept_header_survives_reviewed_cross_host_redirect() -
         nonlocal calls
         calls += 1
         assert request.headers["accept"] == "text/html"
-        if request.url.host == "www.epa.gov":
+        if request.url.host == "clowder.edap-cluster.com":
             return httpx.Response(
                 302,
-                headers={
-                    "location": "https://clowder.edap-cluster.com/datasets/official-release"
-                },
+                headers={"location": "https://epa.figshare.com/articles/dataset/invitrodb/6062623"},
                 request=request,
             )
-        assert request.url.host == "clowder.edap-cluster.com"
+        assert request.url.host == "epa.figshare.com"
         assert "x-api-key" not in request.headers
         return httpx.Response(
             200,
-            content=_epa_manifest_fixtures()["valid_clowder_release_page"].encode(),
+            content=_epa_manifest_fixtures()["valid_clowder_invitrodb_v4_3"].encode(),
             headers={"content-type": "text/html"},
             request=request,
         )
@@ -362,13 +362,49 @@ def test_epa_public_html_accept_header_survives_reviewed_cross_host_redirect() -
         EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
         accepted_types={"text/html"},
         headers={"Accept": "text/html"},
+        approved_request_hosts=frozenset({"clowder.edap-cluster.com"}),
         approved_redirect_hosts=EPA_PUBLIC_DISTRIBUTION_HOSTS,
     )
     assert calls == 2
     assert response.status_code == 200
     assert response.diagnostic is not None
     assert response.diagnostic.redirect_count == 1
-    assert response.diagnostic.final_approved_host == "clowder.edap-cluster.com"
+    assert response.diagnostic.final_approved_host == "epa.figshare.com"
+    client.close()
+
+
+def test_clowder_locator_requires_the_epa_operation_scoped_allowlist() -> None:
+    calls = 0
+
+    def response(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            content=_epa_manifest_fixtures()["valid_clowder_invitrodb_v4_3"].encode(),
+            headers={"content-type": "text/html"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(response),
+        maximum_attempts=1,
+        sleep=lambda _seconds: None,
+    )
+    with pytest.raises(SourcePolicyError):
+        client.get(
+            EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
+            accepted_types={"text/html"},
+        )
+    assert calls == 0
+
+    result = client.get(
+        EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
+        accepted_types={"text/html"},
+        approved_request_hosts=frozenset({"clowder.edap-cluster.com"}),
+    )
+    assert calls == 1
+    assert result.status_code == 200
     client.close()
 
 
@@ -469,6 +505,7 @@ def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None
     assert public_release.url == EPA_TOXCAST_PUBLIC_RELEASE_PAGE
     assert public_release.params == {}
     assert public_release.accepted_mime_types == ["text/html"]
+    assert public_release.approved_request_hosts == ["clowder.edap-cluster.com"]
     assert public_release.required_credential is None
     assert EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER.source_retry_count == 0
     assert EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER.maximum_response_bytes == 500_000
@@ -490,9 +527,7 @@ def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None
         "check_lincs_geo_distribution_health",
         ReviewedSourceOperationInput(),
     )
-    assert lincs_health.url == (
-        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi"
-    )
+    assert lincs_health.url == ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi")
     assert lincs_health.params == {"db": "gds", "retmode": "json"}
 
 
@@ -676,19 +711,7 @@ def test_epa_scientific_operation_without_key_fails_before_transport(workflow_ru
 def test_epa_public_release_manifest_is_bounded_official_and_cacheable(workflow_runtime) -> None:
     database, store, _providers, _harness, service = workflow_runtime
     source_calls = 0
-    manifest = b"""
-    <html><body>
-      <h1>ToxCast data downloadable data</h1>
-      <p>invitrodb release v4.2, released on July 1, 2026.</p>
-      <a href="https://epa.figshare.com/articles/dataset/invitrodb_v4_2/12345">
-        invitrodb v4.2 database package
-      </a>
-      <a href="https://clowder.edap-cluster.com/files/assay_annotations.csv">
-        Assay annotations and target mapping
-      </a>
-      <a href="https://attacker.invalid/full-database.zip">unreviewed download</a>
-    </body></html>
-    """
+    manifest = _epa_manifest_fixtures()["valid_clowder_invitrodb_v4_3"].encode()
 
     def official_epa_page(request: httpx.Request) -> httpx.Response:
         nonlocal source_calls
@@ -748,15 +771,15 @@ def test_epa_public_release_manifest_is_bounded_official_and_cacheable(workflow_
     assert result.telemetry.http_status == 200
     assert result.telemetry.response_bytes == len(manifest)
     assert result.telemetry.retry_count == 0
-    assert result.telemetry.initial_host == "www.epa.gov"
+    assert result.telemetry.initial_host == "clowder.edap-cluster.com"
+    assert result.telemetry.final_allowlisted_host == "clowder.edap-cluster.com"
+    assert result.telemetry.mime_type == "text/html"
     assert result.telemetry.validation_stage_reached == "response_validated"
     assert result.telemetry.parser_stage_reached == "complete"
     assert result.telemetry.failure_category is None
     assert result.telemetry.raw_artifact_id
     assert result.telemetry.raw_artifact_sha256
-    assert result.telemetry.provenance_record_id == (
-        f"source-cache:{result.telemetry.cache_key}"
-    )
+    assert result.telemetry.provenance_record_id == (f"source-cache:{result.telemetry.cache_key}")
     descriptor, persisted = store.get(result.telemetry.raw_artifact_id)
     assert descriptor.sha256 == result.telemetry.raw_artifact_sha256
     assert persisted == manifest
@@ -767,19 +790,30 @@ def test_epa_public_release_manifest_is_bounded_official_and_cacheable(workflow_
     )
     assert cache_row is not None
     assert cache_row.raw_artifact_id == result.telemetry.raw_artifact_id
-    assert observation.source_release_version == "4.2"
-    assert observation.source_release_date == "July 1, 2026"
+    with database.session() as session:
+        assert session.get(ArtifactRow, result.telemetry.raw_artifact_id) is not None
+        persisted_cache = session.get(SourceCacheRow, result.telemetry.cache_key)
+        assert persisted_cache is not None
+        assert persisted_cache.raw_artifact_id == result.telemetry.raw_artifact_id
+    assert observation.source_system == "EPA ToxCast public data releases"
+    assert observation.source_release_version == "4.3"
+    assert observation.source_release_date == "August 2025"
     assert observation.manifest_verification_status == "public_manifest_verified"
     assert observation.data_access_status is CapabilityStatus.REQUIRES_DOWNLOAD
     assert observation.count_status is ObservationCountStatus.NOT_COMPUTED
     assert observation.exact_counts == {}
     assert EPA_TOXCAST_PUBLIC_RELEASE_PAGE in observation.official_evidence_references
-    assert any("epa.figshare.com" in item for item in observation.official_evidence_references)
     assert any(
-        "clowder.edap-cluster.com" in item
+        item == "https://doi.org/10.23645/epacomptox.6062623.v14"
         for item in observation.official_evidence_references
     )
-    assert all("attacker.invalid" not in item for item in observation.official_evidence_references)
+    assert set(observation.downloadable_artifact_types) == {
+        "database package",
+        "summary files",
+        "assay information",
+        "release notes",
+        "plots",
+    }
     assert any("not downloaded" in item for item in observation.limitations)
 
     cached = adapter.execute_with_telemetry(
@@ -795,35 +829,31 @@ def test_epa_public_release_manifest_is_bounded_official_and_cacheable(workflow_
 
 
 @pytest.mark.parametrize(
-    ("fixture_name", "source_url"),
+    "fixture_name",
     [
-        ("valid_epa_landing_page", EPA_TOXCAST_PUBLIC_RELEASE_PAGE),
-        (
-            "valid_clowder_release_page",
-            "https://clowder.edap-cluster.com/datasets/official-release",
-        ),
-        ("valid_distribution_links", EPA_TOXCAST_PUBLIC_RELEASE_PAGE),
-        ("changed_layout", EPA_TOXCAST_PUBLIC_RELEASE_PAGE),
+        "valid_clowder_invitrodb_v4_3",
+        "changed_clowder_layout",
     ],
 )
 def test_epa_public_release_parser_accepts_reviewed_layout_variants(
-    fixture_name: str, source_url: str
+    fixture_name: str,
 ) -> None:
     records = _adapter(EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER)._normalized_records(
         "inspect_epa_public_invitrodb_release",
         ReviewedSourceOperationInput(),
         _epa_manifest_fixtures()[fixture_name].encode(),
         "text/html",
-        source_url=source_url,
+        source_url=EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
     )
 
-    assert records[0]["source_release_version"] == "4.2"
+    assert records[0]["source_release_version"] == "4.3"
+    assert records[0]["source_release_date"] == "August 2025"
     assert records[0]["manifest_verification_status"] == "public_manifest_verified"
     assert records[0]["access_status"] == "requires_download"
     assert records[0]["count_status"] == "not_computed"
-    assert any(
-        "epa.figshare.com" in item or "clowder.edap-cluster.com" in item
-        for item in records[0]["official_evidence_references"]
+    assert (
+        "https://doi.org/10.23645/epacomptox.6062623.v14"
+        in records[0]["official_evidence_references"]
     )
 
 
@@ -831,16 +861,17 @@ def test_epa_public_release_parser_accepts_reviewed_layout_variants(
     ("fixture_name", "failure_category", "parser_stage"),
     [
         (
-            "missing_release_marker",
-            "epa_manifest_release_marker_missing",
-            "release_marker_validation",
+            "missing_release_title",
+            "epa_manifest_release_title_missing",
+            "release_version_parsing",
         ),
         (
-            "unrelated_html",
+            "unrelated_clowder_page",
             "epa_manifest_release_marker_missing",
             "release_marker_validation",
         ),
-        ("login_page", "epa_manifest_login_page", "release_marker_validation"),
+        ("login_error_page", "epa_manifest_login_page", "release_marker_validation"),
+        ("generic_error_page", "epa_manifest_error_page", "release_marker_validation"),
     ],
 )
 def test_epa_public_release_parser_failure_retains_safe_artifact_telemetry(
@@ -875,7 +906,7 @@ def test_epa_public_release_parser_failure_retains_safe_artifact_telemetry(
             )
         telemetry = captured.value.telemetry
         assert calls == 1
-        assert telemetry.initial_host == "www.epa.gov"
+        assert telemetry.initial_host == "clowder.edap-cluster.com"
         assert telemetry.http_status == 200
         assert telemetry.mime_type == "text/html"
         assert telemetry.response_bytes == len(body)
@@ -887,11 +918,14 @@ def test_epa_public_release_parser_failure_retains_safe_artifact_telemetry(
         descriptor, persisted = runtime.artifacts.get(telemetry.raw_artifact_id)
         assert descriptor.sha256 == telemetry.raw_artifact_sha256
         assert persisted == body
-        assert runtime.cache.get(
-            "epa-toxcast-public-downloads:inspect_epa_public_invitrodb_release",
-            request.model_dump(mode="json"),
-            source_version="1.0.0",
-        ) is None
+        assert (
+            runtime.cache.get(
+                "epa-toxcast-public-downloads:inspect_epa_public_invitrodb_release",
+                request.model_dump(mode="json"),
+                source_version="1.0.0",
+            )
+            is None
+        )
         serialized = json.dumps(telemetry.model_dump(mode="json"))
         assert body.decode() not in serialized
     client.close()
@@ -957,7 +991,7 @@ def test_epa_public_release_transport_failures_keep_complete_safe_telemetry(
         assert telemetry.adapter_id == "epa-toxcast-public-downloads"
         assert telemetry.adapter_version == "1.0.0"
         assert telemetry.operation_name == "inspect_epa_public_invitrodb_release"
-        assert telemetry.initial_host == "www.epa.gov"
+        assert telemetry.initial_host == "clowder.edap-cluster.com"
         assert telemetry.http_method == "GET"
         assert telemetry.http_status == expected_status
         assert telemetry.redirect_count == (1 if failure_kind == "redirect" else 0)
@@ -978,7 +1012,7 @@ def test_epa_public_release_artifact_failure_is_bounded_and_diagnostic(
     monkeypatch,
 ) -> None:
     calls = 0
-    body = _epa_manifest_fixtures()["valid_epa_landing_page"].encode()
+    body = _epa_manifest_fixtures()["valid_clowder_invitrodb_v4_3"].encode()
 
     def response(request: httpx.Request) -> httpx.Response:
         nonlocal calls
@@ -1014,9 +1048,7 @@ def test_epa_public_release_artifact_failure_is_bounded_and_diagnostic(
         assert telemetry.validation_stage_reached == "response_validated"
         assert telemetry.parser_stage_reached == "not_started"
         assert telemetry.failure_category == "artifact_persistence"
-        assert telemetry.sanitized_message == (
-            "Reviewed source artifact could not be persisted."
-        )
+        assert telemetry.sanitized_message == ("Reviewed source artifact could not be persisted.")
         assert telemetry.raw_artifact_id is None
         assert telemetry.cache_status == "miss_not_written"
         serialized = json.dumps(telemetry.model_dump(mode="json"))

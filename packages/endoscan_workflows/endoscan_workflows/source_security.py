@@ -26,13 +26,6 @@ APPROVED_SOURCE_HOSTS = frozenset(
         "lincsproject.org",
         "pubchem.ncbi.nlm.nih.gov",
         "www.ncbi.nlm.nih.gov",
-        "www.epa.gov",
-        "api.figshare.com",
-        "clowder.edap-cluster.com",
-        "doi.org",
-        "epa.figshare.com",
-        "gaftp.epa.gov",
-        "ndownloader.figshare.com",
     }
 )
 OFFICIAL_GEO_HOST = "www.ncbi.nlm.nih.gov"
@@ -182,13 +175,14 @@ class ScientificSourceClient:
         maximum_bytes: int | None = None,
         headers: dict[str, str] | None = None,
         allow_empty_health_response: bool = False,
+        approved_request_hosts: frozenset[str] | None = None,
         approved_redirect_hosts: frozenset[str] | None = None,
     ) -> ScientificResponse:
         response_limit = self.maximum_bytes if maximum_bytes is None else maximum_bytes
         if response_limit < 1 or response_limit > self.maximum_bytes:
             raise SourcePolicyError("Scientific source response limit is outside policy.")
         try:
-            self._validate_url(url)
+            self._validate_url(url, additional_approved_hosts=approved_request_hosts)
         except SourcePolicyError as exc:
             raise SourcePolicyError(
                 str(exc),
@@ -470,7 +464,10 @@ class ScientificSourceClient:
                 )
             redirected = str(response.url.join(location))
             try:
-                self._validate_url(redirected)
+                self._validate_url(
+                    redirected,
+                    additional_approved_hosts=approved_redirect_hosts,
+                )
             except SourcePolicyError as exc:
                 raise SourcePolicyError(
                     "Scientific source redirected to a prohibited destination.",
@@ -588,12 +585,20 @@ class ScientificSourceClient:
             developer_message=developer_message,
         )
 
-    def _validate_url(self, url: str) -> None:
+    def _validate_url(
+        self,
+        url: str,
+        *,
+        additional_approved_hosts: frozenset[str] | None = None,
+    ) -> None:
         parsed = urlparse(url)
         if parsed.scheme != "https" or not parsed.hostname:
             raise SourcePolicyError("Scientific source tools require HTTPS.")
         host = parsed.hostname.lower().rstrip(".")
-        if host not in self.approved_hosts:
+        operation_hosts = frozenset(
+            item.lower().rstrip(".") for item in (additional_approved_hosts or ())
+        )
+        if host not in self.approved_hosts and host not in operation_hosts:
             raise SourcePolicyError("Scientific source domain is not allowlisted.")
         if parsed.username or parsed.password:
             raise SourcePolicyError("Scientific source URL contains forbidden credentials.")
