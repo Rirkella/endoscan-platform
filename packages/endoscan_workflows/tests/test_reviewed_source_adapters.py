@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from endoscan_workflows.contracts import EndpointBuildCreate, ToolInvocation, WorkflowState
 from endoscan_workflows.reviewed_source_adapters import (
     EPA_COMPTOX_TOXCAST_ADAPTER,
+    EPA_PUBLIC_DISTRIBUTION_HOSTS,
     EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER,
     EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
     LINCS_L1000_ADAPTER,
@@ -22,6 +23,7 @@ from endoscan_workflows.reviewed_source_adapters import (
     ReviewedSourceAdapter,
     ReviewedSourceAdapterDefinition,
     ReviewedSourceAdapterRegistry,
+    ReviewedSourceExecutionError,
     ReviewedSourceOperationInput,
     SourceHttpRequest,
     adapter_registry_fingerprint,
@@ -36,6 +38,7 @@ from endoscan_workflows.source_security import (
     SourceResponseError,
     SourceTimeoutError,
 )
+from endoscan_workflows.source_smoke import isolated_reviewed_source_smoke_runtime
 from endoscan_workflows.training_dataset import (
     ActivityRepresentation,
     CapabilityStatus,
@@ -53,6 +56,10 @@ from endoscan_workflows.training_dataset import (
 )
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "reviewed_source_adapter_cases.json"
+EPA_MANIFEST_FIXTURE_PATH = (
+    Path(__file__).parent / "fixtures" / "epa_public_release_manifest_cases.json"
+)
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _adapter(definition: ReviewedSourceAdapterDefinition) -> ReviewedSourceAdapter:
@@ -88,6 +95,10 @@ def _specification() -> TrainingDatasetSpecification:
 
 def _fixtures() -> dict[str, list[dict]]:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def _epa_manifest_fixtures() -> dict[str, str]:
+    return json.loads(EPA_MANIFEST_FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
 def test_registry_exposes_only_reviewed_adapters_and_covers_mandatory_roles() -> None:
@@ -316,6 +327,49 @@ def test_source_credentials_are_not_forwarded_across_approved_host_redirects() -
         )
     assert calls == 2
     assert response.status_code == 200
+
+
+def test_epa_public_html_accept_header_survives_reviewed_cross_host_redirect() -> None:
+    calls = 0
+
+    def redirected(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.headers["accept"] == "text/html"
+        if request.url.host == "www.epa.gov":
+            return httpx.Response(
+                302,
+                headers={
+                    "location": "https://clowder.edap-cluster.com/datasets/official-release"
+                },
+                request=request,
+            )
+        assert request.url.host == "clowder.edap-cluster.com"
+        assert "x-api-key" not in request.headers
+        return httpx.Response(
+            200,
+            content=_epa_manifest_fixtures()["valid_clowder_release_page"].encode(),
+            headers={"content-type": "text/html"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(redirected),
+        maximum_attempts=1,
+        sleep=lambda _seconds: None,
+    )
+    response = client.get(
+        EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
+        accepted_types={"text/html"},
+        headers={"Accept": "text/html"},
+        approved_redirect_hosts=EPA_PUBLIC_DISTRIBUTION_HOSTS,
+    )
+    assert calls == 2
+    assert response.status_code == 200
+    assert response.diagnostic is not None
+    assert response.diagnostic.redirect_count == 1
+    assert response.diagnostic.final_approved_host == "clowder.edap-cluster.com"
+    client.close()
 
 
 def test_empty_epa_health_response_is_allowed_only_for_exact_technical_operation() -> None:
@@ -694,6 +748,25 @@ def test_epa_public_release_manifest_is_bounded_official_and_cacheable(workflow_
     assert result.telemetry.http_status == 200
     assert result.telemetry.response_bytes == len(manifest)
     assert result.telemetry.retry_count == 0
+    assert result.telemetry.initial_host == "www.epa.gov"
+    assert result.telemetry.validation_stage_reached == "response_validated"
+    assert result.telemetry.parser_stage_reached == "complete"
+    assert result.telemetry.failure_category is None
+    assert result.telemetry.raw_artifact_id
+    assert result.telemetry.raw_artifact_sha256
+    assert result.telemetry.provenance_record_id == (
+        f"source-cache:{result.telemetry.cache_key}"
+    )
+    descriptor, persisted = store.get(result.telemetry.raw_artifact_id)
+    assert descriptor.sha256 == result.telemetry.raw_artifact_sha256
+    assert persisted == manifest
+    cache_row = SourceResponseCache(database).get(
+        "epa-toxcast-public-downloads:inspect_epa_public_invitrodb_release",
+        request.model_dump(mode="json"),
+        source_version="1.0.0",
+    )
+    assert cache_row is not None
+    assert cache_row.raw_artifact_id == result.telemetry.raw_artifact_id
     assert observation.source_release_version == "4.2"
     assert observation.source_release_date == "July 1, 2026"
     assert observation.manifest_verification_status == "public_manifest_verified"
@@ -717,6 +790,238 @@ def test_epa_public_release_manifest_is_bounded_official_and_cacheable(workflow_
     assert source_calls == 1
     assert cached.batch.cache_status == "cached"
     assert cached.batch.source_request_count == 0
+    assert cached.telemetry.raw_artifact_sha256 == result.telemetry.raw_artifact_sha256
+    client.close()
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "source_url"),
+    [
+        ("valid_epa_landing_page", EPA_TOXCAST_PUBLIC_RELEASE_PAGE),
+        (
+            "valid_clowder_release_page",
+            "https://clowder.edap-cluster.com/datasets/official-release",
+        ),
+        ("valid_distribution_links", EPA_TOXCAST_PUBLIC_RELEASE_PAGE),
+        ("changed_layout", EPA_TOXCAST_PUBLIC_RELEASE_PAGE),
+    ],
+)
+def test_epa_public_release_parser_accepts_reviewed_layout_variants(
+    fixture_name: str, source_url: str
+) -> None:
+    records = _adapter(EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER)._normalized_records(
+        "inspect_epa_public_invitrodb_release",
+        ReviewedSourceOperationInput(),
+        _epa_manifest_fixtures()[fixture_name].encode(),
+        "text/html",
+        source_url=source_url,
+    )
+
+    assert records[0]["source_release_version"] == "4.2"
+    assert records[0]["manifest_verification_status"] == "public_manifest_verified"
+    assert records[0]["access_status"] == "requires_download"
+    assert records[0]["count_status"] == "not_computed"
+    assert any(
+        "epa.figshare.com" in item or "clowder.edap-cluster.com" in item
+        for item in records[0]["official_evidence_references"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "failure_category", "parser_stage"),
+    [
+        (
+            "missing_release_marker",
+            "epa_manifest_release_marker_missing",
+            "release_marker_validation",
+        ),
+        (
+            "unrelated_html",
+            "epa_manifest_release_marker_missing",
+            "release_marker_validation",
+        ),
+        ("login_page", "epa_manifest_login_page", "release_marker_validation"),
+    ],
+)
+def test_epa_public_release_parser_failure_retains_safe_artifact_telemetry(
+    fixture_name: str, failure_category: str, parser_stage: str
+) -> None:
+    calls = 0
+    body = _epa_manifest_fixtures()[fixture_name].encode()
+
+    def response(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            content=body,
+            headers={"content-type": "text/html"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(response),
+        maximum_attempts=1,
+        maximum_bytes=500_000,
+        sleep=lambda _seconds: None,
+    )
+    with isolated_reviewed_source_smoke_runtime(repo_root=REPO_ROOT, client=client) as runtime:
+        request = ReviewedSourceOperationInput(maximum_results=1)
+        with pytest.raises(ReviewedSourceExecutionError) as captured:
+            runtime.execute(
+                "inspect_epa_public_invitrodb_release",
+                request,
+                idempotency_key=f"epa-parser-failure-{fixture_name}",
+            )
+        telemetry = captured.value.telemetry
+        assert calls == 1
+        assert telemetry.initial_host == "www.epa.gov"
+        assert telemetry.http_status == 200
+        assert telemetry.mime_type == "text/html"
+        assert telemetry.response_bytes == len(body)
+        assert telemetry.validation_stage_reached == "response_validated"
+        assert telemetry.parser_stage_reached == parser_stage
+        assert telemetry.failure_category == failure_category
+        assert telemetry.retryable is False
+        assert telemetry.raw_artifact_id
+        descriptor, persisted = runtime.artifacts.get(telemetry.raw_artifact_id)
+        assert descriptor.sha256 == telemetry.raw_artifact_sha256
+        assert persisted == body
+        assert runtime.cache.get(
+            "epa-toxcast-public-downloads:inspect_epa_public_invitrodb_release",
+            request.model_dump(mode="json"),
+            source_version="1.0.0",
+        ) is None
+        serialized = json.dumps(telemetry.model_dump(mode="json"))
+        assert body.decode() not in serialized
+    client.close()
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_category", "expected_stage", "expected_status"),
+    [
+        ("http_error", "source_client_error", "http_status_validation", 404),
+        ("redirect", "redirect_not_approved", "redirect_validation", 302),
+        ("mime", "unexpected_content_type", "mime_validation", 200),
+        ("oversized", "response_too_large", "response_size_validation", 200),
+    ],
+)
+def test_epa_public_release_transport_failures_keep_complete_safe_telemetry(
+    failure_kind: str,
+    expected_category: str,
+    expected_stage: str,
+    expected_status: int,
+) -> None:
+    calls = 0
+
+    def response(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        assert request.headers["accept"] == "text/html"
+        if failure_kind == "http_error":
+            return httpx.Response(404, content=b"private-body", request=request)
+        if failure_kind == "redirect":
+            return httpx.Response(
+                302,
+                headers={"location": "https://example.invalid/release"},
+                request=request,
+            )
+        if failure_kind == "mime":
+            return httpx.Response(
+                200,
+                json={"unexpected": "private-body"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            content=b"x" * 500_001,
+            headers={"content-type": "text/html"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(response),
+        maximum_attempts=1,
+        maximum_bytes=500_000,
+        sleep=lambda _seconds: None,
+    )
+    with isolated_reviewed_source_smoke_runtime(repo_root=REPO_ROOT, client=client) as runtime:
+        with pytest.raises(ReviewedSourceExecutionError) as captured:
+            runtime.execute(
+                "inspect_epa_public_invitrodb_release",
+                ReviewedSourceOperationInput(maximum_results=1),
+                idempotency_key=f"epa-transport-failure-{failure_kind}",
+            )
+        telemetry = captured.value.telemetry
+        assert calls == 1
+        assert telemetry.adapter_id == "epa-toxcast-public-downloads"
+        assert telemetry.adapter_version == "1.0.0"
+        assert telemetry.operation_name == "inspect_epa_public_invitrodb_release"
+        assert telemetry.initial_host == "www.epa.gov"
+        assert telemetry.http_method == "GET"
+        assert telemetry.http_status == expected_status
+        assert telemetry.redirect_count == (1 if failure_kind == "redirect" else 0)
+        assert telemetry.validation_stage_reached == expected_stage
+        assert telemetry.parser_stage_reached == "not_started"
+        assert telemetry.failure_category == expected_category
+        assert telemetry.parser_status == "not_run"
+        assert telemetry.cache_status == "miss_not_written"
+        assert telemetry.raw_artifact_id is None
+        assert telemetry.retryable is False
+        assert telemetry.sanitized_diagnostic is not None
+        serialized = json.dumps(telemetry.model_dump(mode="json"))
+        assert "private-body" not in serialized
+    client.close()
+
+
+def test_epa_public_release_artifact_failure_is_bounded_and_diagnostic(
+    monkeypatch,
+) -> None:
+    calls = 0
+    body = _epa_manifest_fixtures()["valid_epa_landing_page"].encode()
+
+    def response(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            content=body,
+            headers={"content-type": "text/html"},
+            request=request,
+        )
+
+    client = ScientificSourceClient(
+        transport=httpx.MockTransport(response),
+        maximum_attempts=1,
+        maximum_bytes=500_000,
+        sleep=lambda _seconds: None,
+    )
+    with isolated_reviewed_source_smoke_runtime(repo_root=REPO_ROOT, client=client) as runtime:
+
+        def reject_artifact(**_kwargs):
+            raise RuntimeError("private storage failure detail")
+
+        monkeypatch.setattr(runtime.artifacts, "put_bytes", reject_artifact)
+        with pytest.raises(ReviewedSourceExecutionError) as captured:
+            runtime.execute(
+                "inspect_epa_public_invitrodb_release",
+                ReviewedSourceOperationInput(maximum_results=1),
+                idempotency_key="epa-artifact-failure",
+            )
+        telemetry = captured.value.telemetry
+        assert calls == 1
+        assert telemetry.http_status == 200
+        assert telemetry.validation_stage_reached == "response_validated"
+        assert telemetry.parser_stage_reached == "not_started"
+        assert telemetry.failure_category == "artifact_persistence"
+        assert telemetry.sanitized_message == (
+            "Reviewed source artifact could not be persisted."
+        )
+        assert telemetry.raw_artifact_id is None
+        assert telemetry.cache_status == "miss_not_written"
+        serialized = json.dumps(telemetry.model_dump(mode="json"))
+        assert "private storage failure detail" not in serialized
+        assert body.decode() not in serialized
     client.close()
 
 

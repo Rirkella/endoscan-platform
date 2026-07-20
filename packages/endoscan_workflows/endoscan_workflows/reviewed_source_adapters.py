@@ -27,6 +27,7 @@ from .source_security import (
     ALLOWED_CONTENT_TYPES,
     TECHNICAL_HEALTH_STATUS_MIME,
     ScientificSourceClient,
+    SourceToolError,
     sanitize_untrusted_text,
 )
 from .training_dataset import (
@@ -96,6 +97,16 @@ class _BoundedManifestHTMLParser(HTMLParser):
         self.links.append((self._active_href, label))
         self._active_href = None
         self._active_text = []
+
+
+class _ReviewedManifestParseError(ValueError):
+    """Controlled parser failure with a bounded, allowlisted diagnostic."""
+
+    def __init__(self, category: str, stage: str, safe_message: str) -> None:
+        super().__init__(safe_message)
+        self.category = category
+        self.stage = stage
+        self.safe_message = safe_message
 
 
 class AdapterReviewStatus(StrEnum):
@@ -175,6 +186,21 @@ class SourceHttpRequest(StrictContract):
     allow_official_geo_text: bool = False
     required_credential: Literal["epa_comptox_api_key"] | None = None
     allow_empty_health_response: bool = False
+    accept_header: Literal["text/html"] | None = None
+    approved_redirect_hosts: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("approved_redirect_hosts")
+    @classmethod
+    def redirect_hosts_are_exact_hosts(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if (
+                value != value.casefold().rstrip(".")
+                or "://" in value
+                or "/" in value
+                or "@" in value
+            ):
+                raise ValueError("approved redirect hosts must be normalized exact host names")
+        return values
 
     @model_validator(mode="after")
     def no_credentials_or_model_urls(self) -> SourceHttpRequest:
@@ -190,6 +216,7 @@ class ReviewedSourceExecutionTelemetry(StrictContract):
     adapter_version: str
     source_system: str
     operation_name: str
+    initial_host: str | None = None
     http_method: Literal["GET"] = "GET"
     final_allowlisted_host: str | None = None
     http_status: int | None = None
@@ -208,6 +235,11 @@ class ReviewedSourceExecutionTelemetry(StrictContract):
     provenance_record_id: str | None = None
     retry_count: int = Field(default=0, ge=0, le=2)
     sanitized_diagnostic: SourceToolDiagnostic | None = None
+    validation_stage_reached: str = Field(default="not_started", max_length=120)
+    parser_stage_reached: str = Field(default="not_started", max_length=120)
+    failure_category: str | None = Field(default=None, max_length=120)
+    sanitized_message: str | None = Field(default=None, max_length=500)
+    retryable: bool = False
 
 
 class ReviewedSourceExecutionResult(StrictContract):
@@ -340,7 +372,7 @@ EPA_TOXCAST_PUBLIC_DOWNLOADS_ADAPTER = _definition(
         "inspect_epa_public_summary_files",
         "inspect_epa_public_chemical_archive",
     ],
-    domains=["www.epa.gov"],
+    domains=sorted(EPA_PUBLIC_DISTRIBUTION_HOSTS),
     parser="epa_toxcast_public_release_manifest_html_v1",
     accepted_mime_types=["text/html"],
 )
@@ -491,6 +523,7 @@ class ReviewedSourceAdapter:
                     "adapter_version": self.definition.adapter_version,
                     "source_system": self.definition.official_source_system,
                     "operation_name": operation,
+                    "initial_host": stored.get("initial_host"),
                     "final_allowlisted_host": stored.get("final_allowlisted_host"),
                     "http_status": stored.get("http_status"),
                     "redirect_count": stored.get("redirect_count", 0),
@@ -508,6 +541,13 @@ class ReviewedSourceAdapter:
                     "provenance_record_id": f"source-cache:{cached.cache_key}",
                     "retry_count": self.definition.source_retry_count,
                     "sanitized_diagnostic": stored.get("sanitized_diagnostic"),
+                    "validation_stage_reached": stored.get(
+                        "validation_stage_reached", "complete"
+                    ),
+                    "parser_stage_reached": stored.get("parser_stage_reached", "complete"),
+                    "failure_category": stored.get("failure_category"),
+                    "sanitized_message": stored.get("sanitized_message"),
+                    "retryable": stored.get("retryable", False),
                 }
             )
             return ReviewedSourceExecutionResult(batch=batch, telemetry=telemetry)
@@ -515,29 +555,87 @@ class ReviewedSourceAdapter:
         request_host = (urlparse(source_request.url).hostname or "").lower().rstrip(".")
         if request_host not in self.definition.allowlisted_domains:
             raise ValueError("reviewed adapter request host is outside its definition allowlist")
-        response = self.client.get(
-            source_request.url,
-            tool_name=operation,
-            params=source_request.params,
-            accepted_types=frozenset(source_request.accepted_mime_types),
-            allow_official_geo_text=source_request.allow_official_geo_text,
-            maximum_bytes=self.definition.maximum_response_bytes,
-            headers=self._credential_headers(source_request),
-            allow_empty_health_response=source_request.allow_empty_health_response,
-        )
-        artifact = self.artifacts.put_bytes(
-            workflow_id=invocation.workflow_id,
-            step_id=invocation.step_id,
-            content=response.content,
-            mime_type="application/octet-stream",
-            artifact_type="immutable_source_response",
-            logical_name=(
-                f"source-response-{self.definition.adapter_id}-{operation}-{response.sha256[:16]}"
-            ),
-            producer=f"{self.definition.adapter_id}@{self.definition.adapter_version}",
-            original_source=response.url,
-            idempotency_key=invocation.idempotency_key or response.sha256,
-        )
+        try:
+            response = self.client.get(
+                source_request.url,
+                tool_name=operation,
+                params=source_request.params,
+                accepted_types=frozenset(source_request.accepted_mime_types),
+                allow_official_geo_text=source_request.allow_official_geo_text,
+                maximum_bytes=self.definition.maximum_response_bytes,
+                headers=self._request_headers(source_request),
+                allow_empty_health_response=source_request.allow_empty_health_response,
+                approved_redirect_hosts=(
+                    frozenset(source_request.approved_redirect_hosts)
+                    if source_request.approved_redirect_hosts
+                    else None
+                ),
+            )
+        except SourceToolError as exc:
+            diagnostic = exc.diagnostic
+            category = (
+                diagnostic.source_error_category
+                if diagnostic is not None
+                else "source_transport_failure"
+            )
+            validation_stage = {
+                "source_client_error": "http_status_validation",
+                "rate_limited": "http_status_validation",
+                "source_server_error": "http_status_validation",
+                "invalid_redirect": "redirect_validation",
+                "redirect_not_approved": "redirect_validation",
+                "redirect_limit_exceeded": "redirect_validation",
+                "unexpected_content_type": "mime_validation",
+                "response_too_large": "response_size_validation",
+                "source_url_policy": "request_url_validation",
+                "timeout": "transport",
+                "network_unavailable": "transport",
+            }.get(category, "transport")
+            telemetry = self._failure_telemetry(
+                operation=operation,
+                cache_key=cache_key,
+                initial_host=request_host,
+                total_started=total_started,
+                diagnostic=diagnostic,
+                validation_stage=validation_stage,
+                parser_stage="not_started",
+                failure_category=category,
+                sanitized_message=str(exc),
+                retryable=bool(getattr(exc, "retryable", False)),
+            )
+            raise ReviewedSourceExecutionError(str(exc), telemetry) from exc
+        try:
+            artifact = self.artifacts.put_bytes(
+                workflow_id=invocation.workflow_id,
+                step_id=invocation.step_id,
+                content=response.content,
+                mime_type="application/octet-stream",
+                artifact_type="immutable_source_response",
+                logical_name=(
+                    f"source-response-{self.definition.adapter_id}-{operation}-"
+                    f"{response.sha256[:16]}"
+                ),
+                producer=f"{self.definition.adapter_id}@{self.definition.adapter_version}",
+                original_source=response.url,
+                idempotency_key=invocation.idempotency_key or response.sha256,
+            )
+        except Exception as exc:
+            telemetry = self._failure_telemetry(
+                operation=operation,
+                cache_key=cache_key,
+                initial_host=request_host,
+                total_started=total_started,
+                diagnostic=response.diagnostic,
+                validation_stage="response_validated",
+                parser_stage="not_started",
+                failure_category="artifact_persistence",
+                sanitized_message="Reviewed source artifact could not be persisted.",
+                retryable=False,
+                response=response,
+            )
+            raise ReviewedSourceExecutionError(
+                "Reviewed source artifact could not be persisted.", telemetry
+            ) from exc
         parse_started = time.monotonic()
         try:
             observations = self._parse_response(
@@ -550,9 +648,21 @@ class ReviewedSourceAdapter:
                 artifact.sha256,
             )
         except Exception as exc:
+            failure_category = getattr(exc, "category", "parser_rejected")
+            parser_stage = getattr(exc, "stage", "failed")
+            sanitized_message = getattr(
+                exc,
+                "safe_message",
+                "Reviewed source parser rejected the bounded response.",
+            )
             diagnostic = (
                 response.diagnostic.model_copy(
-                    update={"parser_outcome": "failed", "source_artifact_id": artifact.id}
+                    update={
+                        "parser_outcome": parser_stage,
+                        "source_artifact_id": artifact.id,
+                        "source_error_category": failure_category,
+                        "developer_message": sanitized_message,
+                    }
                 )
                 if response.diagnostic
                 else None
@@ -560,6 +670,7 @@ class ReviewedSourceAdapter:
             telemetry = self._telemetry(
                 operation=operation,
                 cache_key=cache_key,
+                initial_host=request_host,
                 response=response,
                 artifact_id=artifact.id,
                 artifact_sha256=artifact.sha256,
@@ -569,6 +680,9 @@ class ReviewedSourceAdapter:
                 cache_write_status="not_written",
                 cache_status="miss_not_written",
                 diagnostic=diagnostic,
+                failure_category=failure_category,
+                sanitized_message=sanitized_message,
+                parser_stage_reached=parser_stage,
             )
             raise ReviewedSourceExecutionError(
                 "Reviewed source parser rejected the bounded response.", telemetry
@@ -592,6 +706,7 @@ class ReviewedSourceAdapter:
         telemetry = self._telemetry(
             operation=operation,
             cache_key=cache_key,
+            initial_host=request_host,
             response=response,
             artifact_id=artifact.id,
             artifact_sha256=artifact.sha256,
@@ -624,6 +739,12 @@ class ReviewedSourceAdapter:
                     "cache_status": "miss_not_written",
                     "provenance_record_id": None,
                     "total_duration_ms": max(0, int((time.monotonic() - total_started) * 1000)),
+                    "validation_stage_reached": "response_validated",
+                    "parser_stage_reached": "complete",
+                    "failure_category": "cache_persistence",
+                    "sanitized_message": (
+                        "Reviewed source cache could not persist artifact provenance."
+                    ),
                 }
             )
             raise ReviewedSourceExecutionError(
@@ -636,6 +757,7 @@ class ReviewedSourceAdapter:
         *,
         operation: str,
         cache_key: str,
+        initial_host: str,
         response: Any,
         artifact_id: str,
         artifact_sha256: str,
@@ -645,12 +767,16 @@ class ReviewedSourceAdapter:
         cache_write_status: Literal["written", "not_written", "failed", "not_applicable"],
         cache_status: Literal["miss_written", "hit", "miss_not_written"],
         diagnostic: SourceToolDiagnostic | None,
+        failure_category: str | None = None,
+        sanitized_message: str | None = None,
+        parser_stage_reached: str | None = None,
     ) -> ReviewedSourceExecutionTelemetry:
         return ReviewedSourceExecutionTelemetry(
             adapter_id=self.definition.adapter_id,
             adapter_version=self.definition.adapter_version,
             source_system=self.definition.official_source_system,
             operation_name=operation,
+            initial_host=initial_host,
             final_allowlisted_host=(diagnostic.final_approved_host if diagnostic else None),
             http_status=response.status_code,
             redirect_count=(diagnostic.redirect_count if diagnostic else 0),
@@ -670,6 +796,68 @@ class ReviewedSourceAdapter:
             ),
             retry_count=self.definition.source_retry_count,
             sanitized_diagnostic=diagnostic,
+            validation_stage_reached="response_validated",
+            parser_stage_reached=(
+                parser_stage_reached
+                or ("complete" if parser_status == "succeeded" else "failed")
+            ),
+            failure_category=failure_category,
+            sanitized_message=sanitized_message,
+            retryable=False,
+        )
+
+    def _failure_telemetry(
+        self,
+        *,
+        operation: str,
+        cache_key: str,
+        initial_host: str,
+        total_started: float,
+        diagnostic: SourceToolDiagnostic | None,
+        validation_stage: str,
+        parser_stage: str,
+        failure_category: str,
+        sanitized_message: str,
+        retryable: bool,
+        response: Any | None = None,
+    ) -> ReviewedSourceExecutionTelemetry:
+        return ReviewedSourceExecutionTelemetry(
+            adapter_id=self.definition.adapter_id,
+            adapter_version=self.definition.adapter_version,
+            source_system=self.definition.official_source_system,
+            operation_name=operation,
+            initial_host=initial_host,
+            final_allowlisted_host=(diagnostic.final_approved_host if diagnostic else None),
+            http_status=(
+                response.status_code
+                if response is not None
+                else (diagnostic.http_status if diagnostic else None)
+            ),
+            redirect_count=(diagnostic.redirect_count if diagnostic else 0),
+            mime_type=(
+                response.content_type
+                if response is not None
+                else (diagnostic.content_type if diagnostic else None)
+            ),
+            response_bytes=(
+                len(response.content)
+                if response is not None
+                else (diagnostic.response_byte_count if diagnostic else None)
+            ),
+            transport_duration_ms=(diagnostic.request_duration_ms if diagnostic else 0),
+            parse_duration_ms=0,
+            total_duration_ms=max(0, int((time.monotonic() - total_started) * 1000)),
+            parser_status="not_run" if parser_stage == "not_started" else "failed",
+            cache_write_status="not_written",
+            cache_status="miss_not_written",
+            cache_key=cache_key,
+            retry_count=self.definition.source_retry_count,
+            sanitized_diagnostic=diagnostic,
+            validation_stage_reached=validation_stage,
+            parser_stage_reached=parser_stage,
+            failure_category=failure_category,
+            sanitized_message=sanitized_message,
+            retryable=retryable,
         )
 
     def _build_request(
@@ -723,6 +911,8 @@ class ReviewedSourceAdapter:
                 url=EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
                 params={},
                 accepted_mime_types=["text/html"],
+                accept_header="text/html",
+                approved_redirect_hosts=sorted(EPA_PUBLIC_DISTRIBUTION_HOSTS),
             )
         if self.definition.adapter_id == "lincs-l1000":
             if operation == "check_lincs_geo_distribution_health":
@@ -868,6 +1058,12 @@ class ReviewedSourceAdapter:
             )
         return {"x-api-key": self._epa_comptox_api_key}
 
+    def _request_headers(self, request: SourceHttpRequest) -> dict[str, str] | None:
+        headers = dict(self._credential_headers(request) or {})
+        if request.accept_header is not None:
+            headers["Accept"] = request.accept_header
+        return headers or None
+
     def _parse_response(
         self,
         operation: str,
@@ -878,7 +1074,13 @@ class ReviewedSourceAdapter:
         artifact_id: str,
         artifact_hash: str,
     ) -> list[VerifiedSourceObservation]:
-        records = self._normalized_records(operation, request, content, content_type)
+        records = self._normalized_records(
+            operation,
+            request,
+            content,
+            content_type,
+            source_url=source_url,
+        )
         return [
             self._observation(
                 operation,
@@ -896,6 +1098,8 @@ class ReviewedSourceAdapter:
         request: ReviewedSourceOperationInput,
         content: bytes,
         content_type: str,
+        *,
+        source_url: str = EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
     ) -> list[dict[str, Any]]:
         if (
             self.definition.adapter_id == "epa-comptox-toxcast"
@@ -920,12 +1124,37 @@ class ReviewedSourceAdapter:
             return []
         if self.definition.adapter_id == "epa-toxcast-public-downloads":
             if content_type != "text/html":
-                raise ValueError("EPA public release manifest must be official HTML")
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_mime_mismatch",
+                    "mime_validation",
+                    "EPA public release manifest must be official HTML.",
+                )
             parser = _BoundedManifestHTMLParser()
-            parser.feed(content.decode("utf-8", errors="replace"))
+            try:
+                parser.feed(content.decode("utf-8", errors="strict"))
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_html_parse_failed",
+                    "html_parsing",
+                    "EPA public release HTML could not be parsed safely.",
+                ) from exc
             page_text = " ".join(" ".join(parser.text_parts).split())
-            if not re.search(r"\b(?:ToxCast|invitrodb)\b", page_text, flags=re.I):
-                raise ValueError("EPA public release page lacks a ToxCast or invitrodb marker")
+            if re.search(r"\b(?:log\s*in|sign\s*in)\b", page_text, flags=re.I) and re.search(
+                r"\b(?:password|username|account)\b", page_text, flags=re.I
+            ):
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_login_page",
+                    "release_marker_validation",
+                    "EPA public release operation returned a login page.",
+                )
+            if not re.search(r"\bToxCast\b", page_text, flags=re.I) or not re.search(
+                r"\binvitrodb\b", page_text, flags=re.I
+            ):
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_release_marker_missing",
+                    "release_marker_validation",
+                    "EPA public release page lacks required ToxCast and invitrodb markers.",
+                )
             release_match = re.search(
                 r"\binvitrodb(?:\s+database)?(?:\s+(?:release|version))?\s+v?([0-9]+(?:\.[0-9]+)+)",
                 page_text,
@@ -941,7 +1170,7 @@ class ReviewedSourceAdapter:
             )
             official_links: list[tuple[str, str]] = []
             for href, label in parser.links:
-                resolved = urljoin(EPA_TOXCAST_PUBLIC_RELEASE_PAGE, href)
+                resolved = urljoin(source_url, href)
                 parsed = urlparse(resolved)
                 host = (parsed.hostname or "").casefold().rstrip(".")
                 if (
@@ -973,6 +1202,18 @@ class ReviewedSourceAdapter:
             )[:25]
             release_version = release_match.group(1) if release_match else None
             release_date = date_match.group(1) if date_match else None
+            if release_version is None:
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_release_version_missing",
+                    "release_version_parsing",
+                    "EPA public release page lacks a bounded invitrodb release version.",
+                )
+            if not deduplicated_links:
+                raise _ReviewedManifestParseError(
+                    "epa_manifest_official_links_missing",
+                    "official_link_extraction",
+                    "EPA public release page lacks reviewed official distribution links.",
+                )
             return [
                 {
                     "stable_identifier": (
@@ -998,6 +1239,7 @@ class ReviewedSourceAdapter:
                     ],
                     "official_evidence_references": [
                         EPA_TOXCAST_PUBLIC_RELEASE_PAGE,
+                        source_url,
                         *deduplicated_links,
                     ],
                     "access_status": "requires_download",

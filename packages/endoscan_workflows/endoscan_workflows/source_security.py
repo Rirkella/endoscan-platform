@@ -27,6 +27,12 @@ APPROVED_SOURCE_HOSTS = frozenset(
         "pubchem.ncbi.nlm.nih.gov",
         "www.ncbi.nlm.nih.gov",
         "www.epa.gov",
+        "api.figshare.com",
+        "clowder.edap-cluster.com",
+        "doi.org",
+        "epa.figshare.com",
+        "gaftp.epa.gov",
+        "ndownloader.figshare.com",
     }
 )
 OFFICIAL_GEO_HOST = "www.ncbi.nlm.nih.gov"
@@ -176,6 +182,7 @@ class ScientificSourceClient:
         maximum_bytes: int | None = None,
         headers: dict[str, str] | None = None,
         allow_empty_health_response: bool = False,
+        approved_redirect_hosts: frozenset[str] | None = None,
     ) -> ScientificResponse:
         response_limit = self.maximum_bytes if maximum_bytes is None else maximum_bytes
         if response_limit < 1 or response_limit > self.maximum_bytes:
@@ -206,6 +213,7 @@ class ScientificSourceClient:
                     tool_name=tool_name,
                     attempt_number=attempt_number,
                     started=started,
+                    approved_redirect_hosts=approved_redirect_hosts,
                 )
             except httpx.TimeoutException as exc:
                 last_error = SourceTimeoutError(
@@ -429,6 +437,7 @@ class ScientificSourceClient:
         tool_name: str,
         attempt_number: int,
         started: float,
+        approved_redirect_hosts: frozenset[str] | None,
     ) -> tuple[httpx.Response, int]:
         current_url = url
         current_params = params
@@ -455,6 +464,7 @@ class ScientificSourceClient:
                         duration_ms=self._elapsed_ms(started),
                         http_status=response.status_code,
                         final_host=(response.url.host or "").lower().rstrip(".") or None,
+                        redirect_count=redirect_count + 1,
                         exception_class="SourcePolicyError",
                     ),
                 )
@@ -473,17 +483,44 @@ class ScientificSourceClient:
                         duration_ms=self._elapsed_ms(started),
                         http_status=response.status_code,
                         final_host=(response.url.host or "").lower().rstrip(".") or None,
+                        redirect_count=redirect_count + 1,
                         exception_class=type(exc).__name__,
                         developer_message=(
                             "Redirect target host failed the scientific-source allowlist."
                         ),
                     ),
                 ) from exc
+            redirected_host = (urlparse(redirected).hostname or "").lower().rstrip(".")
+            if (
+                approved_redirect_hosts is not None
+                and redirected_host not in approved_redirect_hosts
+            ):
+                raise SourcePolicyError(
+                    "Scientific source redirected outside the operation allowlist.",
+                    diagnostic=self._diagnostic(
+                        tool_name=tool_name,
+                        url=str(response.url),
+                        category="redirect_not_approved",
+                        retryable=False,
+                        attempt_number=attempt_number,
+                        duration_ms=self._elapsed_ms(started),
+                        http_status=response.status_code,
+                        final_host=(response.url.host or "").lower().rstrip(".") or None,
+                        redirect_count=redirect_count + 1,
+                        exception_class="SourcePolicyError",
+                        developer_message=(
+                            "Redirect target host failed the operation-specific allowlist."
+                        ),
+                    ),
+                )
             current_url = redirected
             current_params = None
-            redirected_host = (urlparse(redirected).hostname or "").lower().rstrip(".")
             if redirected_host != credential_host:
-                current_headers = None
+                current_headers = {
+                    name: value
+                    for name, value in (current_headers or {}).items()
+                    if name.casefold() == "accept"
+                } or None
         raise SourcePolicyError(
             "Scientific source exceeded the approved redirect limit.",
             diagnostic=self._diagnostic(
@@ -493,6 +530,7 @@ class ScientificSourceClient:
                 retryable=False,
                 attempt_number=attempt_number,
                 duration_ms=self._elapsed_ms(started),
+                redirect_count=self.maximum_redirects + 1,
                 exception_class="SourcePolicyError",
             ),
         )

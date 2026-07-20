@@ -230,6 +230,9 @@ def test_parser_failure_preserves_artifact_without_cache_or_transport_retry() ->
             runtime.execute("search_activity_sources", REQUEST, idempotency_key="parser-failure")
         assert calls == 1
         assert captured.value.telemetry.parser_status == "failed"
+        assert captured.value.telemetry.validation_stage_reached == "response_validated"
+        assert captured.value.telemetry.parser_stage_reached == "failed"
+        assert captured.value.telemetry.failure_category == "parser_rejected"
         assert captured.value.telemetry.cache_status == "miss_not_written"
         assert captured.value.telemetry.raw_artifact_id
         assert row_counts(runtime) == (1, 0)
@@ -257,6 +260,9 @@ def test_cache_failure_preserves_artifact_without_transport_retry(monkeypatch) -
         assert calls == 1
         assert captured.value.telemetry.cache_write_status == "failed"
         assert captured.value.telemetry.cache_status == "miss_not_written"
+        assert captured.value.telemetry.validation_stage_reached == "response_validated"
+        assert captured.value.telemetry.parser_stage_reached == "complete"
+        assert captured.value.telemetry.failure_category == "cache_persistence"
         assert row_counts(runtime) == (1, 0)
     client.close()
 
