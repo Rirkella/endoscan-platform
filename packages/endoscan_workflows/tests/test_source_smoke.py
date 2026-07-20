@@ -122,6 +122,57 @@ def test_first_call_writes_artifact_then_cache_and_second_call_is_offline(caplog
     client.close()
 
 
+def test_epa_and_lincs_health_operations_are_technical_and_cache_offline() -> None:
+    calls: list[str] = []
+
+    def health_response(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path == "/ctx-api/bioactivity/health":
+            return httpx.Response(200, json={"status": "UP"}, request=request)
+        assert request.url.path == "/entrez/eutils/einfo.fcgi"
+        assert dict(request.url.params) == {"db": "gds", "retmode": "json"}
+        return httpx.Response(
+            200,
+            json={"einforesult": {"dbinfo": [{"dbname": "gds"}]}},
+            request=request,
+        )
+
+    client = source_client(health_response)
+    with isolated_reviewed_source_smoke_runtime(repo_root=REPO_ROOT, client=client) as runtime:
+        epa_request = ReviewedSourceOperationInput()
+        lincs_request = ReviewedSourceOperationInput()
+        first_epa = runtime.execute(
+            "check_epa_bioactivity_health",
+            epa_request,
+            idempotency_key="technical-health-epa-first",
+        )
+        first_lincs = runtime.execute(
+            "check_lincs_geo_distribution_health",
+            lincs_request,
+            idempotency_key="technical-health-lincs-first",
+        )
+        cached_epa = runtime.execute(
+            "check_epa_bioactivity_health",
+            epa_request,
+            idempotency_key="technical-health-epa-cached",
+        )
+        cached_lincs = runtime.execute(
+            "check_lincs_geo_distribution_health",
+            lincs_request,
+            idempotency_key="technical-health-lincs-cached",
+        )
+        assert calls == [
+            "/ctx-api/bioactivity/health",
+            "/entrez/eutils/einfo.fcgi",
+        ]
+        assert first_epa.batch.observations == first_lincs.batch.observations == []
+        assert first_epa.batch.source_request_count == first_lincs.batch.source_request_count == 1
+        assert cached_epa.batch.source_request_count == cached_lincs.batch.source_request_count == 0
+        assert cached_epa.telemetry.cache_status == cached_lincs.telemetry.cache_status == "hit"
+        assert row_counts(runtime) == (2, 2)
+    client.close()
+
+
 def test_restart_reloads_cache_artifact_and_compiles_provenance_without_transport() -> None:
     with TemporaryDirectory(prefix="endoscan-smoke-restart-") as temporary:
         root = Path(temporary)

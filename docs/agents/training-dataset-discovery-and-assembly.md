@@ -109,6 +109,11 @@ only as the official `x-api-key` header and is excluded from URLs, cache keys, a
 diagnostics. The reviewed unauthenticated `/bioactivity/health` operation is technical-only and
 produces no scientific source observation.
 
+LINCS technical readiness uses the official NCBI EInfo operation for the GEO DataSets (`gds`)
+distribution channel. It supplies no search term, accession, endpoint hint, or source candidate and
+produces no scientific source observation; normal LINCS discovery remains a separate reviewed
+operation.
+
 Initial discovery inspects bounded metadata and availability. Large result tables and expression
 matrices are not downloaded. Literature may clarify terms or locate a primary identifier, but it
 cannot replace public primary records or turn prose into exact counts or labels.

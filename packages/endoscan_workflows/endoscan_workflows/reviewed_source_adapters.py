@@ -274,6 +274,7 @@ LINCS_L1000_ADAPTER = _definition(
         ComponentRole.PROVENANCE_LICENSE,
     ],
     operations=[
+        "check_lincs_geo_distribution_health",
         "search_lincs_resources",
         "inspect_lincs_perturbagen_catalogue",
         "inspect_lincs_signature_metadata",
@@ -618,6 +619,12 @@ class ReviewedSourceAdapter:
                 required_credential="epa_comptox_api_key",
             )
         if self.definition.adapter_id == "lincs-l1000":
+            if operation == "check_lincs_geo_distribution_health":
+                return SourceHttpRequest(
+                    url="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi",
+                    params={"db": "gds", "retmode": "json"},
+                    accepted_mime_types=["application/json", "text/plain"],
+                )
             if operation == "search_lincs_resources":
                 if not query:
                     raise ValueError("LINCS resource search requires a typed query")
@@ -793,6 +800,14 @@ class ReviewedSourceAdapter:
                     raise ValueError("EPA health response is empty")
             else:
                 json.loads(content.decode("utf-8"))
+            return []
+        if (
+            self.definition.adapter_id == "lincs-l1000"
+            and operation == "check_lincs_geo_distribution_health"
+        ):
+            payload = json.loads(content.decode("utf-8"))
+            if not isinstance(payload.get("einforesult"), dict):
+                raise ValueError("LINCS GEO distribution health response is malformed")
             return []
         if content_type in {"text/plain", "geo/text"} and self.definition.adapter_id in {
             "ncbi-geo-series",

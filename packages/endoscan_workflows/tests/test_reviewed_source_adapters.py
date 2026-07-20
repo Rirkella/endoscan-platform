@@ -340,6 +340,14 @@ def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None
     assert lincs_metadata.url == "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
     assert lincs_metadata.params["acc"] == "GSE12345"
     assert LINCS_L1000_ADAPTER.source_retry_count == 0
+    lincs_health = _adapter(LINCS_L1000_ADAPTER)._build_request(
+        "check_lincs_geo_distribution_health",
+        ReviewedSourceOperationInput(),
+    )
+    assert lincs_health.url == (
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi"
+    )
+    assert lincs_health.params == {"db": "gds", "retmode": "json"}
 
 
 def test_epa_health_parser_is_technical_only_and_creates_no_observation() -> None:
@@ -362,6 +370,26 @@ def test_epa_health_parser_is_technical_only_and_creates_no_observation() -> Non
         )
         == []
     )
+
+
+def test_lincs_geo_distribution_health_is_technical_only() -> None:
+    adapter = _adapter(LINCS_L1000_ADAPTER)
+    assert (
+        adapter._normalized_records(
+            "check_lincs_geo_distribution_health",
+            ReviewedSourceOperationInput(),
+            b'{"einforesult":{"dbinfo":[{"dbname":"gds"}]}}',
+            "application/json",
+        )
+        == []
+    )
+    with pytest.raises(ValueError, match="malformed"):
+        adapter._normalized_records(
+            "check_lincs_geo_distribution_health",
+            ReviewedSourceOperationInput(),
+            b'{"unexpected":true}',
+            "application/json",
+        )
 
 
 def test_epa_official_api_key_is_header_only_and_never_persisted(workflow_runtime) -> None:
