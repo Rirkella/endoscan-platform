@@ -27,6 +27,7 @@ from endoscan_workflows.reviewed_source_adapters import (
 )
 from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_security import (
+    TECHNICAL_HEALTH_STATUS_MIME,
     ScientificSourceClient,
     SourceFormatError,
     SourcePolicyError,
@@ -265,6 +266,33 @@ def test_source_credentials_are_not_forwarded_across_approved_host_redirects() -
     assert response.status_code == 200
 
 
+def test_empty_epa_health_response_is_allowed_only_for_exact_technical_operation() -> None:
+    def empty_response(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"", request=request)
+
+    with ScientificSourceClient(
+        transport=httpx.MockTransport(empty_response), sleep=lambda _seconds: None
+    ) as client:
+        response = client.get(
+            "https://comptox.epa.gov/ctx-api/bioactivity/health",
+            accepted_types={TECHNICAL_HEALTH_STATUS_MIME},
+            allow_empty_health_response=True,
+        )
+        assert response.content_type == TECHNICAL_HEALTH_STATUS_MIME
+        assert response.content == b""
+        with pytest.raises(SourceFormatError):
+            client.get(
+                "https://comptox.epa.gov/ctx-api/bioactivity/health",
+                accepted_types={TECHNICAL_HEALTH_STATUS_MIME},
+            )
+        with pytest.raises(SourceFormatError):
+            client.get(
+                "https://comptox.epa.gov/ctx-api/bioactivity/other",
+                accepted_types={TECHNICAL_HEALTH_STATUS_MIME},
+                allow_empty_health_response=True,
+            )
+
+
 @pytest.mark.parametrize(
     ("fixture_group", "definition", "operation"),
     [
@@ -324,6 +352,7 @@ def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None
     )
     assert epa_health.url == "https://comptox.epa.gov/ctx-api/bioactivity/health"
     assert epa_health.required_credential is None
+    assert epa_health.allow_empty_health_response is True
     assert EPA_COMPTOX_TOXCAST_ADAPTER.source_retry_count == 0
     assert EPA_COMPTOX_TOXCAST_ADAPTER.maximum_response_bytes == 500_000
 
@@ -358,6 +387,15 @@ def test_epa_health_parser_is_technical_only_and_creates_no_observation() -> Non
             ReviewedSourceOperationInput(),
             b'{"status":"UP"}',
             "application/json",
+        )
+        == []
+    )
+    assert (
+        adapter._normalized_records(
+            "check_epa_bioactivity_health",
+            ReviewedSourceOperationInput(),
+            b"",
+            TECHNICAL_HEALTH_STATUS_MIME,
         )
         == []
     )

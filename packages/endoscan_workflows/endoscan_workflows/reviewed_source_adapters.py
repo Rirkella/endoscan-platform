@@ -24,6 +24,7 @@ from .repository import canonical_json, deterministic_id, utc_text
 from .source_cache import SourceResponseCache
 from .source_security import (
     ALLOWED_CONTENT_TYPES,
+    TECHNICAL_HEALTH_STATUS_MIME,
     ScientificSourceClient,
     sanitize_untrusted_text,
 )
@@ -115,6 +116,7 @@ class SourceHttpRequest(StrictContract):
     accepted_mime_types: list[str]
     allow_official_geo_text: bool = False
     required_credential: Literal["epa_comptox_api_key"] | None = None
+    allow_empty_health_response: bool = False
 
     @model_validator(mode="after")
     def no_credentials_or_model_urls(self) -> SourceHttpRequest:
@@ -426,6 +428,7 @@ class ReviewedSourceAdapter:
             allow_official_geo_text=source_request.allow_official_geo_text,
             maximum_bytes=self.definition.maximum_response_bytes,
             headers=self._credential_headers(source_request),
+            allow_empty_health_response=source_request.allow_empty_health_response,
         )
         artifact = self.artifacts.put_bytes(
             workflow_id=invocation.workflow_id,
@@ -589,8 +592,10 @@ class ReviewedSourceAdapter:
                         "application/json",
                         "application/vnd.spring-boot.actuator.v2+json",
                         "application/vnd.spring-boot.actuator.v3+json",
+                        TECHNICAL_HEALTH_STATUS_MIME,
                         "text/plain",
                     ],
+                    allow_empty_health_response=True,
                 )
             search_term = query or request.stable_identifier
             if not search_term:
@@ -795,7 +800,10 @@ class ReviewedSourceAdapter:
             self.definition.adapter_id == "epa-comptox-toxcast"
             and operation == "check_epa_bioactivity_health"
         ):
-            if content_type == "text/plain":
+            if content_type == TECHNICAL_HEALTH_STATUS_MIME:
+                if content:
+                    raise ValueError("EPA status-only health response must be empty")
+            elif content_type == "text/plain":
                 if not content.decode("utf-8", errors="strict").strip():
                     raise ValueError("EPA health response is empty")
             else:

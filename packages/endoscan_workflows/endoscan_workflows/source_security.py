@@ -31,6 +31,9 @@ APPROVED_SOURCE_HOSTS = frozenset(
 OFFICIAL_GEO_HOST = "www.ncbi.nlm.nih.gov"
 OFFICIAL_GEO_ACCESSION_PATH = "/geo/query/acc.cgi"
 OFFICIAL_GEO_TEXT_MIME = "geo/text"
+OFFICIAL_EPA_HEALTH_HOST = "comptox.epa.gov"
+OFFICIAL_EPA_HEALTH_PATH = "/ctx-api/bioactivity/health"
+TECHNICAL_HEALTH_STATUS_MIME = "health/status-only"
 GSE_ACCESSION = re.compile(r"^GSE[1-9][0-9]{1,8}$", re.I)
 ALLOWED_CONTENT_TYPES = frozenset(
     {
@@ -171,6 +174,7 @@ class ScientificSourceClient:
         allow_official_geo_text: bool = False,
         maximum_bytes: int | None = None,
         headers: dict[str, str] | None = None,
+        allow_empty_health_response: bool = False,
     ) -> ScientificResponse:
         response_limit = self.maximum_bytes if maximum_bytes is None else maximum_bytes
         if response_limit < 1 or response_limit > self.maximum_bytes:
@@ -234,6 +238,16 @@ class ScientificSourceClient:
                 content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
                 response_bytes = len(response.content)
                 final_host = (response.url.host or "").lower().rstrip(".")
+                if self._is_approved_empty_health_response(
+                    requested_url=url,
+                    final_url=str(response.url),
+                    params=params,
+                    redirect_count=redirect_count,
+                    content_type=content_type,
+                    response_bytes=response_bytes,
+                    allow_empty_health_response=allow_empty_health_response,
+                ):
+                    content_type = TECHNICAL_HEALTH_STATUS_MIME
                 base_diagnostic = dict(
                     tool_name=tool_name,
                     url=str(response.url),
@@ -331,6 +345,39 @@ class ScientificSourceClient:
         if last_error:
             raise last_error
         raise SourceUnavailableError("Official scientific source is unavailable.")
+
+    @staticmethod
+    def _is_approved_empty_health_response(
+        *,
+        requested_url: str,
+        final_url: str,
+        params: dict[str, str | int] | None,
+        redirect_count: int,
+        content_type: str,
+        response_bytes: int,
+        allow_empty_health_response: bool,
+    ) -> bool:
+        if (
+            not allow_empty_health_response
+            or content_type
+            or response_bytes != 0
+            or redirect_count != 0
+            or params
+        ):
+            return False
+        requested = urlparse(requested_url)
+        final = urlparse(final_url)
+        return all(
+            parsed.scheme == "https"
+            and (parsed.hostname or "").lower().rstrip(".") == OFFICIAL_EPA_HEALTH_HOST
+            and parsed.port in {None, 443}
+            and parsed.path == OFFICIAL_EPA_HEALTH_PATH
+            and not parsed.query
+            and not parsed.fragment
+            and not parsed.username
+            and not parsed.password
+            for parsed in (requested, final)
+        )
 
     @staticmethod
     def _content_type_allowed(

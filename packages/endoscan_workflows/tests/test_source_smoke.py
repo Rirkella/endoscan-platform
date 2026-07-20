@@ -128,7 +128,7 @@ def test_epa_and_lincs_health_operations_are_technical_and_cache_offline() -> No
     def health_response(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
         if request.url.path == "/ctx-api/bioactivity/health":
-            return httpx.Response(200, json={"status": "UP"}, request=request)
+            return httpx.Response(200, content=b"", request=request)
         assert request.url.path == "/entrez/eutils/einfo.fcgi"
         assert dict(request.url.params) == {"db": "gds", "retmode": "json"}
         return httpx.Response(

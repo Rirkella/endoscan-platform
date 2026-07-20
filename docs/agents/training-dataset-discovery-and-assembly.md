@@ -107,7 +107,10 @@ EPA discovery uses the official CTX Bioactivity API under `/ctx-api/bioactivity`
 search and metadata operations require the deployment-injected `EPA_COMPTOX_API_KEY`, which is sent
 only as the official `x-api-key` header and is excluded from URLs, cache keys, artifacts, and safe
 diagnostics. The reviewed unauthenticated `/bioactivity/health` operation is technical-only and
-produces no scientific source observation.
+produces no scientific source observation. Its documented deployment currently returns an empty
+`200` without a MIME header; that status-only response is accepted solely for the exact health URL,
+stored as an immutable empty technical artifact, and never relaxes normal scientific-source MIME
+validation.
 
 LINCS technical readiness uses the official NCBI EInfo operation for the GEO DataSets (`gds`)
 distribution channel. It supplies no search term, accession, endpoint hint, or source candidate and
