@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -18,8 +19,10 @@ from .contracts import (
     AgentRunResult,
     AgentRunStatus,
     NormalizedAgentError,
+    ProviderToolRequest,
     ToolCallStatus,
     ToolInvocation,
+    ToolNormalizationWarning,
     ToolResult,
     TraceEvent,
     UsageReport,
@@ -94,6 +97,7 @@ class AgentHarness:
         tool_calls = 0
         validation_failures = 0
         provider_invocations = 0
+        scientific_source_requests = 0
         retries = 0
         last_turn_usage: UsageReport | None = None
         provider = self.providers.create(request.model.provider)
@@ -164,6 +168,169 @@ class AgentHarness:
                     started,
                 )
                 break
+            orchestrated = self._next_orchestrated_discovery_tool(request, history)
+            if orchestrated is not None:
+                if tool_calls >= request.budget.maximum_tool_calls:
+                    result = self._failure(
+                        AgentRunStatus.BUDGET_EXCEEDED,
+                        "maximum_tool_calls_exceeded",
+                        "Agent run exceeded its maximum tool-call count.",
+                        trace,
+                        usage,
+                        turns,
+                        tool_calls,
+                        started,
+                    )
+                    break
+                if orchestrated.tool_name not in request.available_tools:
+                    result = self._failure(
+                        AgentRunStatus.FAILED,
+                        "orchestration_tool_not_allowed",
+                        "A deterministic discovery tool was outside the bounded role inventory.",
+                        trace,
+                        usage,
+                        turns,
+                        tool_calls,
+                        started,
+                        category="policy",
+                    )
+                    break
+                estimated_source_requests = self._estimated_scientific_source_requests(orchestrated)
+                if scientific_source_requests + estimated_source_requests > int(
+                    request.context.get(
+                        "remaining_global_scientific_source_requests",
+                        1_000_000,
+                    )
+                ):
+                    result = self._failure(
+                        AgentRunStatus.BUDGET_EXCEEDED,
+                        "global_scientific_source_request_budget_exceeded",
+                        "The global scientific-source request budget is exhausted.",
+                        trace,
+                        usage,
+                        turns,
+                        tool_calls,
+                        started,
+                    )
+                    break
+                tool_calls += 1
+                call_id, tool_result = self._invoke_tool(
+                    run_id,
+                    request,
+                    orchestrated,
+                    tool_calls,
+                )
+                if (
+                    tool_result_callback is not None
+                    and tool_result.status is ToolCallStatus.COMPLETED
+                ):
+                    try:
+                        tool_result_callback(
+                            call_id,
+                            orchestrated.tool_name,
+                            tool_result,
+                        )
+                    except Exception as exc:
+                        emit(
+                            "tool_observation.persistence_failed",
+                            "failed",
+                            tool_call_id=call_id,
+                            tool_name=orchestrated.tool_name,
+                            exception_class=type(exc).__name__,
+                            orchestration_generated=True,
+                        )
+                        result = self._failure(
+                            AgentRunStatus.FAILED,
+                            "tool_observation_persistence_failed",
+                            "A verified source observation could not be persisted safely.",
+                            trace,
+                            usage,
+                            turns,
+                            tool_calls,
+                            started,
+                        )
+                        break
+                if isinstance(tool_result.output, dict):
+                    scientific_source_requests += int(
+                        tool_result.output.get("source_request_count", 0) or 0
+                    )
+                emit(
+                    "tool_call.completed",
+                    tool_result.status.value,
+                    tool_name=orchestrated.tool_name,
+                    discovery_substage="deterministic_candidate_hydration",
+                    tool_requested=orchestrated.tool_name,
+                    tool_executed=orchestrated.tool_name,
+                    tool_call_id=call_id,
+                    replayed=tool_result.replayed,
+                    orchestration_generated=True,
+                    model_supplied_arguments=None,
+                    normalized_execution_arguments=tool_result.normalized_arguments,
+                    source_diagnostic=(
+                        tool_result.source_diagnostic.model_dump(mode="json")
+                        if tool_result.source_diagnostic
+                        else None
+                    ),
+                    tool_diagnostic=(
+                        tool_result.error.tool_diagnostic.model_dump(mode="json")
+                        if tool_result.error and tool_result.error.tool_diagnostic
+                        else None
+                    ),
+                )
+                history.append(
+                    {
+                        "tool_name": orchestrated.tool_name,
+                        "status": tool_result.status.value,
+                        "original_arguments": tool_result.original_arguments,
+                        "normalized_arguments": tool_result.normalized_arguments,
+                        "output": tool_result.output,
+                        "error": (
+                            tool_result.error.model_dump(mode="json") if tool_result.error else None
+                        ),
+                        "source_diagnostic": (
+                            tool_result.source_diagnostic.model_dump(mode="json")
+                            if tool_result.source_diagnostic
+                            else None
+                        ),
+                        "discovery_substage": "deterministic_candidate_hydration",
+                        "orchestration_generated": True,
+                    }
+                )
+                if tool_result.status is not ToolCallStatus.COMPLETED:
+                    invalid_input = bool(
+                        tool_result.error and tool_result.error.code == "tool_input_invalid"
+                    )
+                    result = self._failure(
+                        AgentRunStatus.FAILED,
+                        (
+                            "orchestration_tool_input_invalid"
+                            if invalid_input
+                            else tool_result.error.code
+                            if tool_result.error
+                            else "tool_failure"
+                        ),
+                        (
+                            "Deterministic orchestration generated invalid typed tool input."
+                            if invalid_input
+                            else tool_result.error.safe_message
+                            if tool_result.error
+                            else "Tool failed safely."
+                        ),
+                        trace,
+                        usage,
+                        turns,
+                        tool_calls,
+                        started,
+                        retryable=False,
+                        category=(
+                            "orchestration_validation"
+                            if invalid_input
+                            else tool_result.error.category
+                            if tool_result.error
+                            else "agent_runtime"
+                        ),
+                    )
+                continue
             discovery_substage, exposed_tools = self._discovery_turn_policy(request, history)
             turn_request = request.model_copy(
                 update={
@@ -173,6 +340,7 @@ class AgentHarness:
                         discovery_substage=discovery_substage,
                         exposed_tools=exposed_tools,
                         tool_calls=tool_calls,
+                        history=history,
                     ),
                 }
             )
@@ -231,6 +399,20 @@ class AgentHarness:
                 )
                 break
             turn_number = turns + 1
+            if provider_invocations >= int(
+                request.context.get("remaining_global_provider_invocations", 1_000_000)
+            ):
+                result = self._failure(
+                    AgentRunStatus.BUDGET_EXCEEDED,
+                    "global_provider_invocation_budget_exceeded",
+                    "The global provider-invocation budget is exhausted.",
+                    trace,
+                    usage,
+                    turns,
+                    tool_calls,
+                    started,
+                )
+                break
             provider_invocations += 1
             fingerprint = None
             fingerprint_builder = getattr(provider, "structured_output_fingerprint", None)
@@ -419,8 +601,57 @@ class AgentHarness:
                         started,
                     )
                     break
-                tool_calls += 1
                 requested = turn.tool_request
+                model_supplied_arguments = requested.arguments
+                required_modality = turn_request.context.get("required_activity_modality")
+                if requested.tool_name == "search_activity_sources" and isinstance(
+                    required_modality, str
+                ):
+                    validated = turn_request.context.get("validated_artifacts", {})
+                    endpoint_scope = (
+                        validated.get("endpoint_discovery_scope", {})
+                        if isinstance(validated, dict)
+                        else {}
+                    )
+                    approved_target = (
+                        endpoint_scope.get("biological_target")
+                        if isinstance(endpoint_scope, dict)
+                        else None
+                    )
+                    approved_target = (
+                        approved_target
+                        if isinstance(approved_target, str) and approved_target.strip()
+                        else requested.arguments.get("biological_target")
+                    )
+                    requested = requested.model_copy(
+                        update={
+                            "arguments": {
+                                **requested.arguments,
+                                "query": f"{approved_target} {required_modality}",
+                                "biological_target": approved_target,
+                                "endpoint_modality": required_modality,
+                            }
+                        }
+                    )
+                estimated_source_requests = self._estimated_scientific_source_requests(requested)
+                if scientific_source_requests + estimated_source_requests > int(
+                    request.context.get(
+                        "remaining_global_scientific_source_requests",
+                        1_000_000,
+                    )
+                ):
+                    result = self._failure(
+                        AgentRunStatus.BUDGET_EXCEEDED,
+                        "global_scientific_source_request_budget_exceeded",
+                        "The global scientific-source request budget is exhausted.",
+                        trace,
+                        usage,
+                        turns,
+                        tool_calls,
+                        started,
+                    )
+                    break
+                tool_calls += 1
                 duplicate_query = any(
                     item.get("tool_name") == requested.tool_name
                     and canonical_json(item.get("original_arguments") or {})
@@ -464,7 +695,11 @@ class AgentHarness:
                     )
                 else:
                     call_id, tool_result = self._invoke_tool(
-                        run_id, turn_request, requested, tool_calls
+                        run_id,
+                        turn_request,
+                        requested,
+                        tool_calls,
+                        model_supplied_arguments=model_supplied_arguments,
                     )
                 if (
                     tool_result_callback is not None
@@ -491,6 +726,10 @@ class AgentHarness:
                             started,
                         )
                         break
+                if isinstance(tool_result.output, dict):
+                    scientific_source_requests += int(
+                        tool_result.output.get("source_request_count", 0) or 0
+                    )
                 source_diagnostics = []
                 if tool_result.source_diagnostic:
                     source_diagnostics.append(tool_result.source_diagnostic.model_dump(mode="json"))
@@ -608,6 +847,22 @@ class AgentHarness:
                     started,
                 )
                 break
+            if (
+                request.agent_name == "Activity Evidence Discovery Agent"
+                and discovery_substage == "candidate_search"
+            ):
+                result = self._failure(
+                    AgentRunStatus.FAILED,
+                    "mandatory_activity_searches_incomplete",
+                    "Activity synthesis cannot complete before every required modality search.",
+                    trace,
+                    usage,
+                    turns,
+                    tool_calls,
+                    started,
+                    category="orchestration_validation",
+                )
+                break
             try:
                 validated = output_model.model_validate(turn.output)
             except ValidationError as exc:
@@ -718,7 +973,13 @@ class AgentHarness:
             )
         emit("agent_run.finished", result.status.value)
         result = result.model_copy(
-            update={"trace": trace, "duration_ms": int((time.monotonic() - started) * 1000)}
+            update={
+                "trace": trace,
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "usage": result.usage.model_copy(
+                    update={"provider_invocations": provider_invocations}
+                ),
+            }
         )
         self._finish_run(run_id, request, result)
         return run_id, result
@@ -855,7 +1116,15 @@ class AgentHarness:
                 to_state=build.current_stage,
             )
 
-    def _invoke_tool(self, run_id, request, tool_request, ordinal) -> tuple[str, ToolResult]:
+    def _invoke_tool(
+        self,
+        run_id,
+        request,
+        tool_request,
+        ordinal,
+        *,
+        model_supplied_arguments: dict[str, Any] | None = None,
+    ) -> tuple[str, ToolResult]:
         key = tool_request.idempotency_key or f"turn-{ordinal}"
         tool = self.tools.get(tool_request.tool_name)
         arguments = redact(tool_request.arguments)
@@ -935,8 +1204,33 @@ class AgentHarness:
                 idempotency_key=key,
             )
         )
-        original_arguments = redact(result.original_arguments or tool_request.arguments)
+        original_arguments = redact(
+            model_supplied_arguments or result.original_arguments or tool_request.arguments
+        )
         normalized_arguments = redact(result.normalized_arguments or tool_request.arguments)
+        if model_supplied_arguments is not None and canonical_json(
+            model_supplied_arguments
+        ) != canonical_json(tool_request.arguments):
+            enforced_warnings = [
+                ToolNormalizationWarning(
+                    code="approved_activity_scope_enforced",
+                    field=field,
+                    original_index=index,
+                    original=str(model_supplied_arguments.get(field, "")),
+                    normalized=str(tool_request.arguments.get(field, "")),
+                    policy_version="activity-modality-sequence-v1",
+                )
+                for index, field in enumerate(("biological_target", "endpoint_modality", "query"))
+                if model_supplied_arguments.get(field) != tool_request.arguments.get(field)
+            ]
+            result = result.model_copy(
+                update={
+                    "normalization_warnings": [
+                        *result.normalization_warnings,
+                        *enforced_warnings,
+                    ]
+                }
+            )
         normalization_warnings = [
             warning.model_dump(mode="json") for warning in result.normalization_warnings
         ]
@@ -1041,6 +1335,7 @@ class AgentHarness:
         discovery_substage: str,
         exposed_tools: list[str],
         tool_calls: int,
+        history: list[dict] | None = None,
     ) -> dict:
         """Bind the provider boundary proof to the deterministic per-stage tool scope."""
 
@@ -1051,9 +1346,28 @@ class AgentHarness:
             "tool_budget_remaining": max(0, request.budget.maximum_tool_calls - tool_calls),
         }
         stage_tool_sets = request.context.get("stage_tool_sets")
+        if (
+            request.agent_name == "Activity Evidence Discovery Agent"
+            and discovery_substage == "candidate_search"
+        ):
+            required = list(
+                dict.fromkeys(str(item) for item in request.context.get("candidate_modalities", []))
+            ) or ["binding", "agonism", "antagonism"]
+            completed = {
+                str((item.get("normalized_arguments") or {}).get("endpoint_modality"))
+                for item in history or []
+                if item.get("status") == ToolCallStatus.COMPLETED.value
+                and item.get("tool_name") == "search_activity_sources"
+            }
+            context["required_activity_modality"] = next(
+                (item for item in required if item not in completed),
+                None,
+            )
         expected_contract = request.context.get("structured_output_boundary_contract")
-        if isinstance(stage_tool_sets, dict) and stage_tool_sets and isinstance(
-            expected_contract, dict
+        if (
+            isinstance(stage_tool_sets, dict)
+            and stage_tool_sets
+            and isinstance(expected_contract, dict)
         ):
             context["structured_output_boundary_contract"] = {
                 **expected_contract,
@@ -1062,6 +1376,363 @@ class AgentHarness:
                 "tool_choice_mode": "auto" if exposed_tools else "none",
             }
         return context
+
+    @staticmethod
+    def _next_orchestrated_discovery_tool(
+        request: AgentRunRequest,
+        history: list[dict],
+    ) -> ProviderToolRequest | None:
+        """Return the next deterministic hydration/batch call, never a model-invented query."""
+
+        completed = [
+            item
+            for item in history
+            if item.get("status") == ToolCallStatus.COMPLETED.value
+            and isinstance(item.get("tool_name"), str)
+        ]
+
+        def observed_identifiers(*, adapter_id: str, prefixes: tuple[str, ...]) -> list[str]:
+            return list(
+                dict.fromkeys(
+                    str(observation.get("stable_source_identifier"))
+                    for item in completed
+                    for observation in (
+                        (item.get("output") or {}).get("observations", [])
+                        if isinstance(item.get("output"), dict)
+                        else []
+                    )
+                    if isinstance(observation, dict)
+                    and (item.get("output") or {}).get("adapter_id") == adapter_id
+                    and str(observation.get("stable_source_identifier", "")).startswith(prefixes)
+                )
+            )
+
+        def completed_identifiers(tool_name: str, field: str) -> set[str]:
+            values: set[str] = set()
+            for item in completed:
+                if item.get("tool_name") != tool_name:
+                    continue
+                arguments = item.get("normalized_arguments") or {}
+                for value in arguments.get(field, []):
+                    if isinstance(value, str):
+                        values.add(value)
+                stable = arguments.get("stable_identifier")
+                if isinstance(stable, str):
+                    values.add(stable)
+            return values
+
+        def planned(tool_name: str, arguments: dict[str, Any], ordinal: int) -> ProviderToolRequest:
+            digest = hashlib.sha256(
+                canonical_json({"tool": tool_name, "arguments": arguments}).encode()
+            ).hexdigest()[:24]
+            return ProviderToolRequest(
+                tool_name=tool_name,
+                arguments=arguments,
+                idempotency_key=f"orchestrated-{ordinal}-{digest}",
+            )
+
+        if request.agent_name == "Activity Evidence Discovery Agent":
+            required = list(
+                dict.fromkeys(str(item) for item in request.context.get("candidate_modalities", []))
+            ) or ["binding", "agonism", "antagonism"]
+            searched = {
+                str((item.get("normalized_arguments") or {}).get("endpoint_modality"))
+                for item in completed
+                if item.get("tool_name") == "search_activity_sources"
+            }
+            if not set(required).issubset(searched):
+                return None
+            source_identifiers = observed_identifiers(
+                adapter_id="pubchem-bioassay",
+                prefixes=("AID:",),
+            )
+            for ordinal, operation in enumerate(("fetch_activity_source_metadata",), start=1):
+                if operation not in request.available_tools:
+                    continue
+                remaining = [
+                    item
+                    for item in source_identifiers
+                    if item not in completed_identifiers(operation, "source_identifiers")
+                ]
+                if remaining:
+                    return planned(
+                        operation,
+                        {
+                            "source_system": "pubchem-bioassay",
+                            "source_identifiers": remaining[:5],
+                            "maximum_results": 5,
+                        },
+                        ordinal,
+                    )
+            return None
+
+        if request.agent_name == "Transcriptomic Evidence Discovery Agent":
+            validated = request.context.get("validated_artifacts", {})
+            dependency = (
+                validated.get("compound_first_dependency", {})
+                if isinstance(validated, dict)
+                else {}
+            )
+            compounds = [
+                item
+                for item in dependency.get("search_batch", [])
+                if isinstance(item, dict)
+                and re.fullmatch(
+                    r"CID:[1-9][0-9]{0,11}",
+                    str(item.get("pubchem_cid") or ""),
+                    flags=re.I,
+                )
+                and str(item.get("canonical_name") or "").strip()
+            ][:5]
+            if not compounds:
+                return None
+
+            source_searches = (
+                ("search_transcriptomic_sources", "ncbi-geo-series"),
+                ("search_lincs_resources", "lincs-l1000"),
+            )
+
+            def call_matches(
+                item: dict[str, Any],
+                *,
+                tool_name: str,
+                pubchem_cid: str,
+                stable_identifier: str | None = None,
+            ) -> bool:
+                if item.get("tool_name") != tool_name:
+                    return False
+                arguments = item.get("normalized_arguments") or {}
+                sampled = arguments.get("sampled_identifiers", [])
+                if pubchem_cid not in sampled:
+                    return False
+                if stable_identifier is None:
+                    return True
+                return stable_identifier in {
+                    arguments.get("stable_identifier"),
+                    *arguments.get("source_identifiers", []),
+                }
+
+            # Search both reviewed source families for every bounded upstream compound before
+            # hydrating any hit. A zero result is a completed scientific outcome and therefore
+            # does not prevent the remaining compounds from being searched.
+            for compound_index, compound in enumerate(compounds, start=1):
+                pubchem_cid = str(compound["pubchem_cid"]).upper()
+                canonical_name = str(compound["canonical_name"]).strip()
+                verified_terms = [
+                    canonical_name,
+                    *[
+                        str(value).strip()
+                        for value in compound.get("verified_synonyms", [])
+                        if str(value).strip()
+                    ],
+                ][:3]
+                query_subject = " OR ".join(f'"{value}"' for value in verified_terms)
+                for source_index, (operation, source_system) in enumerate(
+                    source_searches, start=1
+                ):
+                    if operation not in request.available_tools:
+                        continue
+                    if any(
+                        call_matches(
+                            item,
+                            tool_name=operation,
+                            pubchem_cid=pubchem_cid,
+                        )
+                        for item in completed
+                    ):
+                        continue
+                    query = (
+                        f"({query_subject}) chemical perturbation gene expression"
+                        if operation == "search_transcriptomic_sources"
+                        else f"({query_subject}) compound perturbation"
+                    )
+                    return planned(
+                        operation,
+                        {
+                            "source_system": source_system,
+                            "query": query,
+                            "biological_target": canonical_name,
+                            "endpoint_modality": "chemical perturbation transcriptomics",
+                            "sampled_identifiers": [pubchem_cid],
+                            "verified_compound_names": verified_terms,
+                            "maximum_results": 1,
+                        },
+                        compound_index * 10 + source_index,
+                    )
+
+            # Hydrate one bounded candidate per compound/source search. Search arguments carry
+            # the upstream CID so the verified metadata row can be joined without asking the
+            # model to infer identity from a title or accession.
+            for search_item in completed:
+                search_tool = str(search_item.get("tool_name") or "")
+                if search_tool not in {name for name, _source in source_searches}:
+                    continue
+                arguments = search_item.get("normalized_arguments") or {}
+                sampled = arguments.get("sampled_identifiers", [])
+                matched_cid = next(
+                    (
+                        str(value).upper()
+                        for value in sampled
+                        if re.fullmatch(r"CID:[1-9][0-9]{0,11}", str(value), flags=re.I)
+                    ),
+                    None,
+                )
+                if matched_cid is None:
+                    continue
+                compound = next(
+                    (
+                        item
+                        for item in compounds
+                        if str(item["pubchem_cid"]).upper() == matched_cid
+                    ),
+                    None,
+                )
+                if compound is None:
+                    continue
+                output = search_item.get("output") or {}
+                observations = output.get("observations", []) if isinstance(output, dict) else []
+                stable_identifier = next(
+                    (
+                        str(item.get("stable_source_identifier"))
+                        for item in observations
+                        if isinstance(item, dict)
+                        and str(item.get("stable_source_identifier") or "").startswith(
+                            ("GDS_UID:", "GSE")
+                        )
+                    ),
+                    None,
+                )
+                if stable_identifier is None:
+                    continue
+                hydration_tool = (
+                    "fetch_transcriptomic_source_metadata"
+                    if search_tool == "search_transcriptomic_sources"
+                    else "inspect_lincs_signature_metadata"
+                )
+                if hydration_tool not in request.available_tools:
+                    continue
+                if any(
+                    call_matches(
+                        item,
+                        tool_name=hydration_tool,
+                        pubchem_cid=matched_cid,
+                        stable_identifier=stable_identifier,
+                    )
+                    for item in completed
+                ):
+                    continue
+                identity_terms = [
+                    matched_cid,
+                    *(
+                        [str(compound.get("inchikey"))]
+                        if compound.get("inchikey")
+                        else []
+                    ),
+                ]
+                hydration_arguments = {
+                    "source_system": (
+                        "ncbi-geo-series"
+                        if hydration_tool == "fetch_transcriptomic_source_metadata"
+                        else "lincs-l1000"
+                    ),
+                    "stable_identifier": stable_identifier,
+                    "sampled_identifiers": identity_terms,
+                    "biological_target": str(compound["canonical_name"]),
+                    "verified_compound_names": [
+                        str(compound["canonical_name"]),
+                        *[
+                            str(value)
+                            for value in compound.get("verified_synonyms", [])
+                            if str(value).strip()
+                        ],
+                    ][:5],
+                    "endpoint_modality": "chemical perturbation transcriptomics",
+                    "maximum_results": 1,
+                }
+                return planned(
+                    hydration_tool,
+                    hydration_arguments,
+                    1_000 + len(completed),
+                )
+            return None
+
+        if request.agent_name == "Chemical Identity and Structure Source Discovery Agent":
+            groups = request.context.get("compound_identifier_groups", [])
+            if not isinstance(groups, list):
+                return None
+            for operation_index, operation in enumerate(
+                ("resolve_compound_identity_sample", "resolve_compound_synonyms"), start=1
+            ):
+                completed_values = completed_identifiers(operation, "sampled_identifiers")
+                for group_index, group in enumerate(groups, start=1):
+                    if not isinstance(group, dict):
+                        continue
+                    identifier_type = group.get("identifier_type")
+                    identifiers = [
+                        value
+                        for value in group.get("identifiers", [])
+                        if isinstance(value, str) and value not in completed_values
+                    ]
+                    if identifiers and operation in request.available_tools:
+                        return planned(
+                            operation,
+                            {
+                                "source_system": "pubchem-compound",
+                                "sampled_identifiers": identifiers[:5],
+                                "identifier_type": identifier_type,
+                                "maximum_results": 5,
+                            },
+                            operation_index * 100 + group_index,
+                        )
+            return None
+
+        if request.agent_name == "Supporting Metadata Discovery Agent":
+            identifiers = [
+                value
+                for value in request.context.get("supporting_metadata_identifiers", [])
+                if isinstance(value, str)
+            ]
+            completed_values = completed_identifiers(
+                "inspect_supporting_metadata", "source_identifiers"
+            )
+            remaining = [value for value in identifiers if value not in completed_values]
+            if remaining:
+                batch_index = len(completed_values) // 5 + 1
+                return planned(
+                    "inspect_supporting_metadata",
+                    {
+                        "source_system": "ncbi-supporting-metadata",
+                        "source_identifiers": remaining[:5],
+                        "maximum_results": 5,
+                    },
+                    batch_index,
+                )
+        return None
+
+    @staticmethod
+    def _estimated_scientific_source_requests(request: ProviderToolRequest) -> int:
+        """Bound the external reads a typed source tool can start before invocation."""
+
+        batch_operations = {
+            "fetch_activity_source_metadata",
+            "inspect_activity_identifier_fields",
+            "extract_activity_result_rows",
+            "fetch_transcriptomic_source_metadata",
+            "inspect_supporting_metadata",
+            "inspect_official_file_listing",
+            "inspect_linked_publications",
+            "inspect_source_access",
+        }
+        if request.tool_name in batch_operations:
+            identifiers = request.arguments.get("source_identifiers", [])
+            return len(identifiers) if isinstance(identifiers, list) else 1
+        non_source_tools = {
+            "build_compound_mapping_manifest",
+            "compare_verified_identity_fields",
+            "classify_verified_record_availability",
+            "audit_coverage",
+        }
+        return 0 if request.tool_name in non_source_tools else 1
 
     @staticmethod
     def _discovery_turn_policy(
@@ -1082,59 +1753,27 @@ class AgentHarness:
                 if item.get("tool_name") == "search_activity_sources"
                 and (item.get("normalized_arguments") or {}).get("endpoint_modality")
             }
-            required = {
-                str(item) for item in request.context.get("candidate_modalities", [])
-            } or {"binding", "agonism", "antagonism"}
+            required = {str(item) for item in request.context.get("candidate_modalities", [])} or {
+                "binding",
+                "agonism",
+                "antagonism",
+            }
             if modalities != required:
                 substage = "candidate_search"
-            elif any((item.get("output") or {}).get("observations") for item in completed):
-                validation_calls = [
-                    item
-                    for item in completed
-                    if item.get("tool_name") != "search_activity_sources"
-                ]
-                substage = "final_output" if validation_calls else "candidate_validation"
             else:
                 substage = "final_output"
             configured_tools = configured.get(substage, [])
+            if substage == "candidate_search":
+                configured_tools = ["search_activity_sources"]
             return substage, [
                 name for name in configured_tools if name in set(request.available_tools)
             ]
 
         if request.agent_name == "Transcriptomic Evidence Discovery Agent":
-            required_searches = {
-                "search_transcriptomic_sources",
-                "search_lincs_resources",
-            }
-            completed_names = {item["tool_name"] for item in completed}
-            if not required_searches.issubset(completed_names):
-                substage = "source_family_search"
-                configured_tools = [
-                    name
-                    for name in configured.get(substage, [])
-                    if name not in completed_names
-                ]
-            elif not any((item.get("output") or {}).get("observations") for item in completed):
-                substage = "final_output"
-                configured_tools = configured.get(substage, [])
-            elif any(
-                item.get("tool_name") in configured.get("context_inspection", [])
-                for item in completed
-            ):
-                substage = "final_output"
-                configured_tools = configured.get(substage, [])
-            elif any(
-                item.get("tool_name") in configured.get("candidate_validation", [])
-                for item in completed
-            ):
-                substage = "context_inspection"
-                configured_tools = configured.get(substage, [])
-            else:
-                substage = "candidate_validation"
-                configured_tools = configured.get(substage, [])
-            return substage, [
-                name for name in configured_tools if name in set(request.available_tools)
-            ]
+            # Compound search and candidate hydration are deterministic orchestration. The
+            # provider receives only the compact persisted results for its final bounded review;
+            # it cannot fall back to a target-first or model-invented scientific query.
+            return "final_output", []
 
         if request.agent_name == "Chemical Identity and Structure Source Discovery Agent":
             substage = "identity_inspection" if not completed else "final_output"

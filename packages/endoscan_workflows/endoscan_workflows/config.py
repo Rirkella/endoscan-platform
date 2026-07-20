@@ -36,6 +36,8 @@ class AgentConfiguration(BaseModel):
     global_maximum_input_tokens: int = Field(default=80_000, ge=1)
     global_maximum_output_tokens: int = Field(default=12_000, ge=1)
     global_maximum_tool_calls: int = Field(default=48, ge=0, le=512)
+    global_maximum_provider_invocations: int = Field(default=32, ge=1, le=256)
+    global_maximum_source_requests: int = Field(default=80, ge=1, le=1_000)
     global_maximum_cost_usd: float = Field(default=1.00, ge=0, le=500)
     global_timeout_seconds: float = Field(default=900.0, gt=0, le=86_400)
     maximum_gap_discovery_rounds: int = Field(default=2, ge=0, le=10)
@@ -43,8 +45,8 @@ class AgentConfiguration(BaseModel):
     output_cost_per_million_usd: float = Field(default=4.50, ge=0)
     tracing_enabled: bool = False
     source_cache_ttl_seconds: int = Field(default=86_400, ge=60, le=2_592_000)
-    source_request_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
-    source_response_maximum_bytes: int = Field(default=1_500_000, ge=1_024, le=5_000_000)
+    source_request_timeout_seconds: float = Field(default=180.0, gt=0, le=180)
+    source_response_maximum_bytes: int = Field(default=5_000_000, ge=1_024, le=5_000_000)
     source_requests_per_second: float = Field(default=2.5, gt=0, le=10)
     ncbi_email: str | None = None
     ncbi_api_key: SecretStr | None = None
@@ -103,6 +105,12 @@ class AgentConfiguration(BaseModel):
                 os.environ.get("ENDOSCAN_WORKFLOW_MAX_OUTPUT_TOKENS", "12000")
             ),
             global_maximum_tool_calls=int(os.environ.get("ENDOSCAN_WORKFLOW_MAX_TOOL_CALLS", "48")),
+            global_maximum_provider_invocations=int(
+                os.environ.get("ENDOSCAN_WORKFLOW_MAX_PROVIDER_INVOCATIONS", "32")
+            ),
+            global_maximum_source_requests=int(
+                os.environ.get("ENDOSCAN_WORKFLOW_MAX_SOURCE_REQUESTS", "80")
+            ),
             global_maximum_cost_usd=float(os.environ.get("ENDOSCAN_WORKFLOW_MAX_COST_USD", "1.00")),
             global_timeout_seconds=float(
                 os.environ.get("ENDOSCAN_WORKFLOW_TIMEOUT_SECONDS", "900")
@@ -121,10 +129,10 @@ class AgentConfiguration(BaseModel):
                 os.environ.get("ENDOSCAN_SOURCE_CACHE_TTL_SECONDS", "86400")
             ),
             source_request_timeout_seconds=float(
-                os.environ.get("ENDOSCAN_SOURCE_TIMEOUT_SECONDS", "15")
+                os.environ.get("ENDOSCAN_SOURCE_TIMEOUT_SECONDS", "180")
             ),
             source_response_maximum_bytes=int(
-                os.environ.get("ENDOSCAN_SOURCE_MAX_RESPONSE_BYTES", "1500000")
+                os.environ.get("ENDOSCAN_SOURCE_MAX_RESPONSE_BYTES", "5000000")
             ),
             source_requests_per_second=float(
                 os.environ.get("ENDOSCAN_SOURCE_REQUESTS_PER_SECOND", "2.5")
@@ -161,19 +169,36 @@ class AgentConfiguration(BaseModel):
 
         return self.model_copy(
             update={
-                "maximum_turns": min(self.maximum_turns, 6),
-                "maximum_tool_calls": min(self.maximum_tool_calls, 6),
-                "timeout_seconds": min(self.timeout_seconds, 120.0),
-                "maximum_input_tokens": min(self.maximum_input_tokens, 16_000),
-                "maximum_output_tokens": min(self.maximum_output_tokens, 2_000),
-                "maximum_cost_usd": min(self.maximum_cost_usd, 0.20),
+                "maximum_turns": 8,
+                "maximum_tool_calls": 16,
+                "timeout_seconds": 240.0,
+                "maximum_input_tokens": 24_000,
+                "maximum_output_tokens": 3_000,
+                "maximum_cost_usd": 0.15,
                 "retry_count": 0,
-                "global_maximum_input_tokens": min(self.global_maximum_input_tokens, 64_000),
-                "global_maximum_output_tokens": min(self.global_maximum_output_tokens, 8_000),
-                "global_maximum_tool_calls": min(self.global_maximum_tool_calls, 24),
-                "global_maximum_cost_usd": min(self.global_maximum_cost_usd, 0.80),
-                "global_timeout_seconds": min(self.global_timeout_seconds, 600.0),
+                "global_maximum_input_tokens": 96_000,
+                "global_maximum_output_tokens": 12_000,
+                "global_maximum_tool_calls": 64,
+                "global_maximum_provider_invocations": 32,
+                "global_maximum_source_requests": 80,
+                "global_maximum_cost_usd": 0.60,
+                "global_timeout_seconds": 1_200.0,
                 "maximum_gap_discovery_rounds": 0,
+            }
+        )
+
+    def controlled_source_discovery_for_agent(self, agent_name: str) -> AgentConfiguration:
+        """Return a role-scoped budget; activity requires three searches plus synthesis."""
+
+        controlled = self.controlled_source_discovery()
+        if agent_name != "Activity Evidence Discovery Agent":
+            return controlled
+        return controlled.model_copy(
+            update={
+                "maximum_turns": max(controlled.maximum_turns, 4),
+                "maximum_tool_calls": max(controlled.maximum_tool_calls, 5),
+                "maximum_input_tokens": max(controlled.maximum_input_tokens, 16_000),
+                "maximum_output_tokens": max(controlled.maximum_output_tokens, 1_500),
             }
         )
 
@@ -209,6 +234,8 @@ class AgentConfiguration(BaseModel):
                 "maximum_input_tokens": self.global_maximum_input_tokens,
                 "maximum_output_tokens": self.global_maximum_output_tokens,
                 "maximum_tool_calls": self.global_maximum_tool_calls,
+                "maximum_provider_invocations": self.global_maximum_provider_invocations,
+                "maximum_scientific_source_requests": self.global_maximum_source_requests,
                 "maximum_cost_usd": self.global_maximum_cost_usd,
                 "maximum_gap_discovery_rounds": self.maximum_gap_discovery_rounds,
                 "timeout_seconds": self.global_timeout_seconds,
@@ -219,6 +246,12 @@ class AgentConfiguration(BaseModel):
                 "maximum_turns_per_agent": controlled.maximum_turns,
                 "maximum_tool_calls_per_agent": controlled.maximum_tool_calls,
                 "maximum_total_tool_calls": controlled.global_maximum_tool_calls,
+                "maximum_total_provider_invocations": (
+                    controlled.global_maximum_provider_invocations
+                ),
+                "maximum_total_scientific_source_requests": (
+                    controlled.global_maximum_source_requests
+                ),
                 "maximum_input_tokens_per_agent": controlled.maximum_input_tokens,
                 "maximum_output_tokens_per_agent": controlled.maximum_output_tokens,
                 "maximum_cost_per_agent_usd": controlled.maximum_cost_usd,
@@ -226,7 +259,7 @@ class AgentConfiguration(BaseModel):
                 "per_agent_timeout_seconds": controlled.timeout_seconds,
                 "global_timeout_seconds": controlled.global_timeout_seconds,
                 "provider_retries": controlled.retry_count,
-                "source_retries": 0,
+                "source_retries": 1,
                 "maximum_gap_discovery_rounds": controlled.maximum_gap_discovery_rounds,
             },
         }

@@ -7,14 +7,16 @@ contracts are exercised by offline fixtures and the production client.
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import re
 import time
 from collections.abc import Iterable
 from enum import StrEnum
 from html.parser import HTMLParser
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import quote, urljoin, urlparse
 
 from pydantic import Field, field_validator, model_validator
@@ -31,10 +33,13 @@ from .source_security import (
     sanitize_untrusted_text,
 )
 from .training_dataset import (
+    ActivityEvidenceRow,
     CapabilityStatus,
     ComponentRole,
+    CompoundIdentityBridgeRow,
     ObservationCountStatus,
     SourceValidationStatus,
+    TranscriptomicProfileEvidenceRow,
     VerifiedSourceObservation,
     VerifiedSourceObservationBatch,
     VerifiedSourceSearchOutcome,
@@ -132,8 +137,8 @@ class ReviewedSourceAdapterDefinition(StrictContract):
     request_builder: str = Field(min_length=3, max_length=160)
     typed_response_parser: str = Field(min_length=3, max_length=160)
     accepted_mime_types: list[str] = Field(min_length=1, max_length=10)
-    maximum_response_bytes: int = Field(ge=1_024, le=1_500_000)
-    request_timeout_seconds: float = Field(gt=0, le=60)
+    maximum_response_bytes: int = Field(ge=1_024, le=5_000_000)
+    request_timeout_seconds: float = Field(gt=0, le=180)
     maximum_redirects: int = Field(ge=0, le=3)
     source_retry_count: int = Field(ge=0, le=2)
     requests_per_second: float = Field(gt=0, le=10)
@@ -162,6 +167,7 @@ class ReviewedSourceOperationInput(StrictContract):
     identifier_type: str | None = Field(default=None, max_length=80)
     sampled_identifiers: list[str] = Field(default_factory=list, max_length=10)
     source_identifiers: list[str] = Field(default_factory=list, max_length=10)
+    verified_compound_names: list[str] = Field(default_factory=list, max_length=5)
     required_fields: list[str] = Field(default_factory=list, max_length=30)
     maximum_results: int = Field(default=8, ge=1, le=10)
 
@@ -184,6 +190,17 @@ class ReviewedSourceOperationInput(StrictContract):
                 raise ValueError("identifier lists must contain bounded non-URL values")
         return values
 
+    @field_validator("verified_compound_names")
+    @classmethod
+    def verified_names_are_bounded_source_values(cls, values: list[str]) -> list[str]:
+        cleaned = []
+        for value in values:
+            compact = re.sub(r"\s+", " ", value).strip()
+            if not compact or len(compact) > 500 or "://" in compact:
+                raise ValueError("verified compound names must be bounded non-URL values")
+            cleaned.append(compact)
+        return list(dict.fromkeys(cleaned))
+
 
 class ActivityDiscoveryModality(StrEnum):
     BINDING = "binding"
@@ -196,6 +213,21 @@ class ActivitySearchOperationInput(ReviewedSourceOperationInput):
 
     source_system: Literal["pubchem-bioassay", "PubChem BioAssay"] | None = None
     endpoint_modality: ActivityDiscoveryModality
+
+
+class ActivityResultExtractionInput(ReviewedSourceOperationInput):
+    """Deterministic bounded extraction for selected PubChem assay result tables."""
+
+    source_system: Literal["pubchem-bioassay", "PubChem BioAssay"] | None = None
+    source_identifiers: list[str] = Field(min_length=1, max_length=5)
+    modality_by_source: dict[str, ActivityDiscoveryModality] = Field(min_length=1, max_length=5)
+    maximum_rows_per_assay: int = Field(default=100, ge=1, le=500)
+
+    @model_validator(mode="after")
+    def every_assay_has_a_modality(self) -> ActivityResultExtractionInput:
+        if set(self.source_identifiers) - set(self.modality_by_source):
+            raise ValueError("every selected assay requires an explicit preserved modality")
+        return self
 
 
 class CompoundSourceOperationInput(ReviewedSourceOperationInput):
@@ -302,6 +334,7 @@ class ReviewedSourceExecutionTelemetry(StrictContract):
     failure_category: str | None = Field(default=None, max_length=120)
     sanitized_message: str | None = Field(default=None, max_length=500)
     retryable: bool = False
+    transport_attempts: list[dict[str, Any]] = Field(default_factory=list, max_length=3)
 
 
 class ReviewedSourceExecutionResult(StrictContract):
@@ -326,6 +359,9 @@ def _definition(
     domains: list[str],
     parser: str,
     accepted_mime_types: list[str] | None = None,
+    request_timeout_seconds: float = 15,
+    source_retry_count: int = 0,
+    maximum_response_bytes: int = 500_000,
 ) -> ReviewedSourceAdapterDefinition:
     return ReviewedSourceAdapterDefinition(
         adapter_id=adapter_id,
@@ -337,10 +373,10 @@ def _definition(
         request_builder=f"{adapter_id}.build_request.v1",
         typed_response_parser=parser,
         accepted_mime_types=accepted_mime_types or sorted(ALLOWED_CONTENT_TYPES),
-        maximum_response_bytes=500_000,
-        request_timeout_seconds=15,
+        maximum_response_bytes=maximum_response_bytes,
+        request_timeout_seconds=request_timeout_seconds,
         maximum_redirects=2,
-        source_retry_count=0,
+        source_retry_count=source_retry_count,
         requests_per_second=2,
         cache_ttl_seconds=86_400,
         provenance_format="adapter/version + immutable response artifact SHA-256",
@@ -363,11 +399,16 @@ PUBCHEM_BIOASSAY_ADAPTER = _definition(
         "fetch_activity_source_metadata",
         "inspect_activity_result_availability",
         "inspect_activity_identifier_fields",
+        "extract_activity_result_rows",
         "summarize_activity_outcomes",
         "inspect_counter_screen_relationships",
     ],
     domains=["eutils.ncbi.nlm.nih.gov", "pubchem.ncbi.nlm.nih.gov"],
-    parser="pubchem_bioassay_json_v1",
+    parser="pubchem_bioassay_json_or_csv_v2",
+    accepted_mime_types=[*sorted(ALLOWED_CONTENT_TYPES), "text/csv", "application/csv"],
+    request_timeout_seconds=180,
+    source_retry_count=1,
+    maximum_response_bytes=5_000_000,
 )
 
 NCBI_GEO_ADAPTER = _definition(
@@ -392,6 +433,8 @@ NCBI_GEO_ADAPTER = _definition(
     ],
     domains=["eutils.ncbi.nlm.nih.gov", "www.ncbi.nlm.nih.gov"],
     parser="ncbi_geo_json_or_accession_text_v1",
+    request_timeout_seconds=180,
+    source_retry_count=1,
 )
 
 EPA_COMPTOX_TOXCAST_ADAPTER = _definition(
@@ -468,6 +511,8 @@ LINCS_L1000_ADAPTER = _definition(
         "lincsproject.org",
     ],
     parser="lincs_l1000_geo_json_or_accession_text_v1",
+    request_timeout_seconds=180,
+    source_retry_count=1,
 )
 
 PUBCHEM_COMPOUND_ADAPTER = _definition(
@@ -482,9 +527,12 @@ PUBCHEM_COMPOUND_ADAPTER = _definition(
         "inspect_source_identity_fields",
         "inspect_source_record_availability",
         "resolve_compound_identity_sample",
+        "resolve_compound_synonyms",
     ],
     domains=["pubchem.ncbi.nlm.nih.gov"],
     parser="pubchem_compound_properties_json_v1",
+    request_timeout_seconds=180,
+    source_retry_count=1,
 )
 
 NCBI_SUPPORTING_METADATA_ADAPTER = _definition(
@@ -499,6 +547,8 @@ NCBI_SUPPORTING_METADATA_ADAPTER = _definition(
     ],
     domains=["eutils.ncbi.nlm.nih.gov", "www.ncbi.nlm.nih.gov"],
     parser="ncbi_linked_metadata_json_v1",
+    request_timeout_seconds=180,
+    source_retry_count=1,
 )
 
 REVIEWED_ADAPTER_DEFINITIONS = (
@@ -609,13 +659,14 @@ class ReviewedSourceAdapter:
                     "raw_artifact_id": cached.raw_artifact_id,
                     "raw_artifact_sha256": cached.content_hash,
                     "provenance_record_id": f"source-cache:{cached.cache_key}",
-                    "retry_count": self.definition.source_retry_count,
+                    "retry_count": stored.get("retry_count", 0),
                     "sanitized_diagnostic": stored.get("sanitized_diagnostic"),
                     "validation_stage_reached": stored.get("validation_stage_reached", "complete"),
                     "parser_stage_reached": stored.get("parser_stage_reached", "complete"),
                     "failure_category": stored.get("failure_category"),
                     "sanitized_message": stored.get("sanitized_message"),
                     "retryable": stored.get("retryable", False),
+                    "transport_attempts": stored.get("transport_attempts", []),
                 }
             )
             return ReviewedSourceExecutionResult(batch=batch, telemetry=telemetry)
@@ -658,6 +709,10 @@ class ReviewedSourceAdapter:
                     if source_request.approved_redirect_hosts
                     else None
                 ),
+                maximum_attempts=min(
+                    1 + self.definition.source_retry_count,
+                    self.client.maximum_attempts,
+                ),
             )
         except SourceToolError as exc:
             diagnostic = exc.diagnostic
@@ -690,6 +745,7 @@ class ReviewedSourceAdapter:
                 failure_category=category,
                 sanitized_message=str(exc),
                 retryable=bool(getattr(exc, "retryable", False)),
+                transport_attempts=list(getattr(exc, "attempt_diagnostics", ())),
             )
             raise ReviewedSourceExecutionError(str(exc), telemetry) from exc
         try:
@@ -731,6 +787,31 @@ class ReviewedSourceAdapter:
                 request,
                 response.content,
                 response.content_type,
+                response.url,
+                artifact.id,
+                artifact.sha256,
+            )
+            activity_rows, inspected_activity_count, excluded_activity_count = (
+                self._activity_result_rows(
+                operation,
+                request,
+                response.content,
+                response.url,
+                artifact.id,
+                artifact.sha256,
+                )
+            )
+            identity_bridge_rows = self._compound_identity_rows(
+                operation,
+                response.content,
+                response.url,
+                artifact.id,
+                artifact.sha256,
+            )
+            transcriptomic_profile_rows = self._transcriptomic_profile_rows(
+                operation,
+                request,
+                response.content,
                 response.url,
                 artifact.id,
                 artifact.sha256,
@@ -796,15 +877,15 @@ class ReviewedSourceAdapter:
                         "biological_target": request.biological_target,
                         "endpoint_modality": request.endpoint_modality,
                         "query": request.query,
+                        "sampled_identifiers": request.sampled_identifiers,
+                        "verified_compound_names": request.verified_compound_names,
                         "maximum_results": request.maximum_results,
                     }.items()
                     if value is not None
                 },
                 result_count=len(observations),
                 outcome=(
-                    "completed_with_candidates"
-                    if observations
-                    else "completed_no_candidates"
+                    "completed_with_candidates" if observations else "completed_no_candidates"
                 ),
                 http_status=response.status_code,
                 cache_status="live",
@@ -817,8 +898,20 @@ class ReviewedSourceAdapter:
             cache_status="live",
             observations=observations,
             source_request_artifact_ids=[artifact.id],
-            source_request_count=1,
+            source_request_count=max(1, len(response.attempt_diagnostics)),
             search_outcome=search_outcome,
+            activity_rows=activity_rows,
+            identity_bridge_rows=identity_bridge_rows,
+            transcriptomic_profile_rows=transcriptomic_profile_rows,
+            inspected_record_count=(
+                inspected_activity_count
+                if operation == "extract_activity_result_rows"
+                else len(transcriptomic_profile_rows)
+            ),
+            excluded_record_count=(
+                excluded_activity_count
+                + sum(row.exclusion_reason is not None for row in transcriptomic_profile_rows)
+            ),
         )
         diagnostic = (
             response.diagnostic.model_copy(
@@ -841,6 +934,7 @@ class ReviewedSourceAdapter:
             cache_status="miss_written",
             diagnostic=diagnostic,
         )
+        batch = batch.model_copy(update={"transport_attempts": telemetry.transport_attempts})
         try:
             self.cache.put(
                 cache_tool_name,
@@ -918,7 +1012,7 @@ class ReviewedSourceAdapter:
             provenance_record_id=(
                 f"source-cache:{cache_key}" if cache_write_status == "written" else None
             ),
-            retry_count=self.definition.source_retry_count,
+            retry_count=max(0, len(response.attempt_diagnostics) - 1),
             sanitized_diagnostic=diagnostic,
             validation_stage_reached="response_validated",
             parser_stage_reached=(
@@ -927,6 +1021,9 @@ class ReviewedSourceAdapter:
             failure_category=failure_category,
             sanitized_message=sanitized_message,
             retryable=False,
+            transport_attempts=[
+                item.model_dump(mode="json") for item in response.attempt_diagnostics
+            ],
         )
 
     def _failure_telemetry(
@@ -943,6 +1040,7 @@ class ReviewedSourceAdapter:
         sanitized_message: str,
         retryable: bool,
         response: Any | None = None,
+        transport_attempts: list[SourceToolDiagnostic] | None = None,
     ) -> ReviewedSourceExecutionTelemetry:
         return ReviewedSourceExecutionTelemetry(
             adapter_id=self.definition.adapter_id,
@@ -974,13 +1072,16 @@ class ReviewedSourceAdapter:
             cache_write_status="not_written",
             cache_status="miss_not_written",
             cache_key=cache_key,
-            retry_count=self.definition.source_retry_count,
+            retry_count=max(0, len(transport_attempts or []) - 1),
             sanitized_diagnostic=diagnostic,
             validation_stage_reached=validation_stage,
             parser_stage_reached=parser_stage,
             failure_category=failure_category,
             sanitized_message=sanitized_message,
             retryable=retryable,
+            transport_attempts=[
+                item.model_dump(mode="json") for item in (transport_attempts or [])
+            ],
         )
 
     def _build_request(
@@ -1056,8 +1157,19 @@ class ReviewedSourceAdapter:
                     accepted_mime_types=["application/json", "text/plain"],
                 )
             stable = self._required_identifier(request).upper()
+            if stable.startswith("GDS_UID:"):
+                uid = stable.removeprefix("GDS_UID:")
+                if not re.fullmatch(r"[1-9][0-9]{0,11}", uid):
+                    raise ValueError("LINCS metadata requires a numeric GDS UID")
+                return SourceHttpRequest(
+                    url="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                    params={"db": "gds", "id": uid, "retmode": "json"},
+                    accepted_mime_types=["application/json", "text/plain"],
+                )
             if not re.fullmatch(r"GSE[1-9][0-9]{1,8}", stable):
-                raise ValueError("LINCS metadata operations require a validated GSE accession")
+                raise ValueError(
+                    "LINCS metadata operations require a validated GSE accession or GDS UID"
+                )
             return SourceHttpRequest(
                 url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
                 params={"acc": stable, "targ": "self", "view": "full", "form": "text"},
@@ -1079,9 +1191,27 @@ class ReviewedSourceAdapter:
                     accepted_mime_types=["application/json", "text/plain"],
                 )
             stable = self._required_identifier(request)
+            aid = stable.removeprefix("AID:").removeprefix("aid:")
+            if not re.fullmatch(r"[1-9][0-9]{0,11}", aid):
+                raise ValueError("PubChem BioAssay metadata requires a numeric AID")
+            if operation == "inspect_activity_identifier_fields":
+                return SourceHttpRequest(
+                    url=("https://pubchem.ncbi.nlm.nih.gov/rest/pug/assay/aid/" f"{aid}/cids/JSON"),
+                    params={"cids_type": "active"},
+                    accepted_mime_types=["application/json"],
+                )
+            if operation == "extract_activity_result_rows":
+                return SourceHttpRequest(
+                    url=(
+                        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/assay/aid/"
+                        f"{aid}/CSV"
+                    ),
+                    params={"response_type": "display"},
+                    accepted_mime_types=["text/csv", "application/csv", "text/plain"],
+                )
             return SourceHttpRequest(
                 url="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
-                params={"db": "pcassay", "id": stable.removeprefix("AID:"), "retmode": "json"},
+                params={"db": "pcassay", "id": aid, "retmode": "json"},
                 accepted_mime_types=["application/json", "text/plain"],
             )
         if self.definition.adapter_id == "ncbi-geo-series":
@@ -1099,6 +1229,15 @@ class ReviewedSourceAdapter:
                     accepted_mime_types=["application/json", "text/plain"],
                 )
             stable = self._required_identifier(request).upper()
+            if stable.startswith("GDS_UID:"):
+                uid = stable.removeprefix("GDS_UID:")
+                if not re.fullmatch(r"[1-9][0-9]{0,11}", uid):
+                    raise ValueError("GEO metadata requires a numeric GDS UID")
+                return SourceHttpRequest(
+                    url="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                    params={"db": "gds", "id": uid, "retmode": "json"},
+                    accepted_mime_types=["application/json", "text/plain"],
+                )
             if not re.fullmatch(r"GSE[1-9][0-9]{1,8}", stable):
                 raise ValueError("GEO operations require a validated GSE accession")
             return SourceHttpRequest(
@@ -1113,21 +1252,26 @@ class ReviewedSourceAdapter:
             )
             if not identifiers or len(identifiers) > 10:
                 raise ValueError("compound inspection requires one to ten sampled identifiers")
-            namespace = (request.identifier_type or "cid").casefold()
+            requested_namespace = (request.identifier_type or "cid").casefold()
             namespace = {
                 "pubchem cid": "cid",
                 "cid": "cid",
                 "inchikey": "inchikey",
                 "compound name": "name",
                 "name": "name",
-            }.get(namespace)
+            }.get(requested_namespace)
             if namespace is None:
                 raise ValueError("compound identifier type is not approved")
             joined = ",".join(quote(item, safe="") for item in identifiers)
+            suffix = (
+                "synonyms/JSON"
+                if operation == "resolve_compound_synonyms"
+                else "property/Title,CanonicalSMILES,IsomericSMILES,InChIKey/JSON"
+            )
             return SourceHttpRequest(
                 url=(
                     f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/{namespace}/{joined}/"
-                    "property/Title,CanonicalSMILES,IsomericSMILES,InChIKey/JSON"
+                    f"{suffix}"
                 ),
                 params={},
                 accepted_mime_types=["application/json"],
@@ -1138,6 +1282,15 @@ class ReviewedSourceAdapter:
         if not identifiers:
             raise ValueError("supporting metadata inspection requires stable source identifiers")
         first_identifier = identifiers[0].upper()
+        if first_identifier.startswith("GDS_UID:"):
+            uid = first_identifier.removeprefix("GDS_UID:")
+            if not re.fullmatch(r"[1-9][0-9]{0,11}", uid):
+                raise ValueError("supporting GEO metadata requires a numeric GDS UID")
+            return SourceHttpRequest(
+                url="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                params={"db": "gds", "id": uid, "retmode": "json"},
+                accepted_mime_types=["application/json", "text/plain"],
+            )
         if re.fullmatch(r"GSE[1-9][0-9]{1,8}", first_identifier):
             return SourceHttpRequest(
                 url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi",
@@ -1155,7 +1308,9 @@ class ReviewedSourceAdapter:
             params={
                 "dbfrom": "pcassay",
                 "db": "pubmed",
-                "id": ",".join(identifiers),
+                "id": ",".join(
+                    item.removeprefix("AID:").removeprefix("aid:") for item in identifiers
+                ),
                 "retmode": "json",
             },
             accepted_mime_types=["application/json", "text/plain"],
@@ -1212,6 +1367,273 @@ class ReviewedSourceAdapter:
             )
             for record in records[: request.maximum_results]
         ]
+
+    def _activity_result_rows(
+        self,
+        operation: str,
+        request: ReviewedSourceOperationInput,
+        content: bytes,
+        source_url: str,
+        artifact_id: str,
+        artifact_hash: str,
+    ) -> tuple[list[ActivityEvidenceRow], int, int]:
+        if operation != "extract_activity_result_rows":
+            return [], 0, 0
+        aid = str(request.stable_identifier or "").upper()
+        modality_map = getattr(request, "modality_by_source", {})
+        raw_modality = str(modality_map.get(aid) or modality_map.get(aid.casefold()) or "")
+        if raw_modality not in {"binding", "agonism", "antagonism"}:
+            raise ValueError("activity extraction requires a preserved assay modality")
+        modality = cast(Literal["binding", "agonism", "antagonism"], raw_modality)
+        maximum_rows = int(getattr(request, "maximum_rows_per_assay", 100))
+        reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig", errors="strict")))
+        if not reader.fieldnames or "PUBCHEM_CID" not in reader.fieldnames:
+            raise ValueError("PubChem assay result CSV lacks the compound identifier column")
+        standard = {
+            "PUBCHEM_RESULT_TAG",
+            "PUBCHEM_SID",
+            "PUBCHEM_CID",
+            "PUBCHEM_ACTIVITY_OUTCOME",
+            "PUBCHEM_ACTIVITY_SCORE",
+            "PUBCHEM_ACTIVITY_URL",
+            "PUBCHEM_ASSAYDATA_COMMENT",
+            "PUBCHEM_EXT_DATASOURCE_SMILES",
+        }
+        value_fields = [field for field in reader.fieldnames if field not in standard]
+        rows: list[ActivityEvidenceRow] = []
+        inspected_count = 0
+        excluded_count = 0
+        seen_records: set[tuple[str | None, str, str | None, str | None, str | None]] = set()
+        for index, source_row in enumerate(reader, start=1):
+            inspected_count += 1
+            cid_raw = str(source_row.get("PUBCHEM_CID") or "").strip()
+            sid_raw = str(source_row.get("PUBCHEM_SID") or "").strip()
+            cid = f"CID:{cid_raw}" if re.fullmatch(r"[1-9][0-9]{0,11}", cid_raw) else None
+            outcome = str(source_row.get("PUBCHEM_ACTIVITY_OUTCOME") or "").strip() or None
+            selected_field = next(
+                (
+                    field
+                    for field in value_fields
+                    if str(source_row.get(field) or "").strip()
+                ),
+                None,
+            )
+            if selected_field is None and str(
+                source_row.get("PUBCHEM_ACTIVITY_SCORE") or ""
+            ).strip():
+                selected_field = "PUBCHEM_ACTIVITY_SCORE"
+            activity_value = (
+                str(source_row.get(selected_field) or "").strip() if selected_field else None
+            ) or None
+            unit_match = re.search(r"\[([^\]]+)\]|\(([^)]+)\)", selected_field or "")
+            unit = next(
+                (value for value in (unit_match.groups() if unit_match else ()) if value),
+                None,
+            )
+            exclusion = None
+            if cid is None:
+                exclusion = "missing_or_invalid_pubchem_cid"
+            elif outcome is None and activity_value is None:
+                exclusion = "missing_source_activity_outcome_and_value"
+            record_key = (cid, sid_raw, outcome, activity_value, selected_field)
+            if exclusion is None and record_key in seen_records:
+                exclusion = "duplicate_source_activity_record"
+            seen_records.add(record_key)
+            if exclusion:
+                excluded_count += 1
+            if len(rows) >= maximum_rows:
+                continue
+            original_fields = {
+                key: str(value)[:500]
+                for key, value in list(source_row.items())[:30]
+                if value not in {None, ""}
+            }
+            rows.append(
+                ActivityEvidenceRow(
+                    row_id=deterministic_id(
+                        "activity-row", aid, cid or sid_raw or str(index), modality, str(index)
+                    ),
+                    pubchem_aid=aid,
+                    source_compound_identifier=(
+                        f"SID:{sid_raw}" if sid_raw else cid or f"row:{index}"
+                    ),
+                    pubchem_cid=cid,
+                    activity_outcome=outcome,
+                    activity_value=activity_value,
+                    activity_unit=unit,
+                    activity_endpoint=selected_field,
+                    assay_target=str(request.biological_target or "").strip() or None,
+                    modality=modality,
+                    source_locator=source_url,
+                    raw_artifact_id=artifact_id,
+                    raw_artifact_sha256=artifact_hash,
+                    extraction_status="excluded" if exclusion else "included",
+                    exclusion_reason=exclusion,
+                    original_source_fields=original_fields,
+                    evidence_references=[source_url],
+                )
+            )
+        return rows, inspected_count, excluded_count
+
+    @staticmethod
+    def _compound_identity_rows(
+        operation: str,
+        content: bytes,
+        source_url: str,
+        artifact_id: str,
+        artifact_hash: str,
+    ) -> list[CompoundIdentityBridgeRow]:
+        if operation not in {"resolve_compound_identity_sample", "resolve_compound_synonyms"}:
+            return []
+        payload = json.loads(content.decode("utf-8"))
+        rows: list[CompoundIdentityBridgeRow] = []
+        if operation == "resolve_compound_identity_sample":
+            records = payload.get("PropertyTable", {}).get("Properties", [])
+            for item in records:
+                cid_raw = str(item.get("CID") or "")
+                if not re.fullmatch(r"[1-9][0-9]{0,11}", cid_raw):
+                    continue
+                inchikey = str(item.get("InChIKey") or "").upper() or None
+                status = cast(
+                    Literal["exact", "missing"],
+                    "exact"
+                    if inchikey and re.fullmatch(r"[A-Z]{14}-[A-Z]{10}-[A-Z]", inchikey)
+                    else "missing",
+                )
+                rows.append(
+                    CompoundIdentityBridgeRow(
+                        mapping_id=deterministic_id("identity-map", cid_raw, artifact_hash),
+                        source_compound_identifier=f"CID:{cid_raw}",
+                        pubchem_cid=f"CID:{cid_raw}",
+                        inchikey=inchikey if status == "exact" else None,
+                        canonical_name=str(item.get("Title") or "").strip() or None,
+                        mapping_status=status,
+                        raw_artifact_ids=[artifact_id],
+                        raw_artifact_hashes=[artifact_hash],
+                        evidence_references=[source_url],
+                    )
+                )
+        else:
+            records = payload.get("InformationList", {}).get("Information", [])
+            for item in records:
+                cid_raw = str(item.get("CID") or "")
+                if not re.fullmatch(r"[1-9][0-9]{0,11}", cid_raw):
+                    continue
+                rows.append(
+                    CompoundIdentityBridgeRow(
+                        mapping_id=deterministic_id("identity-synonyms", cid_raw, artifact_hash),
+                        source_compound_identifier=f"CID:{cid_raw}",
+                        pubchem_cid=f"CID:{cid_raw}",
+                        synonyms=[
+                            str(value)[:500]
+                            for value in item.get("Synonym", [])[:50]
+                            if str(value).strip()
+                        ],
+                        mapping_status="missing",
+                        raw_artifact_ids=[artifact_id],
+                        raw_artifact_hashes=[artifact_hash],
+                        evidence_references=[source_url],
+                    )
+                )
+        return rows
+
+    def _transcriptomic_profile_rows(
+        self,
+        operation: str,
+        request: ReviewedSourceOperationInput,
+        content: bytes,
+        source_url: str,
+        artifact_id: str,
+        artifact_hash: str,
+    ) -> list[TranscriptomicProfileEvidenceRow]:
+        if operation not in {
+            "fetch_transcriptomic_source_metadata",
+            "inspect_lincs_signature_metadata",
+        }:
+            return []
+        cid = next(
+            (
+                value.upper()
+                for value in request.sampled_identifiers
+                if re.fullmatch(r"CID:[1-9][0-9]{0,11}", value, flags=re.I)
+            ),
+            None,
+        )
+        inchikey = next(
+            (
+                value.upper()
+                for value in request.sampled_identifiers
+                if re.fullmatch(r"[A-Z]{14}-[A-Z]{10}-[A-Z]", value, flags=re.I)
+            ),
+            None,
+        )
+        verified_names = list(request.verified_compound_names) or [
+            str(request.biological_target or "").strip()
+        ]
+        verified_names = [value for value in verified_names if value]
+        canonical_name = verified_names[0] if verified_names else ""
+        if cid is None or not canonical_name:
+            return []
+        payload = json.loads(content.decode("utf-8"))
+        result = payload.get("result", {})
+        rows: list[TranscriptomicProfileEvidenceRow] = []
+        for uid in result.get("uids", []):
+            item = result.get(str(uid), {})
+            title = str(item.get("title") or "")
+            summary = str(item.get("summary") or "")
+            combined = f"{title} {summary}".casefold()
+            applied = any(value.casefold() in combined for value in verified_names)
+            accession = str(item.get("accession") or item.get("gse") or f"GDS_UID:{uid}").upper()
+            locator = str(item.get("ftpLink") or item.get("suppfile") or "").strip()
+            dose_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:nM|uM|µM|mM|mg/L)\b", summary, re.I)
+            time_match = re.search(r"\b\d+(?:\.\d+)?\s*(?:h|hr|hrs|hours?|days?)\b", summary, re.I)
+            exclusion = None
+            if not applied:
+                exclusion = "compound_application_not_verified_in_source_metadata"
+            elif not locator:
+                exclusion = "processed_profile_locator_unavailable"
+            rows.append(
+                TranscriptomicProfileEvidenceRow(
+                    profile_row_id=deterministic_id(
+                        "transcriptomic-profile", cid, accession, artifact_hash
+                    ),
+                    pubchem_cid=cid,
+                    inchikey=inchikey,
+                    canonical_name=canonical_name,
+                    source_system=self.definition.official_source_system,
+                    source_accession=accession,
+                    profile_identifier=accession,
+                    profile_locator=locator or source_url,
+                    organism=str(item.get("taxon") or "").strip() or None,
+                    cell_or_tissue_model=str(item.get("gdsType") or "").strip() or None,
+                    dose=dose_match.group(0) if dose_match else None,
+                    exposure_time=time_match.group(0) if time_match else None,
+                    processing_level=("processed" if locator else None),
+                    measurement_status="measured" if applied and locator else "unresolved",
+                    compound_application_verified=applied,
+                    raw_artifact_id=artifact_id,
+                    raw_artifact_sha256=artifact_hash,
+                    original_source_fields={
+                        key: str(value)[:500]
+                        for key, value in item.items()
+                        if key
+                        in {
+                            "accession",
+                            "gse",
+                            "title",
+                            "summary",
+                            "taxon",
+                            "ftpLink",
+                            "suppfile",
+                            "gdsType",
+                        }
+                        and value not in {None, ""}
+                    },
+                    evidence_references=[source_url],
+                    exclusion_reason=exclusion,
+                )
+            )
+        return rows
 
     def _normalized_records(
         self,
@@ -1507,6 +1929,38 @@ class ReviewedSourceAdapter:
                     "access_status": "requires_download",
                 }
             ]
+        if (
+            self.definition.adapter_id == "pubchem-bioassay"
+            and operation == "extract_activity_result_rows"
+        ):
+            csv_reader = csv.DictReader(
+                io.StringIO(content.decode("utf-8-sig", errors="strict"))
+            )
+            cids = [
+                f"CID:{value}"
+                for row in csv_reader
+                if re.fullmatch(
+                    r"[1-9][0-9]{0,11}",
+                    value := str(row.get("PUBCHEM_CID") or "").strip(),
+                )
+            ]
+            aid = str(request.stable_identifier or "").upper()
+            modality = str(getattr(request, "modality_by_source", {}).get(aid) or "") or None
+            return [
+                {
+                    "stable_identifier": aid,
+                    "candidate_modalities": [modality] if modality else [],
+                    "modality": modality,
+                    "identifier_fields": ["PubChem AID", "PubChem CID"],
+                    "sampled_compound_identifiers": list(dict.fromkeys(cids))[:100],
+                    "measurement_fields": ["activity outcome", "activity value"],
+                    "downloadable_artifacts": ["compound-level activity result table"],
+                    "access_status": "verified_available",
+                    "count_status": "exact",
+                    "exact_counts": {"inspected_result_rows": len(cids)},
+                    "validation_status": "verified",
+                }
+            ]
         payload = json.loads(content.decode("utf-8"))
         if self.definition.adapter_id == "epa-comptox-toxcast":
             if isinstance(payload, list):
@@ -1592,18 +2046,66 @@ class ReviewedSourceAdapter:
                 {
                     "stable_identifier": f"{prefix}{item}",
                     "title": "",
+                    "candidate_modalities": (
+                        [str(request.endpoint_modality)]
+                        if activity_search and request.endpoint_modality
+                        else []
+                    ),
                     "modality": (
                         "chemical perturbation transcriptomics"
                         if self.definition.adapter_id == "lincs-l1000"
                         else None
                     ),
                     "count_status": "metadata_only",
-                    "validation_status": "verified" if activity_search else "unresolved",
-                    "unresolved_fields": [] if activity_search else ["GSE accession"],
+                    "validation_status": "metadata_candidate",
+                    "unresolved_fields": (
+                        [
+                            "assay title",
+                            "verified target",
+                            "assay format",
+                            "activity endpoint",
+                            "compound-level record availability",
+                        ]
+                        if activity_search
+                        else ["GSE accession", "study design", "matrix availability"]
+                    ),
                 }
                 for item in payload.get("esearchresult", {}).get("idlist", [])
             ]
+        if self.definition.adapter_id == "pubchem-bioassay" and isinstance(
+            payload.get("IdentifierList"), dict
+        ):
+            identifiers = [
+                f"CID:{item}"
+                for item in payload["IdentifierList"].get("CID", [])[:10]
+                if isinstance(item, int) or str(item).isdigit()
+            ]
+            return [
+                {
+                    "stable_identifier": request.stable_identifier,
+                    "identifier_fields": ["PubChem CID"],
+                    "sampled_compound_identifiers": identifiers,
+                    "access_status": ("verified_available" if identifiers else "metadata_only"),
+                    "count_status": "partial",
+                    "validation_status": "partial",
+                    "unresolved_fields": (
+                        [] if identifiers else ["sampled active compound identifiers"]
+                    ),
+                }
+            ]
         if self.definition.adapter_id == "pubchem-compound":
+            if operation == "resolve_compound_synonyms":
+                return [
+                    {
+                        "stable_identifier": f"CID:{item.get('CID')}",
+                        "identifier_fields": ["PubChem CID", "verified synonyms"],
+                        "sampled_compound_identifiers": [f"CID:{item.get('CID')}"] ,
+                        "access_status": "verified_available",
+                        "count_status": "partial",
+                    }
+                    for item in payload.get("InformationList", {}).get("Information", [])
+                    if item.get("CID") is not None
+                ]
             return [
                 {
                     "stable_identifier": f"CID:{item.get('CID')}",
@@ -1620,17 +2122,122 @@ class ReviewedSourceAdapter:
         records = []
         for uid in result.get("uids", []):
             item = result.get(str(uid), {})
+            is_geo_summary = self.definition.adapter_id in {
+                "ncbi-geo-series",
+                "ncbi-supporting-metadata",
+            } and (request.stable_identifier or "").upper().startswith("GDS_UID:")
+            if is_geo_summary:
+                accession = str(item.get("accession") or item.get("gse") or "").upper()
+                stable_identifier = str(request.stable_identifier)
+                summary = str(item.get("summary") or "")
+                context_fields = [
+                    value
+                    for value in (
+                        (
+                            f"cell or tissue context: {item.get('taxon')}"
+                            if item.get("taxon")
+                            else None
+                        ),
+                        (
+                            f"sample count: {item.get('n_samples')}"
+                            if item.get("n_samples")
+                            else None
+                        ),
+                        (
+                            "dose/time metadata present"
+                            if re.search(
+                                r"\b(?:dose|hour|hours|day|days)\b",
+                                summary,
+                                flags=re.I,
+                            )
+                            else None
+                        ),
+                        "sample design summary present" if summary else None,
+                    )
+                    if value
+                ]
+                downloadables = [
+                    label
+                    for label, present in (
+                        ("processed matrix", bool(item.get("suppfile") or item.get("ftpLink"))),
+                        ("official GEO download locator", bool(item.get("ftpLink"))),
+                    )
+                    if present
+                ]
+                records.append(
+                    {
+                        "stable_identifier": stable_identifier,
+                        "title": item.get("title", ""),
+                        "organism": item.get("taxon"),
+                        "modality": "chemical perturbation transcriptomics",
+                        "perturbation_type": (
+                            "chemical perturbation"
+                            if re.search(
+                                r"\b(?:compound|chemical|drug|treat)\w*\b",
+                                summary,
+                                flags=re.I,
+                            )
+                            else None
+                        ),
+                        "experimental_context_fields": context_fields,
+                        "downloadable_artifacts": downloadables,
+                        "identifier_fields": [
+                            "compound name",
+                            *(
+                                [f"GEO accession {accession}"]
+                                if re.fullmatch(r"GSE[1-9][0-9]{1,8}", accession)
+                                else []
+                            ),
+                        ],
+                        "access_status": "metadata_only",
+                        "count_status": "metadata_only",
+                        "validation_status": "partial",
+                        "unresolved_fields": [
+                            field
+                            for field, present in (
+                                ("chemical perturbation context", bool(summary)),
+                                ("cell or tissue model", bool(item.get("taxon"))),
+                                ("processed matrix availability", bool(downloadables)),
+                            )
+                            if not present
+                        ],
+                    }
+                )
+                continue
             records.append(
                 {
                     "stable_identifier": request.stable_identifier or f"AID:{uid}",
                     "title": item.get("title", item.get("name", "")),
                     "target": item.get("targetname"),
-                    "modality": item.get("activityoutcome"),
-                    "measurement_fields": ["activity outcome"],
+                    "organism": item.get("organism"),
+                    "modality": item.get("assaytype") or item.get("activityoutcome"),
+                    "measurement_fields": [
+                        value
+                        for value in (
+                            "activity outcome",
+                            (
+                                f"activity endpoint: {item.get('activityoutcome')}"
+                                if item.get("activityoutcome")
+                                else None
+                            ),
+                        )
+                        if value
+                    ],
                     "identifier_fields": ["PubChem AID", "PubChem CID"],
+                    "experimental_context_fields": [
+                        value
+                        for value in (
+                            f"assay format: {item.get('assaytype')}"
+                            if item.get("assaytype")
+                            else None,
+                            f"organism: {item.get('organism')}" if item.get("organism") else None,
+                        )
+                        if value
+                    ],
                     "downloadable_artifacts": ["compound-level activity result table"],
                     "access_status": "requires_download",
                     "count_status": "metadata_only",
+                    "validation_status": "partial",
                 }
             )
         if records:
@@ -1728,11 +2335,20 @@ class ReviewedSourceAdapter:
             source_roles=roles,
             request_operation=operation,
             public_validation_status=validation,
+            source_title=safe_text(record.get("title"), "title"),
+            organism=safe_text(record.get("organism"), "organism"),
             target=safe_text(record.get("target"), "target"),
             modality=safe_text(record.get("modality"), "modality"),
+            candidate_modalities=safe_list(
+                record.get("candidate_modalities", []), "candidate_modality"
+            ),
             perturbation_type=safe_text(record.get("perturbation_type"), "perturbation_type"),
             measurement_fields=safe_list(record.get("measurement_fields", []), "measurement"),
             identifier_fields=safe_list(record.get("identifier_fields", []), "identifier"),
+            sampled_compound_identifiers=safe_list(
+                record.get("sampled_compound_identifiers", []),
+                "sampled_compound_identifier",
+            ),
             structure_fields=safe_list(record.get("structure_fields", []), "structure"),
             experimental_context_fields=safe_list(
                 record.get("experimental_context_fields", []), "experimental_context"
@@ -1878,7 +2494,9 @@ class ReviewedSourceAdapterRegistry:
                 "status": "ready" if "lincs-l1000" in approved_by_id else "not_ready",
                 "requires_api_key": False,
             },
-            "source_retries": 0,
+            "source_retries": max(
+                (item.definition.source_retry_count for item in approved), default=0
+            ),
         }
 
     def public_inventory(self) -> list[dict[str, Any]]:
@@ -1917,7 +2535,126 @@ class ReviewedSourceAdapterRegistry:
         request: ReviewedSourceOperationInput,
         invocation: ToolInvocation,
     ) -> VerifiedSourceObservationBatch:
-        return self._resolve(operation, request).execute(operation, request, invocation)
+        batchable = {
+            "fetch_activity_source_metadata",
+            "inspect_activity_identifier_fields",
+            "extract_activity_result_rows",
+            "fetch_transcriptomic_source_metadata",
+            "inspect_supporting_metadata",
+            "inspect_official_file_listing",
+            "inspect_linked_publications",
+            "inspect_source_access",
+        }
+        identifiers = list(request.source_identifiers)
+        if operation not in batchable or not identifiers:
+            return self._resolve(operation, request).execute(operation, request, invocation)
+
+        batches: list[VerifiedSourceObservationBatch] = []
+        source_errors: list[dict[str, str | bool]] = []
+        failed_source_request_count = 0
+        for index, identifier in enumerate(identifiers):
+            single = request.model_copy(
+                update={
+                    "stable_identifier": identifier,
+                    "source_identifiers": [],
+                    "maximum_results": min(request.maximum_results, 10),
+                }
+            )
+            single_invocation = invocation.model_copy(
+                update={
+                    "idempotency_key": (
+                        f"{invocation.idempotency_key or operation}:item-{index + 1}"
+                    )
+                }
+            )
+            try:
+                batches.append(
+                    self._resolve(operation, single).execute(
+                        operation,
+                        single,
+                        single_invocation,
+                    )
+                )
+            except ReviewedSourceExecutionError as exc:
+                started = bool(
+                    exc.telemetry.http_status is not None
+                    or exc.telemetry.final_allowlisted_host
+                    or exc.telemetry.transport_attempts
+                )
+                if started:
+                    failed_source_request_count += max(
+                        1, len(exc.telemetry.transport_attempts)
+                    )
+                source_errors.append(
+                    {
+                        "stable_identifier": identifier,
+                        "error_code": exc.telemetry.failure_category or "source_request_failed",
+                        "safe_message": str(exc)[:500],
+                        "source_request_started": started,
+                    }
+                )
+            except (ReviewedSourceInvocationError, ValueError) as exc:
+                source_errors.append(
+                    {
+                        "stable_identifier": identifier,
+                        "error_code": "source_input_or_request_invalid",
+                        "safe_message": str(exc)[:500],
+                        "source_request_started": False,
+                    }
+                )
+
+        observations = list(
+            {item.observation_id: item for batch in batches for item in batch.observations}.values()
+        )
+        artifact_ids = list(
+            dict.fromkeys(
+                artifact_id
+                for batch in batches
+                for artifact_id in batch.source_request_artifact_ids
+            )
+        )
+        cache_statuses = {batch.cache_status for batch in batches}
+        cache_status = (
+            "fixture"
+            if cache_statuses == {"fixture"}
+            else "cached"
+            if cache_statuses and cache_statuses <= {"cached"}
+            else "live"
+        )
+        adapter = self._resolve(operation, request)
+        return VerifiedSourceObservationBatch(
+            adapter_id=adapter.definition.adapter_id,
+            adapter_version=adapter.definition.adapter_version,
+            operation=operation,
+            cache_status=cast(Literal["live", "cached", "fixture"], cache_status),
+            observations=observations,
+            source_request_artifact_ids=artifact_ids,
+            source_request_count=(
+                sum(item.source_request_count for item in batches)
+                + failed_source_request_count
+            ),
+            limitations=[
+                *list(dict.fromkeys(value for batch in batches for value in batch.limitations)),
+                *(
+                    [f"{len(source_errors)} source item(s) failed safely; see source_errors."]
+                    if source_errors
+                    else []
+                ),
+            ],
+            source_errors=source_errors,
+            activity_rows=[row for batch in batches for row in batch.activity_rows],
+            identity_bridge_rows=[
+                row for batch in batches for row in batch.identity_bridge_rows
+            ],
+            transcriptomic_profile_rows=[
+                row for batch in batches for row in batch.transcriptomic_profile_rows
+            ],
+            inspected_record_count=sum(batch.inspected_record_count for batch in batches),
+            excluded_record_count=sum(batch.excluded_record_count for batch in batches),
+            transport_attempts=[
+                attempt for batch in batches for attempt in batch.transport_attempts
+            ][:20],
+        )
 
     def execute_with_telemetry(
         self,
@@ -1933,9 +2670,7 @@ class ReviewedSourceAdapterRegistry:
         self, operation: str, request: ReviewedSourceOperationInput
     ) -> ReviewedSourceAdapter:
         operation_candidates = [
-            item
-            for item in self.approved()
-            if operation in item.definition.approved_operations
+            item for item in self.approved() if operation in item.definition.approved_operations
         ]
         candidates = [
             item
@@ -1948,12 +2683,7 @@ class ReviewedSourceAdapterRegistry:
             }
         ]
         if len(candidates) != 1:
-            expected = sorted(
-                {
-                    item.definition.adapter_id
-                    for item in operation_candidates
-                }
-            )
+            expected = sorted({item.definition.adapter_id for item in operation_candidates})
             supplied = request.source_system or "not supplied"
             category = (
                 "source_system_does_not_match_operation"

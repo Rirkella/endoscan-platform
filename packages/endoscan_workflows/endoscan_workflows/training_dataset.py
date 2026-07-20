@@ -92,9 +92,9 @@ class EndpointDiscoveryScope(StrictContract):
     aggregation_allowed_later: bool = False
     aggregation_requires_human_approval: bool = True
     aggregation_active_during_discovery: Literal[False] = False
-    selection_deferred_until: Literal[
-        "source_inventory_review", "assembly_strategy_review"
-    ] | None = None
+    selection_deferred_until: (
+        Literal["source_inventory_review", "assembly_strategy_review"] | None
+    ) = None
     scientific_scope: str = Field(min_length=10, max_length=4000)
     provenance: list[EndpointDiscoveryScopeProvenance] = Field(min_length=1, max_length=10)
 
@@ -362,6 +362,7 @@ class AgentReviewStatus(StrEnum):
 
 
 class SourceValidationStatus(StrEnum):
+    METADATA_CANDIDATE = "metadata_candidate"
     VERIFIED = "verified"
     PARTIAL = "partial"
     METADATA_ONLY = "metadata_only"
@@ -737,9 +738,7 @@ class DatasetSpecificationCompiler:
             ]
         if scope is None or missing:
             missing = missing or [MissingCoreEndpointElement.REQUESTED_MODALITY_OR_PREDICTION_CLAIM]
-            questions = [
-                self._blocking_question(item) for item in missing
-            ]
+            questions = [self._blocking_question(item) for item in missing]
             payload = {
                 "status": "needs_human_clarification",
                 "compiler_version": self.version,
@@ -785,12 +784,12 @@ class DatasetSpecificationCompiler:
         target = scope.biological_target or ""
         broad = scope.mode is EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION
         modality = None if broad else scope.fixed_modality.value if scope.fixed_modality else None
-        exclusions = self._broad_exclusions(target) if broad else self._exclusions(
-            target, modality or "activity"
+        exclusions = (
+            self._broad_exclusions(target)
+            if broad
+            else self._exclusions(target, modality or "activity")
         )
-        assumptions = list(
-            self._broad_approval_questions if broad else self._approval_questions
-        )
+        assumptions = list(self._broad_approval_questions if broad else self._approval_questions)
         provenance = self._provenance()
         draft = TrainingDatasetSpecificationDraft(
             schema_version=schema_version,
@@ -1457,9 +1456,7 @@ def derive_component_requirements(
 
     identity_ids = list(specification.compound_identity_requirements)
     scope = specification.endpoint_discovery_scope
-    broad = bool(
-        scope and scope.mode is EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION
-    )
+    broad = bool(scope and scope.mode is EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION)
     candidate_modalities = [item.value for item in specification.candidate_modalities]
     endpoint_exclusions = list(specification.excluded_modalities) or [
         "activity outside the approved endpoint modality"
@@ -1697,11 +1694,15 @@ class VerifiedSourceObservation(StrictContract):
     source_roles: list[ComponentRole] = Field(min_length=1, max_length=30)
     request_operation: str = Field(min_length=2, max_length=160)
     public_validation_status: SourceValidationStatus
+    source_title: str | None = Field(default=None, max_length=1000)
+    organism: str | None = Field(default=None, max_length=300)
     target: str | None = Field(default=None, max_length=500)
     modality: str | None = Field(default=None, max_length=300)
+    candidate_modalities: list[str] = Field(default_factory=list, max_length=20)
     perturbation_type: str | None = Field(default=None, max_length=300)
     measurement_fields: list[str] = Field(default_factory=list, max_length=100)
     identifier_fields: list[str] = Field(default_factory=list, max_length=100)
+    sampled_compound_identifiers: list[str] = Field(default_factory=list, max_length=100)
     structure_fields: list[str] = Field(default_factory=list, max_length=100)
     experimental_context_fields: list[str] = Field(default_factory=list, max_length=100)
     data_access_status: CapabilityStatus
@@ -1741,6 +1742,81 @@ class VerifiedSourceSearchOutcome(StrictContract):
     source_request_artifact_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
+class ActivityEvidenceRow(StrictContract):
+    """One source-backed PubChem assay result; AID is never a compound identifier."""
+
+    row_id: str = Field(min_length=3, max_length=160)
+    pubchem_aid: str = Field(pattern=r"^AID:[1-9][0-9]{0,11}$")
+    source_compound_identifier: str = Field(min_length=1, max_length=160)
+    pubchem_cid: str | None = Field(default=None, pattern=r"^CID:[1-9][0-9]{0,11}$")
+    activity_outcome: str | None = Field(default=None, max_length=300)
+    activity_value: str | None = Field(default=None, max_length=300)
+    activity_unit: str | None = Field(default=None, max_length=120)
+    activity_endpoint: str | None = Field(default=None, max_length=300)
+    assay_target: str | None = Field(default=None, max_length=500)
+    modality: Literal["binding", "agonism", "antagonism"]
+    source_locator: str = Field(min_length=1, max_length=2000)
+    raw_artifact_id: str = Field(min_length=3, max_length=160)
+    raw_artifact_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    extraction_status: Literal["included", "excluded"]
+    exclusion_reason: str | None = Field(default=None, max_length=500)
+    original_source_fields: dict[str, str] = Field(default_factory=dict, max_length=30)
+    evidence_references: list[str] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def included_rows_require_a_real_compound_identifier(self) -> ActivityEvidenceRow:
+        if self.extraction_status == "included" and self.pubchem_cid is None:
+            raise ValueError("included activity rows require a real PubChem CID")
+        if self.extraction_status == "excluded" and not self.exclusion_reason:
+            raise ValueError("excluded activity rows require an exclusion reason")
+        return self
+
+
+class CompoundIdentityBridgeRow(StrictContract):
+    """Deterministic CID-to-canonical-identity mapping with source provenance."""
+
+    mapping_id: str = Field(min_length=3, max_length=160)
+    activity_aids: list[str] = Field(default_factory=list, max_length=100)
+    source_compound_identifier: str = Field(min_length=1, max_length=160)
+    pubchem_cid: str = Field(pattern=r"^CID:[1-9][0-9]{0,11}$")
+    inchikey: str | None = Field(
+        default=None, pattern=r"^[A-Z]{14}-[A-Z]{10}-[A-Z]$"
+    )
+    canonical_name: str | None = Field(default=None, max_length=500)
+    synonyms: list[str] = Field(default_factory=list, max_length=50)
+    mapping_status: Literal["exact", "ambiguous", "missing", "failed"]
+    raw_artifact_ids: list[str] = Field(default_factory=list, max_length=20)
+    raw_artifact_hashes: list[str] = Field(default_factory=list, max_length=20)
+    evidence_references: list[str] = Field(default_factory=list, max_length=20)
+
+
+class TranscriptomicProfileEvidenceRow(StrictContract):
+    """One measured, source-backed perturbational transcriptomic profile candidate."""
+
+    profile_row_id: str = Field(min_length=3, max_length=160)
+    pubchem_cid: str = Field(pattern=r"^CID:[1-9][0-9]{0,11}$")
+    inchikey: str | None = Field(
+        default=None, pattern=r"^[A-Z]{14}-[A-Z]{10}-[A-Z]$"
+    )
+    canonical_name: str = Field(min_length=1, max_length=500)
+    source_system: str = Field(min_length=2, max_length=160)
+    source_accession: str = Field(min_length=1, max_length=300)
+    profile_identifier: str = Field(min_length=1, max_length=500)
+    profile_locator: str = Field(min_length=1, max_length=2000)
+    organism: str | None = Field(default=None, max_length=300)
+    cell_or_tissue_model: str | None = Field(default=None, max_length=500)
+    dose: str | None = Field(default=None, max_length=300)
+    exposure_time: str | None = Field(default=None, max_length=300)
+    processing_level: str | None = Field(default=None, max_length=300)
+    measurement_status: Literal["measured", "predicted", "inferred", "unresolved"]
+    compound_application_verified: bool
+    raw_artifact_id: str = Field(min_length=3, max_length=160)
+    raw_artifact_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    original_source_fields: dict[str, str] = Field(default_factory=dict, max_length=30)
+    evidence_references: list[str] = Field(min_length=1, max_length=20)
+    exclusion_reason: str | None = Field(default=None, max_length=500)
+
+
 class VerifiedSourceObservationBatch(StrictContract):
     adapter_id: str
     adapter_version: str
@@ -1748,9 +1824,20 @@ class VerifiedSourceObservationBatch(StrictContract):
     cache_status: Literal["live", "cached", "fixture"]
     observations: list[VerifiedSourceObservation] = Field(default_factory=list, max_length=25)
     source_request_artifact_ids: list[str] = Field(default_factory=list, max_length=10)
-    source_request_count: int = Field(ge=0, le=10)
+    source_request_count: int = Field(ge=0, le=20)
     limitations: list[str] = Field(default_factory=list, max_length=50)
+    source_errors: list[dict[str, str | bool]] = Field(default_factory=list, max_length=10)
     search_outcome: VerifiedSourceSearchOutcome | None = None
+    activity_rows: list[ActivityEvidenceRow] = Field(default_factory=list, max_length=2500)
+    identity_bridge_rows: list[CompoundIdentityBridgeRow] = Field(
+        default_factory=list, max_length=2500
+    )
+    transcriptomic_profile_rows: list[TranscriptomicProfileEvidenceRow] = Field(
+        default_factory=list, max_length=2500
+    )
+    inspected_record_count: int = Field(default=0, ge=0)
+    excluded_record_count: int = Field(default=0, ge=0)
+    transport_attempts: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
 
 
 class SourceCapability(StrictContract):
@@ -1766,11 +1853,15 @@ class VerifiedSourceRecord(StrictContract):
     source_roles: list[ComponentRole] = Field(min_length=1, max_length=30)
     source_system: str = Field(min_length=2, max_length=160)
     stable_accession: str = Field(min_length=1, max_length=300)
+    source_title: str | None = Field(default=None, max_length=1000)
+    organism: str | None = Field(default=None, max_length=300)
     assay_modality: str | None = Field(default=None, max_length=300)
+    candidate_modalities: list[str] = Field(default_factory=list, max_length=20)
     official_source: str = Field(min_length=2, max_length=300)
     verified_public_availability: bool
     capabilities: list[SourceCapability] = Field(min_length=1, max_length=100)
     identifier_fields: list[str] = Field(default_factory=list, max_length=100)
+    sampled_compound_identifiers: list[str] = Field(default_factory=list, max_length=100)
     structure_fields: list[str] = Field(default_factory=list, max_length=100)
     measurement_fields: list[str] = Field(default_factory=list, max_length=100)
     experimental_context_fields: list[str] = Field(default_factory=list, max_length=100)
@@ -1852,6 +1943,15 @@ class VerifiedSourceInventoryFragment(StrictContract):
     scientific_source_requests: int = Field(default=0, ge=0)
     incomplete_stage: str | None = Field(default=None, max_length=160)
     model_annotations: dict[str, str] = Field(default_factory=dict, max_length=100)
+    activity_rows: list[ActivityEvidenceRow] = Field(default_factory=list, max_length=2500)
+    identity_bridge_rows: list[CompoundIdentityBridgeRow] = Field(
+        default_factory=list, max_length=2500
+    )
+    transcriptomic_profile_rows: list[TranscriptomicProfileEvidenceRow] = Field(
+        default_factory=list, max_length=2500
+    )
+    inspected_record_count: int = Field(default=0, ge=0)
+    excluded_record_count: int = Field(default=0, ge=0)
 
 
 def _observation_record(
@@ -1879,14 +1979,6 @@ def _observation_record(
     record_payload = {
         "source_system": observation.source_system,
         "stable_source_identifier": observation.stable_source_identifier,
-        "assay_modality": observation.modality,
-        "roles": sorted(role.value for role in observation.source_roles),
-        "measurement_fields": sorted(observation.measurement_fields),
-        "identifier_fields": sorted(observation.identifier_fields),
-        "structure_fields": sorted(observation.structure_fields),
-        "context_fields": sorted(observation.experimental_context_fields),
-        "access_status": observation.data_access_status.value,
-        "validation_status": observation.public_validation_status.value,
     }
     digest = hashlib.sha256(
         json.dumps(record_payload, sort_keys=True, separators=(",", ":")).encode()
@@ -1896,13 +1988,17 @@ def _observation_record(
         source_roles=list(dict.fromkeys(observation.source_roles)),
         source_system=observation.source_system,
         stable_accession=observation.stable_source_identifier,
+        source_title=observation.source_title,
+        organism=observation.organism,
         assay_modality=observation.modality,
+        candidate_modalities=observation.candidate_modalities,
         official_source=observation.source_system,
         verified_public_availability=(
             observation.public_validation_status is SourceValidationStatus.VERIFIED
         ),
         capabilities=capabilities,
         identifier_fields=observation.identifier_fields,
+        sampled_compound_identifiers=observation.sampled_compound_identifiers,
         structure_fields=observation.structure_fields,
         measurement_fields=observation.measurement_fields,
         experimental_context_fields=observation.experimental_context_fields,
@@ -1941,13 +2037,19 @@ def compile_verified_source_fragment(
     scientific_source_requests: int = 0,
     missing_prerequisites: list[str] | None = None,
     incomplete_stage: str | None = None,
+    activity_rows: list[ActivityEvidenceRow] | None = None,
+    identity_bridge_rows: list[CompoundIdentityBridgeRow] | None = None,
+    transcriptomic_profile_rows: list[TranscriptomicProfileEvidenceRow] | None = None,
+    inspected_record_count: int = 0,
+    excluded_record_count: int = 0,
+    deterministic_limitations: list[str] | None = None,
 ) -> VerifiedSourceInventoryFragment:
     """Compile a source fragment without allowing model text to overwrite verified facts."""
 
     status = AgentReviewStatus.UNAVAILABLE
     terminal_outcome = "unavailable"
     annotations: dict[str, str] = {}
-    limitations: list[str] = []
+    limitations: list[str] = list(deterministic_limitations or [])
     unresolved: list[str] = []
     search_outcomes = list(search_outcomes or [])
     missing_prerequisites = list(missing_prerequisites or [])
@@ -2037,6 +2139,11 @@ def compile_verified_source_fragment(
         tool_calls=tool_calls,
         scientific_source_requests=scientific_source_requests,
         incomplete_stage=incomplete_stage,
+        activity_rows=list(activity_rows or []),
+        identity_bridge_rows=list(identity_bridge_rows or []),
+        transcriptomic_profile_rows=list(transcriptomic_profile_rows or []),
+        inspected_record_count=inspected_record_count,
+        excluded_record_count=excluded_record_count,
     )
 
 
@@ -2056,8 +2163,86 @@ def compile_verified_source_inventory(
             if existing is None:
                 records[candidate.source_id] = candidate
                 continue
-            records[candidate.source_id] = existing.model_copy(
+            validation_rank = {
+                SourceValidationStatus.INVALID: 0,
+                SourceValidationStatus.UNAVAILABLE: 1,
+                SourceValidationStatus.UNRESOLVED: 2,
+                SourceValidationStatus.METADATA_CANDIDATE: 3,
+                SourceValidationStatus.METADATA_ONLY: 4,
+                SourceValidationStatus.PARTIAL: 5,
+                SourceValidationStatus.VERIFIED: 6,
+            }
+            preferred = (
+                candidate
+                if validation_rank[candidate.validation_status]
+                > validation_rank[existing.validation_status]
+                else existing
+            )
+            capabilities: dict[ComponentRole, SourceCapability] = {
+                item.component: item for item in existing.capabilities
+            }
+            for item in candidate.capabilities:
+                prior = capabilities.get(item.component)
+                if prior is None:
+                    capabilities[item.component] = item
+                    continue
+                capabilities[item.component] = prior.model_copy(
+                    update={
+                        "status": (
+                            item.status
+                            if item.status is not CapabilityStatus.UNRESOLVED
+                            else prior.status
+                        ),
+                        "fields": sorted(set(prior.fields + item.fields)),
+                        "evidence_references": sorted(
+                            set(prior.evidence_references + item.evidence_references)
+                        ),
+                        "limitation": prior.limitation or item.limitation,
+                    }
+                )
+            records[candidate.source_id] = preferred.model_copy(
                 update={
+                    "source_roles": list(
+                        dict.fromkeys(existing.source_roles + candidate.source_roles)
+                    ),
+                    "source_title": candidate.source_title or existing.source_title,
+                    "organism": candidate.organism or existing.organism,
+                    "assay_modality": candidate.assay_modality or existing.assay_modality,
+                    "candidate_modalities": sorted(
+                        set(existing.candidate_modalities + candidate.candidate_modalities)
+                    ),
+                    "capabilities": list(capabilities.values()),
+                    "identifier_fields": sorted(
+                        set(existing.identifier_fields + candidate.identifier_fields)
+                    ),
+                    "sampled_compound_identifiers": sorted(
+                        set(
+                            existing.sampled_compound_identifiers
+                            + candidate.sampled_compound_identifiers
+                        )
+                    ),
+                    "structure_fields": sorted(
+                        set(existing.structure_fields + candidate.structure_fields)
+                    ),
+                    "measurement_fields": sorted(
+                        set(existing.measurement_fields + candidate.measurement_fields)
+                    ),
+                    "experimental_context_fields": sorted(
+                        set(
+                            existing.experimental_context_fields
+                            + candidate.experimental_context_fields
+                        )
+                    ),
+                    "downloadable_artifacts": sorted(
+                        set(existing.downloadable_artifacts + candidate.downloadable_artifacts)
+                    ),
+                    "source_references": sorted(
+                        set(existing.source_references + candidate.source_references)
+                    ),
+                    "limitations": sorted(set(existing.limitations + candidate.limitations)),
+                    "unresolved_questions": sorted(
+                        set(existing.unresolved_questions + candidate.unresolved_questions)
+                    ),
                     "artifact_hashes": sorted(
                         set(existing.artifact_hashes + candidate.artifact_hashes)
                     ),
@@ -2568,6 +2753,81 @@ class AssemblyGap(StrictContract):
     prior_query_fingerprints: list[str] = Field(default_factory=list, max_length=100)
 
 
+class DeterministicTableReadiness(StrictContract):
+    """Evidence-bound readiness for one downstream table; this never ingests source data."""
+
+    table_name: Literal[
+        "activity_table",
+        "transcriptomic_profile_table",
+        "identifier_bridge",
+        "joinability_report",
+        "candidate_training_table_preview",
+    ]
+    required_fields: list[str] = Field(min_length=1, max_length=30)
+    source_ids: list[str] = Field(default_factory=list, max_length=500)
+    status: Literal[
+        "deterministic_ready",
+        "requires_approved_ingestion",
+        "requires_deterministic_computation",
+        "blocked",
+    ]
+    blocking_gaps: list[str] = Field(default_factory=list, max_length=50)
+    next_deterministic_action: str = Field(min_length=3, max_length=2000)
+
+
+class CandidateTrainingTablePreviewRow(StrictContract):
+    """A source-backed preview row; fields may never be inferred by a model."""
+
+    stable_compound_identifier: str = Field(min_length=1, max_length=300)
+    pubchem_cid: str | None = Field(default=None, pattern=r"^CID:[1-9][0-9]{0,11}$")
+    inchikey: str | None = Field(
+        default=None, pattern=r"^[A-Z]{14}-[A-Z]{10}-[A-Z]$"
+    )
+    canonical_compound_name: str | None = Field(default=None, max_length=500)
+    activity_source_id: str = Field(min_length=3, max_length=160)
+    activity_aid: str | None = Field(
+        default=None, pattern=r"^AID:[1-9][0-9]{0,11}$"
+    )
+    activity_outcome: str | None = Field(default=None, max_length=300)
+    activity_value: str | None = Field(default=None, max_length=300)
+    transcriptomic_source_id: str = Field(min_length=3, max_length=160)
+    transcriptomic_profile_identifier: str | None = Field(default=None, max_length=500)
+    modality: str = Field(min_length=1, max_length=300)
+    profile_locator: str = Field(min_length=1, max_length=1000)
+    cell_or_tissue_model: str | None = Field(default=None, max_length=500)
+    dose: str | None = Field(default=None, max_length=300)
+    exposure_time: str | None = Field(default=None, max_length=300)
+    processing_level: str | None = Field(default=None, max_length=300)
+    activity_provenance: list[str] = Field(default_factory=list, max_length=20)
+    transcriptomic_provenance: list[str] = Field(default_factory=list, max_length=20)
+    evidence_references: list[str] = Field(min_length=1, max_length=100)
+
+
+class JoinableTrainingTablePathAssessment(StrictContract):
+    """Deterministic discovery acceptance result before ingestion or assembly approval."""
+
+    outcome: Literal[
+        "concrete_joinable_path_identified",
+        "evidence_backed_blocking_gap",
+    ]
+    activity_compounds_by_modality: dict[str, int] = Field(default_factory=dict, max_length=30)
+    transcriptomic_compound_count: int = Field(ge=0)
+    overlap_by_modality: dict[str, int] = Field(default_factory=dict, max_length=30)
+    functional_agonism_or_antagonism_overlap: int = Field(default=0, ge=0)
+    resolved_identity_count: int = Field(default=0, ge=0)
+    measured_transcriptomic_profile_count: int = Field(default=0, ge=0)
+    profile_rows_by_context: dict[str, int] = Field(default_factory=dict, max_length=100)
+    excluded_records_by_reason: dict[str, int] = Field(default_factory=dict, max_length=100)
+    table_readiness: list[DeterministicTableReadiness] = Field(min_length=5, max_length=5)
+    preview_rows: list[CandidateTrainingTablePreviewRow] = Field(
+        default_factory=list, max_length=500
+    )
+    blocking_gaps: list[str] = Field(default_factory=list, max_length=100)
+    evidence_references: list[str] = Field(default_factory=list, max_length=500)
+    requires_inventory_approval_before_ingestion: bool = True
+    exploratory_llm_required_for_known_post_approval_steps: bool = False
+
+
 class AssemblyGapReport(StrictContract):
     report_id: str = Field(min_length=3, max_length=160)
     inventory_id: str
@@ -2585,6 +2845,7 @@ class AssemblyGapReport(StrictContract):
     ] = "inventory_gaps"
     discovery_execution_complete: bool = True
     recommended_next_action: str | None = Field(default=None, max_length=1000)
+    joinable_training_table_path: JoinableTrainingTablePathAssessment | None = None
 
     def next_queries(self, already_executed: set[str]) -> list[str]:
         if self.discovery_round >= self.maximum_discovery_rounds:
@@ -2699,6 +2960,337 @@ def build_source_assembly_gap_report(
         classification = "inventory_gaps"
         execution_complete = True
         next_action = "Review verified inventory gaps without changing scope automatically."
+    activity_rows = [row for fragment in fragments for row in fragment.activity_rows]
+    identity_rows = [row for fragment in fragments for row in fragment.identity_bridge_rows]
+    profile_rows = [
+        row for fragment in fragments for row in fragment.transcriptomic_profile_rows
+    ]
+    included_activity_rows = [
+        row for row in activity_rows if row.extraction_status == "included" and row.pubchem_cid
+    ]
+    exact_identity = {
+        row.pubchem_cid: row
+        for row in identity_rows
+        if row.mapping_status == "exact" and row.inchikey
+    }
+    measured_profiles = [
+        row
+        for row in profile_rows
+        if row.measurement_status == "measured" and row.compound_application_verified
+    ]
+    complete_measured_profiles = [
+        row
+        for row in measured_profiles
+        if row.profile_locator
+        and row.cell_or_tissue_model
+        and row.dose
+        and row.exposure_time
+        and row.processing_level
+    ]
+    activity_sources = [
+        source
+        for source in inventory.sources
+        if ComponentRole.ENDPOINT_ACTIVITY in source.source_roles
+    ]
+    transcriptomic_sources = [
+        source
+        for source in inventory.sources
+        if ComponentRole.TRANSCRIPTOMIC_MATRIX in source.source_roles
+    ]
+    identity_sources = [
+        source
+        for source in inventory.sources
+        if {
+            ComponentRole.COMPOUND_IDENTITY,
+            ComponentRole.CHEMICAL_STRUCTURE,
+            ComponentRole.SOURCE_ID_MAPPING,
+        }
+        & set(source.source_roles)
+    ]
+    activity_identifiers_by_modality: dict[str, set[str]] = defaultdict(set)
+    if included_activity_rows:
+        for row in included_activity_rows:
+            activity_identifiers_by_modality[row.modality].add(str(row.pubchem_cid))
+    else:
+        for source in activity_sources:
+            modalities = list(source.candidate_modalities)
+            if not modalities and source.assay_modality:
+                modalities.append(source.assay_modality)
+            for modality in sorted(set(modalities)) or ["unresolved"]:
+                activity_identifiers_by_modality[modality].update(
+                    source.sampled_compound_identifiers
+                )
+    transcriptomic_identifiers = (
+        {row.pubchem_cid for row in measured_profiles}
+        if measured_profiles
+        else {
+            identifier
+            for source in transcriptomic_sources
+            for identifier in source.sampled_compound_identifiers
+        }
+    )
+    overlap_by_modality = {
+        modality: len(identifiers & transcriptomic_identifiers)
+        for modality, identifiers in sorted(activity_identifiers_by_modality.items())
+    }
+    joinability_blockers: list[str] = []
+    if not activity_sources:
+        joinability_blockers.append("No verified activity source candidate is available.")
+    if not transcriptomic_sources:
+        joinability_blockers.append(
+            "No verified perturbational-transcriptomic source candidate is available."
+        )
+    if activity_sources and not any(activity_identifiers_by_modality.values()):
+        joinability_blockers.append(
+            "Hydrated activity candidates expose no stable sampled compound identifiers."
+        )
+    if transcriptomic_sources and not transcriptomic_identifiers:
+        joinability_blockers.append(
+            "Hydrated transcriptomic candidates expose no stable sampled compound identifiers; "
+            "approved metadata or matrix ingestion is required before exact overlap can be "
+            "computed."
+        )
+    if (
+        activity_identifiers_by_modality
+        and transcriptomic_identifiers
+        and not any(overlap_by_modality.values())
+    ):
+        joinability_blockers.append(
+            "The currently sampled stable identifiers have zero cross-source overlap."
+        )
+    incomplete_profile_context_count = len(measured_profiles) - len(complete_measured_profiles)
+    if incomplete_profile_context_count:
+        joinability_blockers.append(
+            f"{incomplete_profile_context_count} measured transcriptomic profile row(s) lack "
+            "a source-backed cell/tissue model, dose, exposure time, or processing level."
+        )
+
+    activity_ids = [source.source_id for source in activity_sources]
+    transcriptomic_ids = [source.source_id for source in transcriptomic_sources]
+    identity_ids = [source.source_id for source in identity_sources]
+    functional_overlap = len(
+        (
+            activity_identifiers_by_modality.get("agonism", set())
+            | activity_identifiers_by_modality.get("antagonism", set())
+        )
+        & transcriptomic_identifiers
+    )
+    profiles_by_cid: dict[str, list[TranscriptomicProfileEvidenceRow]] = defaultdict(list)
+    for profile_row in complete_measured_profiles:
+        profiles_by_cid[profile_row.pubchem_cid].append(profile_row)
+    preview_rows: list[CandidateTrainingTablePreviewRow] = []
+    for activity in included_activity_rows:
+        if not activity.pubchem_cid:
+            continue
+        identity = exact_identity.get(activity.pubchem_cid)
+        for profile in profiles_by_cid.get(activity.pubchem_cid, []):
+            preview_rows.append(
+                CandidateTrainingTablePreviewRow(
+                    stable_compound_identifier=(
+                        identity.inchikey
+                        if identity and identity.inchikey
+                        else activity.pubchem_cid
+                    ),
+                    pubchem_cid=activity.pubchem_cid,
+                    inchikey=(identity.inchikey if identity else profile.inchikey),
+                    canonical_compound_name=(
+                        identity.canonical_name if identity else profile.canonical_name
+                    ),
+                    activity_source_id=activity.row_id,
+                    activity_aid=activity.pubchem_aid,
+                    activity_outcome=activity.activity_outcome,
+                    activity_value=activity.activity_value,
+                    transcriptomic_source_id=profile.profile_row_id,
+                    transcriptomic_profile_identifier=profile.profile_identifier,
+                    modality=activity.modality,
+                    profile_locator=profile.profile_locator,
+                    cell_or_tissue_model=profile.cell_or_tissue_model,
+                    dose=profile.dose,
+                    exposure_time=profile.exposure_time,
+                    processing_level=profile.processing_level,
+                    activity_provenance=[
+                        *activity.evidence_references,
+                        activity.raw_artifact_id,
+                        f"sha256:{activity.raw_artifact_sha256}",
+                    ],
+                    transcriptomic_provenance=[
+                        *profile.evidence_references,
+                        profile.raw_artifact_id,
+                        f"sha256:{profile.raw_artifact_sha256}",
+                    ],
+                    evidence_references=sorted(
+                        set(activity.evidence_references + profile.evidence_references)
+                    ),
+                )
+            )
+            if len(preview_rows) >= 100:
+                break
+        if len(preview_rows) >= 100:
+            break
+    excluded_records_by_reason: dict[str, int] = defaultdict(int)
+    for activity_row in activity_rows:
+        if activity_row.extraction_status == "excluded":
+            excluded_records_by_reason[activity_row.exclusion_reason or "unspecified"] += 1
+    for profile_row in profile_rows:
+        if profile_row.exclusion_reason:
+            excluded_records_by_reason[profile_row.exclusion_reason] += 1
+    profile_rows_by_context: dict[str, int] = defaultdict(int)
+    for profile_row in measured_profiles:
+        profile_rows_by_context[
+            " | ".join(
+                [
+                    profile_row.cell_or_tissue_model or "unresolved model",
+                    profile_row.dose or "unresolved dose",
+                    profile_row.exposure_time or "unresolved time",
+                ]
+            )
+        ] += 1
+    table_readiness = [
+        DeterministicTableReadiness(
+            table_name="activity_table",
+            required_fields=[
+                "stable_compound_identifier",
+                "assay_source_identifier",
+                "target",
+                "modality",
+                "activity_label_or_value",
+                "provenance",
+            ],
+            source_ids=activity_ids,
+            status=(
+                "deterministic_ready"
+                if included_activity_rows
+                else "requires_approved_ingestion"
+                if activity_ids
+                else "blocked"
+            ),
+            blocking_gaps=(
+                []
+                if included_activity_rows
+                else ["No extracted compound-level activity rows are available."]
+            ),
+            next_deterministic_action=(
+                "After inventory approval, ingest only the approved compound-level activity "
+                "records and preserve assay modality and provenance."
+            ),
+        ),
+        DeterministicTableReadiness(
+            table_name="transcriptomic_profile_table",
+            required_fields=[
+                "stable_compound_identifier",
+                "gene_expression_profile_locator",
+                "cell_or_tissue_model",
+                "dose",
+                "exposure_time",
+                "processing_level",
+                "provenance",
+            ],
+            source_ids=transcriptomic_ids,
+            status=(
+                "deterministic_ready"
+                if complete_measured_profiles
+                else "requires_approved_ingestion"
+                if transcriptomic_ids
+                else "blocked"
+            ),
+            blocking_gaps=(
+                []
+                if complete_measured_profiles
+                else [
+                    "No measured compound-linked transcriptomic profile with complete "
+                    "source-backed context is available."
+                ]
+            ),
+            next_deterministic_action=(
+                "After inventory approval, ingest only approved profile metadata and locators; "
+                "do not infer missing experimental conditions."
+            ),
+        ),
+        DeterministicTableReadiness(
+            table_name="identifier_bridge",
+            required_fields=[
+                "source_identifiers",
+                "pubchem_cid",
+                "stable_canonical_identifier",
+                "mapping_status",
+                "provenance",
+            ],
+            source_ids=identity_ids,
+            status=("deterministic_ready" if exact_identity else "blocked"),
+            blocking_gaps=(
+                [] if exact_identity else ["No exact CID-to-InChIKey bridge is available."]
+            ),
+            next_deterministic_action=(
+                "Resolve only source-provided stable identifiers through approved identity "
+                "records and retain every mapping decision."
+            ),
+        ),
+        DeterministicTableReadiness(
+            table_name="joinability_report",
+            required_fields=[
+                "activity_compounds_by_modality",
+                "transcriptomic_compounds",
+                "overlap_by_modality",
+                "missing_identifiers",
+                "unusable_record_reasons",
+            ],
+            source_ids=sorted(set(activity_ids + transcriptomic_ids + identity_ids)),
+            status=("deterministic_ready" if preview_rows else "blocked"),
+            blocking_gaps=joinability_blockers,
+            next_deterministic_action=(
+                "After approved ingestion, compute exact modality-specific overlap, conflicts, "
+                "missingness, and unusable-record reasons without aggregating modalities."
+            ),
+        ),
+        DeterministicTableReadiness(
+            table_name="candidate_training_table_preview",
+            required_fields=[
+                "stable_compound_identifier",
+                "activity_source_identifier",
+                "transcriptomic_profile_locator",
+                "modality",
+                "provenance",
+            ],
+            source_ids=sorted(set(activity_ids + transcriptomic_ids)),
+            status=("deterministic_ready" if preview_rows else "blocked"),
+            blocking_gaps=(
+                []
+                if preview_rows
+                else [
+                    "No source-backed compound/profile pair is materialized before approved "
+                    "ingestion."
+                ]
+            ),
+            next_deterministic_action=(
+                "Materialize one provenance-bound preview row per exact compound/profile pair; "
+                "never invent activity values, conditions, or identifiers."
+            ),
+        ),
+    ]
+    joinable_path = JoinableTrainingTablePathAssessment(
+        outcome=(
+            "concrete_joinable_path_identified"
+            if preview_rows
+            else "evidence_backed_blocking_gap"
+        ),
+        activity_compounds_by_modality={
+            modality: len(identifiers)
+            for modality, identifiers in sorted(activity_identifiers_by_modality.items())
+        },
+        transcriptomic_compound_count=len(transcriptomic_identifiers),
+        overlap_by_modality=overlap_by_modality,
+        functional_agonism_or_antagonism_overlap=functional_overlap,
+        resolved_identity_count=len(exact_identity),
+        measured_transcriptomic_profile_count=len(measured_profiles),
+        profile_rows_by_context=dict(sorted(profile_rows_by_context.items())),
+        excluded_records_by_reason=dict(sorted(excluded_records_by_reason.items())),
+        table_readiness=table_readiness,
+        preview_rows=preview_rows,
+        blocking_gaps=joinability_blockers,
+        evidence_references=sorted(
+            {reference for source in inventory.sources for reference in source.source_references}
+        )[:500],
+    )
     return AssemblyGapReport(
         report_id=report_id,
         inventory_id=inventory.inventory_id,
@@ -2710,6 +3302,7 @@ def build_source_assembly_gap_report(
         classification=classification,
         discovery_execution_complete=execution_complete,
         recommended_next_action=next_action,
+        joinable_training_table_path=joinable_path,
     )
 
 
@@ -2805,6 +3398,7 @@ SPECIALIZED_AGENT_SEQUENCE = [
             "fetch_activity_source_metadata",
             "inspect_activity_result_availability",
             "inspect_activity_identifier_fields",
+            "extract_activity_result_rows",
             "summarize_activity_outcomes",
             "inspect_counter_screen_relationships",
             "inspect_epa_public_invitrodb_release",
@@ -2828,6 +3422,20 @@ SPECIALIZED_AGENT_SEQUENCE = [
         produces_artifact="activity_source_inventory_fragment",
     ),
     SpecializedAgentDefinition(
+        agent_name="Chemical Identity and Structure Source Discovery Agent",
+        role="worker",
+        output_schema_name="DiscoveryAgentReviewOutcome",
+        allowed_tools=[
+            "inspect_source_identity_fields",
+            "inspect_source_record_availability",
+            "build_compound_mapping_manifest",
+            "resolve_compound_identity_sample",
+            "resolve_compound_synonyms",
+        ],
+        receives_artifacts=["component_requirements", "discovered_source_fragments"],
+        produces_artifact="identity_source_inventory_fragment",
+    ),
+    SpecializedAgentDefinition(
         agent_name="Transcriptomic Evidence Discovery Agent",
         role="worker",
         output_schema_name="DiscoveryAgentReviewOutcome",
@@ -2848,21 +3456,12 @@ SPECIALIZED_AGENT_SEQUENCE = [
             "inspect_lincs_processed_signature_availability",
             "inspect_lincs_release_manifest",
         ],
-        receives_artifacts=["training_dataset_specification", "component_requirements"],
-        produces_artifact="transcriptomic_source_inventory_fragment",
-    ),
-    SpecializedAgentDefinition(
-        agent_name="Chemical Identity and Structure Source Discovery Agent",
-        role="worker",
-        output_schema_name="DiscoveryAgentReviewOutcome",
-        allowed_tools=[
-            "inspect_source_identity_fields",
-            "inspect_source_record_availability",
-            "build_compound_mapping_manifest",
-            "resolve_compound_identity_sample",
+        receives_artifacts=[
+            "training_dataset_specification",
+            "component_requirements",
+            "identifier_bridge",
         ],
-        receives_artifacts=["component_requirements", "discovered_source_fragments"],
-        produces_artifact="identity_source_inventory_fragment",
+        produces_artifact="transcriptomic_source_inventory_fragment",
     ),
     SpecializedAgentDefinition(
         agent_name="Supporting Metadata Discovery Agent",
@@ -2917,6 +3516,7 @@ SOURCE_DISCOVERY_STAGE_TOOL_SETS: dict[str, dict[str, list[str]]] = {
             "fetch_activity_source_metadata",
             "inspect_activity_result_availability",
             "inspect_activity_identifier_fields",
+            "extract_activity_result_rows",
             "inspect_epa_public_assay_annotations",
         ],
         "final_output": [],
@@ -2950,6 +3550,7 @@ SOURCE_DISCOVERY_STAGE_TOOL_SETS: dict[str, dict[str, list[str]]] = {
             "inspect_source_identity_fields",
             "inspect_source_record_availability",
             "resolve_compound_identity_sample",
+            "resolve_compound_synonyms",
         ],
         "mapping_review": ["build_compound_mapping_manifest"],
         "final_output": [],
@@ -2993,11 +3594,12 @@ SPECIALIZED_AGENT_INSTRUCTIONS = {
         "persisted observation IDs only; an empty review is valid."
     ),
     "Transcriptomic Evidence Discovery Agent": (
-        "Discover bounded official public chemical-perturbation transcriptomic sources using "
-        "only exposed tools. Reject disease cohorts and genetic perturbations as substitutes "
-        "for compound-induced responses. Search general GEO and LINCS as independent source "
-        "families before validation. Return only annotations for persisted observation IDs; "
-        "an empty review is valid."
+        "Review bounded compound-first official chemical-perturbation transcriptomic evidence "
+        "produced from the persisted exact identity bridge. Reject disease cohorts, genetic "
+        "perturbations, and predicted profiles as substitutes for measured compound-induced "
+        "responses. General GEO and LINCS remain independent source families. Do not invent a "
+        "target-first fallback query or infer compound application from an accession alone. "
+        "Return only annotations for persisted observation IDs; an empty review is valid."
     ),
     "Chemical Identity and Structure Source Discovery Agent": (
         "Assess identity and structure resources and mapping paths for already discovered "
@@ -3072,9 +3674,7 @@ def specialized_agent_request(
     stage_tool_sets = SOURCE_DISCOVERY_STAGE_TOOL_SETS.get(definition.agent_name, {})
     endpoint_scope = effective_artifacts.get("endpoint_discovery_scope")
     candidate_modalities = (
-        endpoint_scope.get("candidate_modalities", [])
-        if isinstance(endpoint_scope, dict)
-        else []
+        endpoint_scope.get("candidate_modalities", []) if isinstance(endpoint_scope, dict) else []
     )
     return AgentRunRequest(
         workflow_id=workflow_id,
@@ -3104,6 +3704,10 @@ def specialized_agent_request(
             "stage_tool_sets": stage_tool_sets,
             "stage_sequence": list(stage_tool_sets),
             "candidate_modalities": candidate_modalities,
+            "compound_identifier_groups": effective_artifacts.get("compound_identifier_groups", []),
+            "supporting_metadata_identifiers": effective_artifacts.get(
+                "verified_source_identifiers", []
+            ),
             "validated_artifacts": effective_artifacts,
             "source_hints": [],
             "structured_output_boundary_contract": {

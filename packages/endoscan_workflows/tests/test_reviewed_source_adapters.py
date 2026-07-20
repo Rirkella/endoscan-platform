@@ -153,7 +153,7 @@ def test_registry_exposes_only_reviewed_adapters_and_covers_mandatory_roles() ->
     )
     readiness = registry.readiness()
     assert readiness["ready"] is True
-    assert readiness["source_retries"] == 0
+    assert readiness["source_retries"] == 1
     assert readiness["approved_adapter_count"] == 7
     assert all(
         item.allows_bulk_downloads_during_discovery is False
@@ -333,6 +333,32 @@ def test_source_security_rejects_domain_redirect_mime_size_timeout_and_http_erro
             client.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi")
         assert failure.value.diagnostic is not None
         assert failure.value.diagnostic.attempt_number == 1
+
+    attempts = 0
+
+    def transient_timeout_then_success(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ReadTimeout("bounded transient timeout", request=request)
+        return httpx.Response(200, json={"ok": True}, request=request)
+
+    with ScientificSourceClient(
+        transport=httpx.MockTransport(transient_timeout_then_success),
+        maximum_attempts=2,
+        sleep=lambda _seconds: None,
+    ) as client:
+        response = client.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi",
+            maximum_attempts=2,
+        )
+    assert attempts == 2
+    assert [item.attempt_number for item in response.attempt_diagnostics] == [1, 2]
+    assert [item.source_error_category for item in response.attempt_diagnostics] == [
+        "timeout",
+        "none",
+    ]
+    assert response.attempt_diagnostics[0].retryable is True
 
     def rejected(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"secret": "must not escape"}, request=request)
@@ -567,7 +593,7 @@ def test_epa_and_lincs_request_builders_are_bounded_and_source_neutral() -> None
     )
     assert lincs_metadata.url == "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
     assert lincs_metadata.params["acc"] == "GSE12345"
-    assert LINCS_L1000_ADAPTER.source_retry_count == 0
+    assert LINCS_L1000_ADAPTER.source_retry_count == 1
     lincs_health = _adapter(LINCS_L1000_ADAPTER)._build_request(
         "check_lincs_geo_distribution_health",
         ReviewedSourceOperationInput(),

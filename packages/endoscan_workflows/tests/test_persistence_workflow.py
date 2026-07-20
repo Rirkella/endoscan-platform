@@ -668,14 +668,9 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
                         provider_invocations=1,
                     ),
                 )
-            if (
-                request.agent_name == "Transcriptomic Evidence Discovery Agent"
-                and len(history) < 2
-            ):
+            if request.agent_name == "Transcriptomic Evidence Discovery Agent" and len(history) < 2:
                 operation = (
-                    "search_transcriptomic_sources"
-                    if not history
-                    else "search_lincs_resources"
+                    "search_transcriptomic_sources" if not history else "search_lincs_resources"
                 )
                 return ProviderTurn(
                     kind="tool",
@@ -753,6 +748,38 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
     def official_fixture(request: httpx.Request) -> httpx.Response:
         source_requests.append(request.url.host or "")
         if request.url.host == "pubchem.ncbi.nlm.nih.gov":
+            if "/rest/pug/assay/aid/" in request.url.path:
+                if request.url.path.endswith("/CSV"):
+                    return httpx.Response(
+                        200,
+                        text=(
+                            "PUBCHEM_RESULT_TAG,PUBCHEM_SID,PUBCHEM_CID,"
+                            "PUBCHEM_ACTIVITY_OUTCOME,AC50 [uM]\n"
+                            "1,70001,123,Active,0.5\n"
+                        ),
+                        headers={"content-type": "text/csv"},
+                        request=request,
+                    )
+                return httpx.Response(
+                    200,
+                    json={"IdentifierList": {"CID": [123]}},
+                    request=request,
+                )
+            if request.url.path.endswith("/synonyms/JSON"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "InformationList": {
+                            "Information": [
+                                {
+                                    "CID": 123,
+                                    "Synonym": ["Example compound", "Fixture compound"],
+                                }
+                            ]
+                        }
+                    },
+                    request=request,
+                )
             return httpx.Response(
                 200,
                 json={
@@ -763,7 +790,7 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
                                 "Title": "Example compound",
                                 "CanonicalSMILES": "CCO",
                                 "IsomericSMILES": "CCO",
-                                "InChIKey": "EXAMPLE-INCHIKEY",
+                                "InChIKey": "AAAAAAAAAAAAAA-BBBBBBBBBB-C",
                             }
                         ]
                     }
@@ -772,10 +799,59 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
             )
         database_name = request.url.params.get("db")
         if request.url.path.endswith("esearch.fcgi"):
-            identifier = "1001" if database_name == "pcassay" else "2001"
+            query = str(request.url.params.get("term", "")).casefold()
+            if database_name == "pcassay":
+                identifier = (
+                    "1001"
+                    if "binding" in query
+                    else "1003"
+                    if "antagonism" in query
+                    else "1002"
+                )
+            else:
+                identifier = "2001"
             return httpx.Response(
                 200,
                 json={"esearchresult": {"idlist": [identifier]}},
+                request=request,
+            )
+        if request.url.path.endswith("esummary.fcgi") and database_name == "pcassay":
+            identifier = str(request.url.params["id"])
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "uids": [identifier],
+                        identifier: {
+                            "title": "Example receptor assay",
+                            "targetname": "Example receptor",
+                            "assaytype": "functional assay",
+                        },
+                    }
+                },
+                request=request,
+            )
+        if request.url.path.endswith("esummary.fcgi") and database_name == "gds":
+            identifier = str(request.url.params["id"])
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "uids": [identifier],
+                        identifier: {
+                            "accession": f"GSE{identifier}",
+                            "title": "Example compound perturbation study",
+                            "summary": (
+                                "Example compound treatment at 1 uM for 24 hours with "
+                                "matched controls."
+                            ),
+                            "taxon": "Homo sapiens",
+                            "gdsType": "HepG2 cells",
+                            "suppfile": "processed.tsv.gz",
+                            "ftpLink": "https://ftp.ncbi.nlm.nih.gov/geo/example",
+                        },
+                    }
+                },
                 request=request,
             )
         return httpx.Response(200, json={"linksets": []}, request=request)
@@ -853,7 +929,7 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
     assert completed.current_stage is WorkflowState.AWAITING_SOURCE_INVENTORY_REVIEW
     assert completed.status.value == "waiting"
     assert len(service.agent_runs(build.id)) == 4
-    assert len(calls) == 11
+    assert len(calls) == 7
     assert {agent for agent, _history in calls} == {
         "Activity Evidence Discovery Agent",
         "Transcriptomic Evidence Discovery Agent",
@@ -865,7 +941,7 @@ def test_authorized_four_role_orchestration_is_offline_bounded_and_restart_safe(
         for run in service.agent_runs(build.id)
     )
     workflow = service.training_dataset_workflow(build.id)
-    assert len(workflow["source_observations"]) == 5
+    assert len(workflow["source_observations"]) >= 7
     assert len(workflow["source_search_outcomes"]) == 5
     assert len(workflow["source_fragments"]) == 4
     transcript_fragment = next(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 
 import httpx
@@ -79,7 +80,7 @@ class ScenarioProvider:
             and request.agent_name == "Activity Evidence Discovery Agent"
             and history
         ):
-            return {"compact_next_turn": 20_000}
+            return {"compact_next_turn": 25_000}
         return {
             "instructions": 300,
             "requirements": 200,
@@ -137,21 +138,6 @@ class ScenarioProvider:
                 )
             return self._output()
         if agent == "Transcriptomic Evidence Discovery Agent":
-            completed = {item.get("tool_name") for item in history}
-            for operation in ("search_transcriptomic_sources", "search_lincs_resources"):
-                if operation not in completed:
-                    return self._tool(
-                        operation,
-                        {
-                            "query": (
-                                "example receptor chemical perturbation"
-                                if operation == "search_transcriptomic_sources"
-                                else "example receptor LINCS perturbagen"
-                            ),
-                            "maximum_results": 3,
-                        },
-                        f"transcript-{operation}",
-                    )
             return self._output()
         if agent == "Chemical Identity and Structure Source Discovery Agent":
             if not history:
@@ -213,22 +199,67 @@ class ScenarioProvider:
 def _run(workflow_runtime, scenario: str):
     database, store, _providers, _harness, service = workflow_runtime
     source_requests: list[str] = []
+    geo_compounds: dict[str, str] = {}
 
     def fixture(request: httpx.Request) -> httpx.Response:
         source_requests.append(str(request.url))
         if request.url.host == "pubchem.ncbi.nlm.nih.gov":
+            if "/rest/pug/assay/aid/" in request.url.path:
+                aid = int(request.url.path.split("/aid/")[1].split("/")[0])
+                if request.url.path.endswith("/CSV"):
+                    shared_cid = 5001
+                    modality_cid = 5000 + aid
+                    body = (
+                        "PUBCHEM_RESULT_TAG,PUBCHEM_SID,PUBCHEM_CID,"
+                        "PUBCHEM_ACTIVITY_OUTCOME,AC50 [uM]\n"
+                        f"1,{70_000 + aid},{shared_cid},Active,0.5\n"
+                        f"2,{80_000 + aid},{modality_cid},Inactive,10\n"
+                    )
+                    return httpx.Response(
+                        200,
+                        text=body,
+                        headers={"content-type": "text/csv"},
+                        request=request,
+                    )
+                return httpx.Response(
+                    200,
+                    json={"IdentifierList": {"CID": [10_000 + aid]}},
+                    request=request,
+                )
+            identifier_segment = request.url.path.split("/cid/")[1].split("/")[0]
+            identifiers = [int(item) for item in identifier_segment.split(",")]
+            if request.url.path.endswith("/synonyms/JSON"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "InformationList": {
+                            "Information": [
+                                {
+                                    "CID": identifier,
+                                    "Synonym": [
+                                        f"Synthetic compound {identifier}",
+                                        f"Fixture synonym {identifier}",
+                                    ],
+                                }
+                                for identifier in identifiers
+                            ]
+                        }
+                    },
+                    request=request,
+                )
             return httpx.Response(
                 200,
                 json={
                     "PropertyTable": {
                         "Properties": [
                             {
-                                "CID": 123,
-                                "Title": "Synthetic compound",
+                                "CID": identifier,
+                                "Title": f"Synthetic compound {identifier}",
                                 "CanonicalSMILES": "CCO",
                                 "IsomericSMILES": "CCO",
-                                "InChIKey": "SYNTHETIC-INCHIKEY",
+                                "InChIKey": "AAAAAAAAAAAAAA-BBBBBBBBBB-C",
                             }
+                            for identifier in identifiers
                         ]
                     }
                 },
@@ -239,19 +270,78 @@ def _run(workflow_runtime, scenario: str):
             database_name = request.url.params.get("db")
             identifiers: list[str] = []
             if database_name == "pcassay" and scenario in {"success", "budget"}:
-                identifiers = ["1001"]
+                modality_offset = 0 if "binding" in query else 6 if "antagonism" in query else 3
+                identifiers = [str(1001 + modality_offset + index) for index in range(3)]
             elif database_name != "pcassay" and scenario in {"success", "partial"}:
-                identifiers = [] if scenario == "partial" and "lincs" in query else ["2001"]
+                compound_match = re.search(r"synthetic compound (\d+)", query)
+                if "lincs" not in query and compound_match:
+                    cid = compound_match.group(1)
+                    uid = str(200_000 + int(cid))
+                    geo_compounds[uid] = f"Synthetic compound {cid}"
+                    identifiers = [uid]
             return httpx.Response(
                 200,
                 json={"esearchresult": {"idlist": identifiers}},
+                request=request,
+            )
+        if request.url.path.endswith("esummary.fcgi"):
+            database_name = request.url.params.get("db")
+            identifier = str(request.url.params["id"])
+            if database_name == "pcassay":
+                return httpx.Response(
+                    200,
+                    json={
+                        "result": {
+                            "uids": [identifier],
+                            identifier: {
+                                "uid": identifier,
+                                "title": f"Receptor assay {identifier}",
+                                "targetname": "Example receptor",
+                                "assaytype": "functional or binding assay",
+                                "activityoutcome": "active/inactive",
+                                "organism": "Homo sapiens",
+                            },
+                        }
+                    },
+                    request=request,
+                )
+            compound_name = geo_compounds.get(identifier, "Unresolved compound")
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "uids": [identifier],
+                        identifier: {
+                            "uid": identifier,
+                            "accession": f"GSE{identifier}",
+                            "title": f"{compound_name} chemical perturbation study",
+                            "summary": (
+                                f"{compound_name} treatment at 10 uM for 24 hours with matched "
+                                "controls."
+                            ),
+                            "taxon": "Homo sapiens",
+                            "gdsType": "HepG2 cells",
+                            "n_samples": 12,
+                            "suppfile": "processed_matrix.tsv.gz",
+                            "ftpLink": f"https://ftp.ncbi.nlm.nih.gov/geo/GSE{identifier}",
+                        },
+                    }
+                },
+                request=request,
+            )
+        if request.url.host == "www.ncbi.nlm.nih.gov":
+            accession = request.url.params.get("acc", "GSE1")
+            return httpx.Response(
+                200,
+                text=f"!Series_geo_accession = {accession}\n!Series_title = Synthetic study",
+                headers={"content-type": "text/plain"},
                 request=request,
             )
         return httpx.Response(200, json={"linksets": []}, request=request)
 
     client = ScientificSourceClient(
         transport=httpx.MockTransport(fixture),
-        maximum_attempts=1,
+        maximum_attempts=2,
         sleep=lambda _seconds: None,
     )
     cache = SourceResponseCache(database)
@@ -341,12 +431,40 @@ def test_source_neutral_offline_four_agent_regression_paths(workflow_runtime, sc
         assert workflow["assembly_strategies"] is None
         assert workflow["capability_matrix"] is not None
         assert workflow["gap_report"] is not None
+        controlled_budget = service.agent_configuration.public_status()[
+            "controlled_source_discovery_budget"
+        ]
+        assert controlled_budget == {
+            "maximum_agent_runs": 4,
+            "maximum_turns_per_agent": 8,
+            "maximum_tool_calls_per_agent": 16,
+            "maximum_total_tool_calls": 64,
+            "maximum_total_provider_invocations": 32,
+            "maximum_total_scientific_source_requests": 80,
+            "maximum_input_tokens_per_agent": 24_000,
+            "maximum_output_tokens_per_agent": 3_000,
+            "maximum_cost_per_agent_usd": 0.15,
+            "maximum_total_cost_usd": 0.60,
+            "per_agent_timeout_seconds": 240.0,
+            "global_timeout_seconds": 1_200.0,
+            "provider_retries": 0,
+            "source_retries": 1,
+            "maximum_gap_discovery_rounds": 0,
+        }
 
         if scenario == "success":
-            assert len(service.agent_runs(build_id)) == 4
+            assert len(service.agent_runs(build_id)) == 4, [
+                (
+                    name,
+                    fragment["agent_review_status"],
+                    fragment["limitations"],
+                    len(fragment.get("activity_rows", [])),
+                )
+                for name, fragment in fragments.items()
+            ]
             assert len(inventory["sources"]) >= 4
             assert calls_by_agent["Activity Evidence Discovery Agent"] == 4
-            assert calls_by_agent["Transcriptomic Evidence Discovery Agent"] == 3
+            assert calls_by_agent["Transcriptomic Evidence Discovery Agent"] == 1
             activity_modalities = {
                 item["search_outcome"]["query_scope"].get("endpoint_modality")
                 for item in workflow["source_search_outcomes"]
@@ -369,15 +487,8 @@ def test_source_neutral_offline_four_agent_regression_paths(workflow_runtime, sc
                 for item in provider.calls
                 if item["agent"] == "Transcriptomic Evidence Discovery Agent"
             ]
-            assert transcript_turns[0]["tools"] == (
-                "search_transcriptomic_sources",
-                "search_lincs_resources",
-            )
-            assert transcript_turns[1]["tools"] == ("search_lincs_resources",)
-            assert not {
-                "search_transcriptomic_sources",
-                "search_lincs_resources",
-            }.intersection(transcript_turns[2]["tools"])
+            assert len(transcript_turns) == 1
+            assert transcript_turns[0]["tools"] == ()
             activity_request = service.agent_run(
                 next(
                     item["id"]
@@ -390,24 +501,172 @@ def test_source_neutral_offline_four_agent_regression_paths(workflow_runtime, sc
             assert "reviewed_adapter_capabilities" in compact
             assert "target_specification" not in compact
             assert "component_requirements" not in compact
-        elif scenario == "partial":
-            assert len(service.agent_runs(build_id)) == 4
+            search_outcomes = [
+                item["search_outcome"] for item in workflow["source_search_outcomes"]
+            ]
+            pubchem_aids = {
+                source["stable_accession"]
+                for source in inventory["sources"]
+                if source["source_system"] == "PubChem BioAssay"
+                and source["stable_accession"].startswith("AID:")
+            }
+            geo_uids = {
+                source["stable_accession"]
+                for source in inventory["sources"]
+                if source["source_system"] == "NCBI GEO Series"
+                and source["stable_accession"].startswith("GDS_UID:")
+            }
+            assert len(pubchem_aids) == 9
+            assert len(geo_uids) >= 1
+            assert any(
+                item["operation"] == "search_lincs_resources"
+                and item["outcome"] == "completed_no_candidates"
+                for item in search_outcomes
+            )
+            runs = [service.agent_run(item["id"]) for item in service.agent_runs(build_id)]
+            assert all(
+                {
+                    key: run["request"]["budget"][key]
+                    for key in (
+                        "maximum_turns",
+                        "maximum_tool_calls",
+                        "timeout_seconds",
+                        "maximum_input_tokens",
+                        "maximum_output_tokens",
+                        "maximum_cost_cents",
+                        "retry_count",
+                    )
+                }
+                == {
+                    "maximum_turns": 8,
+                    "maximum_tool_calls": 16,
+                    "timeout_seconds": 240.0,
+                    "maximum_input_tokens": 24_000,
+                    "maximum_output_tokens": 3_000,
+                    "maximum_cost_cents": 15.0,
+                    "retry_count": 0,
+                }
+                for run in runs
+            )
+            tool_calls = [call for run in runs for call in run["tool_calls"]]
+            assert not any(
+                (call.get("result", {}).get("error") or {}).get("code") == "tool_input_invalid"
+                for call in tool_calls
+            )
+            metadata_calls = [
+                call for call in tool_calls if call["tool_name"] == "inspect_supporting_metadata"
+            ]
+            assert all(
+                len(call["arguments"]["normalized_arguments"]["source_identifiers"]) <= 5
+                for call in metadata_calls
+            )
+            assert all(
+                len(
+                    call["arguments"]["normalized_arguments"].get(
+                        "source_identifiers",
+                        call["arguments"]["normalized_arguments"].get("sampled_identifiers", []),
+                    )
+                )
+                <= 10
+                for call in tool_calls
+            )
+            identity_calls = [
+                call
+                for call in tool_calls
+                if call["tool_name"] == "resolve_compound_identity_sample"
+            ]
+            assert identity_calls
+            assert all(
+                str(value).isdigit()
+                for call in identity_calls
+                for value in call["arguments"]["normalized_arguments"]["sampled_identifiers"]
+            )
+            assert not any(run["status"] == "budget_exceeded" for run in runs)
+            assert all(fragment["observation_ids"] for fragment in fragments.values())
+            activity_rows = fragments["Activity Evidence Discovery Agent"]["activity_rows"]
+            assert {row["modality"] for row in activity_rows} == {
+                "binding",
+                "agonism",
+                "antagonism",
+            }
+            assert all(row["pubchem_aid"].startswith("AID:") for row in activity_rows)
+            assert all(row["pubchem_cid"].startswith("CID:") for row in activity_rows)
+            assert all("PUBCHEM_CID" in row["original_source_fields"] for row in activity_rows)
+            identity_rows = fragments[
+                "Chemical Identity and Structure Source Discovery Agent"
+            ]["identity_bridge_rows"]
+            assert identity_rows
+            assert all(row["mapping_status"] == "exact" for row in identity_rows)
+            assert all(row["inchikey"] for row in identity_rows)
+            assert all(row["activity_aids"] for row in identity_rows)
+            transcript_run = next(
+                run
+                for run in runs
+                if run["agent_name"] == "Transcriptomic Evidence Discovery Agent"
+            )
+            transcript_calls = transcript_run["tool_calls"]
+            search_calls = [
+                call
+                for call in transcript_calls
+                if call["tool_name"]
+                in {"search_transcriptomic_sources", "search_lincs_resources"}
+            ]
+            assert search_calls
+            assert all(
+                call["arguments"]["normalized_arguments"]["sampled_identifiers"][0].startswith(
+                    "CID:"
+                )
+                for call in search_calls
+            )
+            assert all(
+                "Synthetic compound"
+                in call["arguments"]["normalized_arguments"]["query"]
+                for call in search_calls
+            )
+            profile_rows = fragments["Transcriptomic Evidence Discovery Agent"][
+                "transcriptomic_profile_rows"
+            ]
+            assert profile_rows
+            assert all(row["measurement_status"] == "measured" for row in profile_rows)
+            assert all(row["compound_application_verified"] for row in profile_rows)
+            path = workflow["gap_report"]["joinable_training_table_path"]
+            assert path["outcome"] == "concrete_joinable_path_identified"
+            assert path["activity_compounds_by_modality"] == {
+                "agonism": 2,
+                "antagonism": 2,
+                "binding": 2,
+            }
+            assert path["transcriptomic_compound_count"] >= 1
+            assert path["resolved_identity_count"] >= 1
+            assert path["measured_transcriptomic_profile_count"] >= 1
+            assert path["overlap_by_modality"] == {
+                "agonism": 2,
+                "antagonism": 2,
+                "binding": 2,
+            }
+            assert path["functional_agonism_or_antagonism_overlap"] >= 1
+            assert path["preview_rows"]
+            assert all(row["pubchem_cid"].startswith("CID:") for row in path["preview_rows"])
+            assert all(row["activity_aid"].startswith("AID:") for row in path["preview_rows"])
+            assert path["exploratory_llm_required_for_known_post_approval_steps"] is False
+            assert [item["table_name"] for item in path["table_readiness"]] == [
+                "activity_table",
+                "transcriptomic_profile_table",
+                "identifier_bridge",
+                "joinability_report",
+                "candidate_training_table_preview",
+            ]
+            assert path["blocking_gaps"] == []
+        elif scenario in {"partial", "empty"}:
+            assert len(service.agent_runs(build_id)) == 1
             assert fragments["Activity Evidence Discovery Agent"]["agent_review_status"] == (
                 "completed_no_candidates"
             )
-            assert any(
-                "transcriptomic" in role
-                for source in inventory["sources"]
-                for role in source["source_roles"]
-            )
-            assert calls_by_agent["Chemical Identity and Structure Source Discovery Agent"] > 0
-            assert calls_by_agent["Supporting Metadata Discovery Agent"] > 0
-        elif scenario == "empty":
-            assert len(service.agent_runs(build_id)) == 2
             assert inventory["sources"] == []
             assert workflow["gap_report"]["classification"] == "completed_no_candidates"
             for agent in (
                 "Chemical Identity and Structure Source Discovery Agent",
+                "Transcriptomic Evidence Discovery Agent",
                 "Supporting Metadata Discovery Agent",
             ):
                 assert fragments[agent]["agent_review_status"] == "skipped_dependency_not_met"
@@ -421,9 +680,9 @@ def test_source_neutral_offline_four_agent_regression_paths(workflow_runtime, sc
                 for item in service.agent_runs(build_id)
                 if item["agent_name"] == "Activity Evidence Discovery Agent"
             )
-            diagnostic = service.agent_run(activity_run["id"])["tool_calls"][0]["result"][
-                "error"
-            ]["tool_diagnostic"]
+            diagnostic = service.agent_run(activity_run["id"])["tool_calls"][0]["result"]["error"][
+                "tool_diagnostic"
+            ]
             assert diagnostic["invocation_stage"] == "input_validation"
             assert diagnostic["source_transport_started"] is False
             assert diagnostic["validation_error_category"] == "input_schema_validation"

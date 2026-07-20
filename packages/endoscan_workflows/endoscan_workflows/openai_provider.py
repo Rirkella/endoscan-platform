@@ -236,9 +236,7 @@ class OpenAIAgentProvider:
                 else AgentOutputSchema(expected_output_type)
             )
             expected_schema = canonical_json(expected_output_schema.json_schema()).encode()
-            expected_tool_names = expected_contract.get(
-                "tool_names", configuration["tool_names"]
-            )
+            expected_tool_names = expected_contract.get("tool_names", configuration["tool_names"])
             if not isinstance(expected_tool_names, list):
                 expected_tool_names = configuration["tool_names"]
             boundary_configuration = {
@@ -465,8 +463,7 @@ class OpenAIAgentProvider:
                     ),
                 )
                 if is_discovery
-                else
-                DatasetSpecificationReviewOutcome(
+                else DatasetSpecificationReviewOutcome(
                     schema_version="1.0.0",
                     status="invalid_model_output",
                     review_summary=(
@@ -518,8 +515,7 @@ class OpenAIAgentProvider:
                     ),
                 )
                 if is_discovery
-                else
-                DatasetSpecificationReviewOutcome(
+                else DatasetSpecificationReviewOutcome(
                     schema_version="1.0.0",
                     status="model_refused",
                     review_summary=(
@@ -787,6 +783,19 @@ class OpenAIAgentProvider:
     @staticmethod
     def _turn_input(request: AgentRunRequest, history: list[dict]) -> str:
         validated_artifacts = request.context.get("validated_artifacts", {})
+        if (
+            request.agent_name == "Activity Evidence Discovery Agent"
+            and history
+            and isinstance(validated_artifacts, dict)
+        ):
+            validated_artifacts = {
+                key: validated_artifacts.get(key)
+                for key in (
+                    "endpoint_discovery_scope",
+                    "approved_scientific_policies",
+                )
+                if key in validated_artifacts
+            }
         encoded_artifacts = canonical_json(validated_artifacts)
         if len(encoded_artifacts) > 24_000:
             validated_artifacts = {
@@ -804,6 +813,11 @@ class OpenAIAgentProvider:
             },
             "discovery_substage": request.context.get("discovery_substage"),
             "tools_exposed": request.available_tools,
+            "orchestration_constraints": {
+                "required_activity_modality": request.context.get("required_activity_modality"),
+                "raw_modalities_preserved_separately": True,
+                "aggregation_during_discovery": False,
+            },
             "benchmark_mode": request.context.get("benchmark_mode"),
             "validated_artifacts": validated_artifacts,
             "discovery_state": OpenAIAgentProvider._state_summary(request, history),
@@ -918,9 +932,9 @@ class OpenAIAgentProvider:
                     "search_outcome": output.get("search_outcome"),
                     "result_count": output.get("result_count", 0),
                     "query_scope": output.get("query_scope"),
-                    "source_request_artifact_ids": output.get(
-                        "source_request_artifact_ids", []
-                    )[:5],
+                    "source_request_artifact_ids": output.get("source_request_artifact_ids", [])[
+                        :5
+                    ],
                     "observations": [
                         {
                             key: observation.get(key)
@@ -973,9 +987,7 @@ class OpenAIAgentProvider:
             item["output"] for item in compact if item["tool_name"] == "compare_dataset_candidates"
         ]
         reviewed_source_results = [
-            item["output"]
-            for item in compact
-            if item["output"].get("adapter_id")
+            item["output"] for item in compact if item["output"].get("adapter_id")
         ]
         accessions = list(
             dict.fromkeys(

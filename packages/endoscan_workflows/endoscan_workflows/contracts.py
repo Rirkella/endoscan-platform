@@ -502,7 +502,7 @@ class ToolDefinition(StrictContract):
     required_permissions: list[str] = Field(default_factory=list)
     side_effect: SideEffectClassification
     idempotency: IdempotencyClassification
-    timeout_seconds: float = Field(gt=0, le=120)
+    timeout_seconds: float = Field(gt=0, le=180)
     allowed_workflow_stages: list[WorkflowState]
     implementation_version: str = Field(min_length=1, max_length=40)
 

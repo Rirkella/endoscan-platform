@@ -179,10 +179,10 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         workflow_database, ttl_seconds=agent_configuration.source_cache_ttl_seconds
     )
     source_client = ScientificSourceClient(
-        timeout_seconds=min(agent_configuration.source_request_timeout_seconds, 15.0),
+        timeout_seconds=min(agent_configuration.source_request_timeout_seconds, 180.0),
         maximum_bytes=agent_configuration.source_response_maximum_bytes,
         requests_per_second=min(agent_configuration.source_requests_per_second, 2.0),
-        maximum_attempts=1,
+        maximum_attempts=2,
         maximum_redirects=2,
     )
     discovery_tools = DiscoveryToolService(

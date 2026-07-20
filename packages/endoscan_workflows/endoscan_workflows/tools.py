@@ -847,6 +847,7 @@ def extend_training_dataset_tool_registry(
     """Add reviewed, typed multi-source tools without enabling arbitrary network access."""
 
     from .reviewed_source_adapters import (
+        ActivityResultExtractionInput,
         ActivitySearchOperationInput,
         CompoundSourceOperationInput,
         ReviewedSourceAdapterRegistry,
@@ -893,6 +894,7 @@ def extend_training_dataset_tool_registry(
         effect=SideEffectClassification.NONE,
         contextual=False,
         argument_normalizer=None,
+        timeout_seconds=30.0,
     ):
         registry.register(
             RegisteredTool(
@@ -904,7 +906,7 @@ def extend_training_dataset_tool_registry(
                     required_permissions=[f"training-dataset:{name}"],
                     side_effect=effect,
                     idempotency=IdempotencyClassification.IDEMPOTENT_WITH_KEY,
-                    timeout_seconds=30.0,
+                    timeout_seconds=timeout_seconds,
                     allowed_workflow_stages=stages,
                     implementation_version="training-dataset-v1",
                 ),
@@ -922,6 +924,7 @@ def extend_training_dataset_tool_registry(
         "fetch_activity_source_metadata",
         "inspect_activity_result_availability",
         "inspect_activity_identifier_fields",
+        "extract_activity_result_rows",
         "summarize_activity_outcomes",
         "inspect_counter_screen_relationships",
         "inspect_epa_public_invitrodb_release",
@@ -954,6 +957,7 @@ def extend_training_dataset_tool_registry(
         "inspect_source_identity_fields",
         "inspect_source_record_availability",
         "resolve_compound_identity_sample",
+        "resolve_compound_synonyms",
         "inspect_supporting_metadata",
         "inspect_official_file_listing",
         "inspect_linked_publications",
@@ -965,10 +969,13 @@ def extend_training_dataset_tool_registry(
         if operation == "search_activity_sources":
             input_model = ActivitySearchOperationInput
             argument_normalizer = normalize_activity_search_arguments
+        elif operation == "extract_activity_result_rows":
+            input_model = ActivityResultExtractionInput
         elif operation in {
             "inspect_source_identity_fields",
             "inspect_source_record_availability",
             "resolve_compound_identity_sample",
+            "resolve_compound_synonyms",
         }:
             input_model = CompoundSourceOperationInput
         elif operation in {
@@ -990,6 +997,7 @@ def extend_training_dataset_tool_registry(
             SideEffectClassification.EXTERNAL_READ,
             contextual=True,
             argument_normalizer=argument_normalizer,
+            timeout_seconds=180.0,
         )
     register(
         "compare_verified_identity_fields",

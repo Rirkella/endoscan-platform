@@ -43,6 +43,8 @@ ALLOWED_CONTENT_TYPES = frozenset(
         "application/xml",
         "text/xml",
         "text/plain",
+        "text/csv",
+        "application/csv",
     }
 )
 INJECTION_PATTERNS = (
@@ -61,6 +63,7 @@ class SourceToolError(RuntimeError):
     ) -> None:
         super().__init__(safe_message)
         self.diagnostic = diagnostic
+        self.attempt_diagnostics: tuple[SourceToolDiagnostic, ...] = ()
 
 
 class SourcePolicyError(SourceToolError):
@@ -96,6 +99,7 @@ class ScientificResponse:
     headers: dict[str, str]
     retrieved_at: float
     diagnostic: SourceToolDiagnostic | None = None
+    attempt_diagnostics: tuple[SourceToolDiagnostic, ...] = ()
 
     @property
     def sha256(self) -> str:
@@ -126,7 +130,7 @@ class ScientificSourceClient:
         self,
         *,
         timeout_seconds: float = 15.0,
-        maximum_bytes: int = 1_500_000,
+        maximum_bytes: int = 5_000_000,
         requests_per_second: float = 2.5,
         maximum_attempts: int = 3,
         maximum_redirects: int = 2,
@@ -177,6 +181,7 @@ class ScientificSourceClient:
         allow_empty_health_response: bool = False,
         approved_request_hosts: frozenset[str] | None = None,
         approved_redirect_hosts: frozenset[str] | None = None,
+        maximum_attempts: int | None = None,
     ) -> ScientificResponse:
         response_limit = self.maximum_bytes if maximum_bytes is None else maximum_bytes
         if response_limit < 1 or response_limit > self.maximum_bytes:
@@ -194,8 +199,12 @@ class ScientificSourceClient:
                     developer_message=str(exc),
                 ),
             ) from exc
+        allowed_attempts = self.maximum_attempts if maximum_attempts is None else maximum_attempts
+        if allowed_attempts < 1 or allowed_attempts > self.maximum_attempts:
+            raise SourcePolicyError("Scientific source attempt count is outside policy.")
         last_error: SourceToolError | None = None
-        for attempt_index in range(self.maximum_attempts):
+        attempt_diagnostics: list[SourceToolDiagnostic] = []
+        for attempt_index in range(allowed_attempts):
             attempt_number = attempt_index + 1
             self._rate_limit()
             started = time.monotonic()
@@ -210,30 +219,34 @@ class ScientificSourceClient:
                     approved_redirect_hosts=approved_redirect_hosts,
                 )
             except httpx.TimeoutException as exc:
+                diagnostic = self._diagnostic(
+                    tool_name=tool_name,
+                    url=url,
+                    category="timeout",
+                    retryable=True,
+                    attempt_number=attempt_number,
+                    duration_ms=self._elapsed_ms(started),
+                    exception_class=type(exc).__name__,
+                )
+                attempt_diagnostics.append(diagnostic)
                 last_error = SourceTimeoutError(
                     "Official scientific source timed out.",
-                    diagnostic=self._diagnostic(
-                        tool_name=tool_name,
-                        url=url,
-                        category="timeout",
-                        retryable=True,
-                        attempt_number=attempt_number,
-                        duration_ms=self._elapsed_ms(started),
-                        exception_class=type(exc).__name__,
-                    ),
+                    diagnostic=diagnostic,
                 )
             except httpx.HTTPError as exc:
+                diagnostic = self._diagnostic(
+                    tool_name=tool_name,
+                    url=url,
+                    category="network_unavailable",
+                    retryable=True,
+                    attempt_number=attempt_number,
+                    duration_ms=self._elapsed_ms(started),
+                    exception_class=type(exc).__name__,
+                )
+                attempt_diagnostics.append(diagnostic)
                 last_error = SourceUnavailableError(
                     "Official scientific source is unavailable.",
-                    diagnostic=self._diagnostic(
-                        tool_name=tool_name,
-                        url=url,
-                        category="network_unavailable",
-                        retryable=True,
-                        attempt_number=attempt_number,
-                        duration_ms=self._elapsed_ms(started),
-                        exception_class=type(exc).__name__,
-                    ),
+                    diagnostic=diagnostic,
                 )
             except SourceToolError:
                 raise
@@ -263,24 +276,28 @@ class ScientificSourceClient:
                     duration_ms=self._elapsed_ms(started),
                 )
                 if response.status_code == 429:
-                    last_error = SourceRateLimitError(
+                    diagnostic = self._diagnostic(
+                        **base_diagnostic,
+                        category="rate_limited",
+                        retryable=False,
+                        exception_class="SourceRateLimitError",
+                    )
+                    attempt_diagnostics.append(diagnostic)
+                    raise SourceRateLimitError(
                         "Official scientific source rate limit reached.",
-                        diagnostic=self._diagnostic(
-                            **base_diagnostic,
-                            category="rate_limited",
-                            retryable=True,
-                            exception_class="SourceRateLimitError",
-                        ),
+                        diagnostic=diagnostic,
                     )
                 elif 500 <= response.status_code < 600:
+                    diagnostic = self._diagnostic(
+                        **base_diagnostic,
+                        category="source_server_error",
+                        retryable=True,
+                        exception_class="SourceUnavailableError",
+                    )
+                    attempt_diagnostics.append(diagnostic)
                     last_error = SourceUnavailableError(
                         "Official scientific source returned a server error.",
-                        diagnostic=self._diagnostic(
-                            **base_diagnostic,
-                            category="source_server_error",
-                            retryable=True,
-                            exception_class="SourceUnavailableError",
-                        ),
+                        diagnostic=diagnostic,
                     )
                 elif response.status_code >= 400:
                     raise SourceResponseError(
@@ -329,6 +346,7 @@ class ScientificSourceClient:
                         category="none",
                         retryable=False,
                     )
+                    attempt_diagnostics.append(diagnostic)
                     return ScientificResponse(
                         url=self._safe_source_url(str(response.url)),
                         content=response.content,
@@ -342,10 +360,12 @@ class ScientificSourceClient:
                         },
                         retrieved_at=time.time(),
                         diagnostic=diagnostic,
+                        attempt_diagnostics=tuple(attempt_diagnostics),
                     )
-            if attempt_index + 1 < self.maximum_attempts:
+            if attempt_index + 1 < allowed_attempts:
                 self.sleep(min(0.25 * (2**attempt_index), 1.0))
         if last_error:
+            last_error.attempt_diagnostics = tuple(attempt_diagnostics)
             raise last_error
         raise SourceUnavailableError("Official scientific source is unavailable.")
 

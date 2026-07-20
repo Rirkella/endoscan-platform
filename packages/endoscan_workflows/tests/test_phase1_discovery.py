@@ -140,6 +140,25 @@ def test_configuration_honors_bounded_live_settings(monkeypatch) -> None:
     assert "epa-unit-test-key-never-display" not in json.dumps(configuration.public_status())
 
 
+def test_controlled_source_discovery_uses_completeness_capacity_without_retries() -> None:
+    configuration = AgentConfiguration().controlled_source_discovery()
+
+    assert configuration.maximum_turns == 8
+    assert configuration.maximum_tool_calls == 16
+    assert configuration.maximum_input_tokens == 24_000
+    assert configuration.maximum_output_tokens == 3_000
+    assert configuration.maximum_cost_usd == 0.15
+    assert configuration.retry_count == 0
+    assert configuration.timeout_seconds == 240.0
+    assert configuration.global_maximum_provider_invocations == 32
+    assert configuration.global_maximum_tool_calls == 64
+    assert configuration.global_maximum_source_requests == 80
+    assert configuration.global_maximum_input_tokens == 96_000
+    assert configuration.global_maximum_output_tokens == 12_000
+    assert configuration.global_maximum_cost_usd == 0.60
+    assert configuration.global_timeout_seconds == 1_200.0
+
+
 def test_configuration_separates_planner_worker_and_global_budgets(monkeypatch) -> None:
     monkeypatch.setenv("ENDOSCAN_PLANNER_PROVIDER", "openai")
     monkeypatch.setenv("ENDOSCAN_PLANNER_MODEL", "planner-test-model")

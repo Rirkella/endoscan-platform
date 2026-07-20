@@ -501,11 +501,11 @@ def test_source_http_retries_do_not_create_extra_provider_invocations(workflow_r
     _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
     source_requests = 0
 
-    def source_transport(_request: httpx.Request) -> httpx.Response:
+    def source_transport(request: httpx.Request) -> httpx.Response:
         nonlocal source_requests
         source_requests += 1
-        if source_requests < 3:
-            return httpx.Response(429, headers={"content-type": "application/json"})
+        if source_requests == 1:
+            raise httpx.ReadTimeout("bounded transient timeout", request=request)
         return httpx.Response(
             200,
             headers={"content-type": "application/json"},
@@ -514,6 +514,7 @@ def test_source_http_retries_do_not_create_extra_provider_invocations(workflow_r
 
     client = ScientificSourceClient(
         transport=httpx.MockTransport(source_transport),
+        maximum_attempts=2,
         sleep=lambda _seconds: None,
     )
     tools = phase0_test_tool_registry()
@@ -565,7 +566,7 @@ def test_source_http_retries_do_not_create_extra_provider_invocations(workflow_r
         client.close()
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert source_requests == 3
+    assert source_requests == 2
     assert provider.calls == 2
     assert not any(event.event_type == "provider.retry" for event in result.trace)
 

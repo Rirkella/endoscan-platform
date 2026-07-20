@@ -632,7 +632,7 @@ def test_timeout_is_bounded_and_sanitized() -> None:
     client.close()
 
 
-def test_rate_limit_is_bounded_and_retryable() -> None:
+def test_rate_limit_is_bounded_and_not_transport_retried() -> None:
     calls = 0
 
     def limited(request: httpx.Request) -> httpx.Response:
@@ -643,7 +643,7 @@ def test_rate_limit_is_bounded_and_retryable() -> None:
     client = ScientificSourceClient(transport=httpx.MockTransport(limited), sleep=lambda _: None)
     with pytest.raises(SourceRateLimitError):
         client.get("https://www.ncbi.nlm.nih.gov/data", accepted_types={"text/plain"})
-    assert calls == 3
+    assert calls == 1
     client.close()
 
 
@@ -1151,11 +1151,15 @@ def test_geo_redirect_to_unapproved_host_is_terminal(workflow_runtime) -> None:
 
 
 @pytest.mark.parametrize(
-    ("kind", "expected_category"),
-    [("timeout", "timeout"), ("429", "rate_limited"), ("500", "source_server_error")],
+    ("kind", "expected_category", "expected_attempt"),
+    [
+        ("timeout", "timeout", 3),
+        ("429", "rate_limited", 1),
+        ("500", "source_server_error", 3),
+    ],
 )
 def test_geo_transient_source_failures_are_candidate_level(
-    workflow_runtime, kind: str, expected_category: str
+    workflow_runtime, kind: str, expected_category: str, expected_attempt: int
 ) -> None:
     database, artifacts, _providers, _harness, workflow_service = workflow_runtime
     workflow_id = create_build(workflow_service)
@@ -1175,7 +1179,7 @@ def test_geo_transient_source_failures_are_candidate_level(
     assert result.retryable is True
     assert result.source_diagnostic is not None
     assert result.source_diagnostic.source_error_category == expected_category
-    assert result.source_diagnostic.attempt_number == 3
+    assert result.source_diagnostic.attempt_number == expected_attempt
     assert "raw-private-detail" not in result.model_dump_json()
     client.close()
 
