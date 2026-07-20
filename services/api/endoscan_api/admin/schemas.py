@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from endoscan_workflows.contracts import ApprovalDecisionValue, WorkflowKind
+from endoscan_workflows.training_dataset import EndpointDiscoveryScope
 
 
 class AdminRequest(BaseModel):
@@ -25,6 +26,10 @@ class CreateBuildBody(AdminRequest):
 class WorkflowCommandBody(AdminRequest):
     expected_version: int = Field(ge=0)
     actor: str = Field(default="local-admin", min_length=2, max_length=120)
+
+
+class DatasetSpecificationRetryBody(WorkflowCommandBody):
+    endpoint_discovery_scope: EndpointDiscoveryScope | None = None
 
 
 class SourceDiscoveryAuthorizationBody(WorkflowCommandBody):

@@ -19,6 +19,7 @@ from .auth import (
 from .schemas import (
     ApprovalDecisionBody,
     CreateBuildBody,
+    DatasetSpecificationRetryBody,
     GeoValidationProbeBody,
     SourceDiscoveryAuthorizationBody,
     WorkflowCommandBody,
@@ -152,9 +153,18 @@ def authorize_source_discovery(
     dependencies=[Depends(require_mutation_budget)],
 )
 def retry_dataset_specification(
-    build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)
+    build_id: str,
+    body: DatasetSpecificationRetryBody,
+    request: Request,
+    key: str = Depends(_key),
 ):
-    return _command("retry_training_dataset_specification", build_id, body, request, key)
+    return _service(request).retry_training_dataset_specification(
+        validate_resource_id(build_id, "Endpoint build"),
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+        endpoint_discovery_scope=body.endpoint_discovery_scope,
+    )
 
 
 @router.post(

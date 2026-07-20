@@ -51,6 +51,13 @@ structure requirements, experimental context, mandatory and optional fields, mis
 coverage policies, evidence minima, permitted contexts, exclusions, claim scope, unresolved
 questions, and assumptions requiring approval.
 
+Every newly compiled specification also carries a strict, versioned `EndpointDiscoveryScope`.
+`fixed_modality` scopes contain exactly one candidate modality. Human-scoped
+`broad_modality_exploration` scopes contain at least two controlled-vocabulary candidates, no fixed
+modality, mandatory assay-level separation, and a required stage at which selection is deferred.
+The scope contains no source, assay, accession, expected-count, overlap, or winning-modality hint.
+Broad compilation therefore defines a search boundary, not a synthetic activity label.
+
 Continuous activity, potency, efficacy, multiclass, dose-response, and aggregated evidence are
 first-class representations; binary labels are not forced. Required table fields connect canonical
 compound identity and structure to a compound-induced transcriptomic response, its experimental
@@ -62,6 +69,11 @@ activity, assay metadata, identity, structure, perturbational transcriptomics, c
 controls, mappings, counter-screens, methodological evidence, provenance, and licence. Requirements
 describe acceptable forms, identifiers, metadata, quality, substitutes, and dependencies; they do
 not name sources.
+
+Broad component requirements explicitly request every candidate modality and add
+`modality-specific-evidence-preservation`: original modality, assay, source, measurement, outcome,
+and provenance remain attached to every activity record. No source is required to cover every
+candidate modality.
 
 ## Specialized agents and budgets
 

@@ -49,7 +49,13 @@ from endoscan_workflows.reviewed_source_adapters import (
 from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_security import ScientificSourceClient
 from endoscan_workflows.tools import phase1_tool_registry
-from endoscan_workflows.training_dataset import TrainingDatasetSpecification
+from endoscan_workflows.training_dataset import (
+    EndpointDiscoveryMode,
+    EndpointDiscoveryScope,
+    EndpointDiscoveryScopeProvenance,
+    EndpointSemanticModality,
+    TrainingDatasetSpecification,
+)
 
 
 def create_build(service, key="phase0-test-create"):
@@ -103,6 +109,7 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
         item["name"] for item in inspect(database.engine).get_columns("training_dataset_workflows")
     }
     assert {
+        "endpoint_discovery_scope_json",
         "specification_draft_json",
         "specification_outcome_json",
         "specification_semantic_validation_json",
@@ -137,6 +144,7 @@ def test_specification_outcome_migration_upgrades_phase1_database_in_place(tmp_p
         item["name"] for item in inspect(database.engine).get_columns("training_dataset_workflows")
     }
     assert {
+        "endpoint_discovery_scope_json",
         "specification_draft_json",
         "specification_outcome_json",
         "specification_semantic_validation_json",
@@ -406,7 +414,116 @@ def test_training_dataset_specification_approval_precedes_discovery(
             actor="test-admin",
             idempotency_key="authorize-source-discovery",
         )
-    assert service.agent_runs(build.id) == []
+
+
+def test_fixed_and_human_scoped_broad_builds_coexist_without_provider_or_source_calls(
+    workflow_runtime,
+) -> None:
+    _database, _store, _providers, _harness, service = workflow_runtime
+    fixed = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Thyroid hormone receptor antagonist",
+            endpoint_slug="thyroid-receptor-antagonist-fixed",
+            biological_goal="Construct a compound-level transcriptomic training dataset.",
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="fixed-and-broad-fixed",
+        )
+    )
+    fixed_waiting = service.start_build(
+        fixed.id,
+        expected_version=fixed.version,
+        actor="test-admin",
+        idempotency_key="fixed-and-broad-fixed-start",
+    )
+    fixed_workflow = service.training_dataset_workflow(fixed.id)
+    assert fixed_workflow["endpoint_discovery_scope"]["mode"] == "fixed_modality"
+    assert fixed_workflow["endpoint_discovery_scope"]["candidate_modalities"] == ["antagonism"]
+
+    broad = service.create_build(
+        EndpointBuildCreate(
+            endpoint_name="Thyroid hormone receptor activity",
+            endpoint_slug="thyroid-receptor-activity-broad",
+            biological_goal=(
+                "Determine which public compound-level thyroid hormone receptor activity "
+                "modalities can be connected to public compound-induced transcriptomic "
+                "responses to construct training datasets."
+            ),
+            created_by="test-admin",
+            workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
+            benchmark_mode="blind_training_dataset_discovery",
+            idempotency_key="fixed-and-broad-broad",
+        )
+    )
+    revision = service.start_build(
+        broad.id,
+        expected_version=broad.version,
+        actor="test-admin",
+        idempotency_key="fixed-and-broad-broad-start",
+    )
+    assert revision.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION
+    scope = EndpointDiscoveryScope(
+        mode=EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION,
+        biological_target="Thyroid hormone receptor",
+        fixed_modality=None,
+        candidate_modalities=[
+            EndpointSemanticModality.BINDING,
+            EndpointSemanticModality.AGONISM,
+            EndpointSemanticModality.ANTAGONISM,
+        ],
+        explicitly_excluded_modalities=[],
+        preserve_modalities_separately=True,
+        aggregation_allowed_later=True,
+        aggregation_requires_human_approval=True,
+        selection_deferred_until="assembly_strategy_review",
+        scientific_scope=(
+            "Explore binding, agonism, and antagonism separately and defer endpoint selection."
+        ),
+        provenance=[EndpointDiscoveryScopeProvenance.HUMAN_SCOPED_CONFIGURATION],
+    )
+    waiting = service.retry_training_dataset_specification(
+        broad.id,
+        expected_version=revision.version,
+        actor="test-admin",
+        idempotency_key="fixed-and-broad-broad-revision",
+        endpoint_discovery_scope=scope,
+    )
+    assert waiting.current_stage is WorkflowState.AWAITING_DATASET_SPECIFICATION_REVIEW
+    workflow = service.training_dataset_workflow(broad.id)
+    assert workflow["endpoint_discovery_scope"] == scope.model_dump(mode="json")
+    assert workflow["specification_draft"]["endpoint_modality"] is None
+    assert workflow["component_requirements"] is None
+    assert service.agent_runs(broad.id) == []
+    pending = service.list_approvals(broad.id, pending_only=True)
+    assert len(pending) == 1
+    assert pending[0]["approval_type"] == "dataset_specification"
+
+    approved = service.decide_approval(
+        pending[0]["id"],
+        ApprovalDecision(
+            decision=ApprovalDecisionValue.APPROVE,
+            reviewer_id="test-admin",
+            expected_version=waiting.version,
+            idempotency_key="fixed-and-broad-broad-approved",
+            artifact_hashes=pending[0]["request"]["artifact_hashes"],
+            dataset_specification_policy=approved_specification_policy(),
+        ),
+    )
+    service.derive_training_dataset_requirements(
+        broad.id,
+        actor="deterministic-orchestrator",
+        idempotency_key="fixed-and-broad-broad-requirements",
+    )
+    assert approved.current_stage is WorkflowState.DERIVING_COMPONENT_REQUIREMENTS
+    requirements = service.training_dataset_workflow(broad.id)["component_requirements"]
+    assert "modality-specific-evidence-preservation" in {
+        item["requirement_id"] for item in requirements["requirements"]
+    }
+    unchanged = service.get_build(fixed.id)
+    assert unchanged.version == fixed_waiting.version
+    assert unchanged.current_stage is fixed_waiting.current_stage
+    assert service.agent_runs(fixed.id) == []
 
 
 def test_reviewed_source_authorization_is_explicit_optimistic_and_idempotent(

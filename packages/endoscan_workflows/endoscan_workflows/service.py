@@ -77,6 +77,7 @@ from .training_dataset import (
     DatasetSpecificationSemanticValidation,
     DiscoveryAgentReviewOutcome,
     DiscoveryBeforeStrategyGuard,
+    EndpointDiscoveryScope,
     SourceCapabilityMatrix,
     SpecializedAgentDefinition,
     TrainingDatasetAssemblyReview,
@@ -307,6 +308,7 @@ class WorkflowService:
                         initial_context_json=canonical_json(
                             versioned_payload(document=initial_context.model_dump(mode="json"))
                         ),
+                        endpoint_discovery_scope_json=None,
                         specification_draft_json=None,
                         specification_outcome_json=None,
                         specification_semantic_validation_json=None,
@@ -455,6 +457,11 @@ class WorkflowService:
                 "benchmark_mode": row.benchmark_mode,
                 "legacy": False,
                 "initial_context": _load_training_document(row.initial_context_json),
+                "endpoint_discovery_scope": (
+                    _load_training_document(row.endpoint_discovery_scope_json)
+                    if row.endpoint_discovery_scope_json
+                    else None
+                ),
                 "target_specification": (
                     _load_training_document(row.specification_json)
                     if row.specification_json
@@ -603,6 +610,11 @@ class WorkflowService:
         """Persist one validated checkpoint without changing workflow state."""
 
         document_types = {
+            "endpoint_discovery_scope": (
+                EndpointDiscoveryScope,
+                "endpoint_discovery_scope_json",
+                "endpoint_discovery_scope",
+            ),
             "specification": (
                 TrainingDatasetSpecification,
                 "specification_json",
@@ -651,13 +663,22 @@ class WorkflowService:
             row = session.get(TrainingDatasetWorkflowRow, workflow_id)
             if row is None:
                 raise WorkflowNotFound("Training-dataset workflow state was not found.")
+            document_revision = 1 + int(
+                session.scalar(
+                    select(func.count(ArtifactRow.id)).where(
+                        ArtifactRow.workflow_id == workflow_id,
+                        ArtifactRow.artifact_type == artifact_type,
+                    )
+                )
+                or 0
+            )
             artifact = self.artifact_store._put_bytes(
                 session,
                 workflow_id=workflow_id,
                 content=canonical_json(payload).encode(),
                 mime_type="application/json",
                 artifact_type=artifact_type,
-                logical_name=f"{artifact_type}-{document_name}-v1.json",
+                logical_name=f"{artifact_type}-{document_name}-v{document_revision}.json",
                 producer=actor,
                 idempotency_key=idempotency_key,
             )
@@ -1424,6 +1445,11 @@ class WorkflowService:
             )
         validated_artifacts: dict[str, object] = {
             "training_dataset_specification": specification.model_dump(mode="json"),
+            "endpoint_discovery_scope": (
+                specification.endpoint_discovery_scope.model_dump(mode="json")
+                if specification.endpoint_discovery_scope
+                else None
+            ),
             "component_requirements": requirements.model_dump(mode="json"),
             "approved_scientific_policies": initial_context.approved_scientific_policies,
             "reviewed_adapter_capabilities": self.reviewed_source_adapters.public_inventory(),
@@ -1777,12 +1803,17 @@ class WorkflowService:
         expected_version: int,
         actor: str,
         idempotency_key: str,
+        endpoint_discovery_scope: EndpointDiscoveryScope | None = None,
     ) -> WorkflowSnapshot:
         """Human-authorized deterministic recompilation; never a provider retry."""
 
         snapshot = self.get_build(workflow_id)
         if snapshot.current_stage is not WorkflowState.AWAITING_DATASET_SPECIFICATION_REVISION:
             raise InvalidTransition("Only a specification revision gate may be retried.")
+        if snapshot.version != expected_version:
+            raise StaleWorkflowVersion(
+                "Workflow version is stale.", detail={"current_version": snapshot.version}
+            )
         outcome = next(
             (
                 item
@@ -1797,6 +1828,16 @@ class WorkflowService:
         )
         if outcome is None:
             raise GuardNotSatisfied("The terminal specification outcome is missing.")
+        artifact_hashes = [outcome.sha256]
+        if endpoint_discovery_scope is not None:
+            stored_scope = self.persist_training_dataset_document(
+                workflow_id,
+                document_name="endpoint_discovery_scope",
+                value=endpoint_discovery_scope.model_dump(mode="json"),
+                actor=actor,
+                idempotency_key=f"{idempotency_key}:discovery-scope",
+            )
+            artifact_hashes.append(stored_scope["sha256"])
         snapshot = self.transition(
             workflow_id,
             TransitionRequest(
@@ -1808,7 +1849,7 @@ class WorkflowService:
                 reason=(
                     "Administrator explicitly authorized deterministic specification compilation."
                 ),
-                artifact_hashes=[outcome.sha256],
+                artifact_hashes=artifact_hashes,
             ),
         )
         return self.compile_training_dataset_specification(
@@ -1880,6 +1921,13 @@ class WorkflowService:
             initial_context = BlindBenchmarkInitialContext.model_validate(
                 _load_training_document(row.initial_context_json)
             )
+            discovery_scope = (
+                EndpointDiscoveryScope.model_validate(
+                    _load_training_document(row.endpoint_discovery_scope_json)
+                )
+                if row.endpoint_discovery_scope_json
+                else None
+            )
         step = self.create_step(
             workflow_id,
             WorkflowState.COMPILING_TARGET_DATASET_SPECIFICATION,
@@ -1888,6 +1936,7 @@ class WorkflowService:
                 "compiler": "DatasetSpecificationCompiler",
                 "compiler_version": DatasetSpecificationCompiler.version,
                 "provider_invocations": 0,
+                "human_scoped_discovery_scope": discovery_scope is not None,
             },
         )
         hints = initial_context.endpoint_request_semantic_hints or (
@@ -1902,14 +1951,19 @@ class WorkflowService:
             semantic_hints=hints,
             target_training_dataset_contract=initial_context.target_training_dataset_contract,
             approved_platform_policies=initial_context.approved_scientific_policies,
+            discovery_scope=discovery_scope,
             schema_version=TRAINING_DATASET_CONTRACT_VERSION,
+        )
+        compilation_revision = 1 + sum(
+            item.artifact_type == "dataset_specification_compilation_outcome"
+            for item in self.artifact_store.list_artifacts(workflow_id)
         )
         hints_artifact = self.artifact_store.put_json(
             workflow_id=workflow_id,
             step_id=step.id,
             value=hints.model_dump(mode="json"),
             artifact_type="endpoint_request_semantic_hints",
-            logical_name="endpoint-request-semantic-hints-v1.json",
+            logical_name=f"endpoint-request-semantic-hints-v{compilation_revision}.json",
             producer="deterministic-orchestrator",
             original_source=None,
             idempotency_key=f"{idempotency_key}:semantic-hints",
@@ -1919,7 +1973,9 @@ class WorkflowService:
             step_id=step.id,
             value=outcome.model_dump(mode="json"),
             artifact_type="dataset_specification_compilation_outcome",
-            logical_name="dataset-specification-compilation-outcome-v1.json",
+            logical_name=(
+                f"dataset-specification-compilation-outcome-v{compilation_revision}.json"
+            ),
             producer="DatasetSpecificationCompiler",
             original_source=None,
             idempotency_key=f"{idempotency_key}:outcome",
@@ -1936,7 +1992,7 @@ class WorkflowService:
             step_id=step.id,
             value=review_record.model_dump(mode="json"),
             artifact_type="dataset_specification_review_record",
-            logical_name="dataset-specification-review-record-v1.json",
+            logical_name=f"dataset-specification-review-record-v{compilation_revision}.json",
             producer="deterministic-orchestrator",
             original_source=None,
             idempotency_key=f"{idempotency_key}:review-status",
@@ -1946,6 +2002,29 @@ class WorkflowService:
             outcome_artifact.sha256,
             review_record_artifact.sha256,
         ]
+        compiled_scope = outcome.endpoint_discovery_scope
+        if compiled_scope is not None:
+            if discovery_scope is None:
+                stored_scope = self.persist_training_dataset_document(
+                    workflow_id,
+                    document_name="endpoint_discovery_scope",
+                    value=compiled_scope.model_dump(mode="json"),
+                    actor="DatasetSpecificationCompiler",
+                    idempotency_key=f"{idempotency_key}:discovery-scope",
+                )
+                artifact_hashes.append(stored_scope["sha256"])
+            else:
+                scope_artifact = next(
+                    (
+                        item
+                        for item in reversed(self.artifact_store.list_artifacts(workflow_id))
+                        if item.artifact_type == "endpoint_discovery_scope"
+                    ),
+                    None,
+                )
+                if scope_artifact is None:
+                    raise GuardNotSatisfied("Endpoint discovery scope artifact is missing.")
+                artifact_hashes.append(scope_artifact.sha256)
         draft_artifact = None
         if outcome.specification is not None:
             draft_artifact = self.artifact_store.put_json(
@@ -1953,7 +2032,7 @@ class WorkflowService:
                 step_id=step.id,
                 value=outcome.specification.model_dump(mode="json"),
                 artifact_type="training_dataset_specification_draft",
-                logical_name="training-dataset-specification-draft-v1.json",
+                logical_name=f"training-dataset-specification-draft-v{compilation_revision}.json",
                 producer="DatasetSpecificationCompiler",
                 original_source=None,
                 idempotency_key=f"{idempotency_key}:draft",
@@ -3795,6 +3874,13 @@ class WorkflowService:
                 draft = TrainingDatasetSpecificationDraft.model_validate(
                     _load_training_document(workflow.specification_draft_json)
                 )
+                endpoint_discovery_scope = (
+                    EndpointDiscoveryScope.model_validate(
+                        _load_training_document(workflow.endpoint_discovery_scope_json)
+                    )
+                    if workflow.endpoint_discovery_scope_json
+                    else None
+                )
                 if approved_specification_policy is not None:
                     policy_payload = approved_specification_policy.model_dump(mode="json")
                     policy_artifact = self.artifact_store._put_bytes(
@@ -3830,6 +3916,7 @@ class WorkflowService:
                     draft,
                     specification_id=deterministic_id("spec", build.id, approval.proposal_hash),
                     approved_policy=approved_specification_policy,
+                    endpoint_discovery_scope=endpoint_discovery_scope,
                 )
                 payload = specification.model_dump(mode="json")
                 artifact = self.artifact_store._put_bytes(

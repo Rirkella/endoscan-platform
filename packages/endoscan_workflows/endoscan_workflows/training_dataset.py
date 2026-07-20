@@ -27,8 +27,9 @@ from .contracts import (
 
 TRAINING_DATASET_CONTRACT_VERSION = "1.0.0"
 BLIND_TRAINING_DATASET_DISCOVERY = "blind_training_dataset_discovery"
-DATASET_SPECIFICATION_COMPILER_VERSION = "1.0.0"
+DATASET_SPECIFICATION_COMPILER_VERSION = "1.1.0"
 PLATFORM_SPECIFICATION_POLICY_VERSION = "1.0.0"
+ENDPOINT_DISCOVERY_SCOPE_VERSION = "1.0.0"
 
 
 class PredictionUnit(StrEnum):
@@ -58,6 +59,102 @@ class EndpointSemanticModality(StrEnum):
     SENSITIZATION = "sensitization"
     CYTOTOXICITY = "cytotoxicity"
     PATHWAY_ACTIVATION = "pathway_activation"
+
+
+class EndpointDiscoveryMode(StrEnum):
+    FIXED_MODALITY = "fixed_modality"
+    BROAD_MODALITY_EXPLORATION = "broad_modality_exploration"
+    PHENOTYPE_EXPLORATION = "phenotype_exploration"
+    NEEDS_HUMAN_CLARIFICATION = "needs_human_clarification"
+
+
+class EndpointDiscoveryScopeProvenance(StrEnum):
+    USER_REQUEST = "user_request"
+    HUMAN_SCOPED_CONFIGURATION = "human_scoped_configuration"
+    DETERMINISTIC_COMPILER = "deterministic_compiler"
+    APPROVED_PLATFORM_POLICY = "approved_platform_policy"
+
+
+class EndpointDiscoveryScope(StrictContract):
+    """Versioned, source-neutral scientific search boundary for endpoint discovery."""
+
+    schema_version: Literal["1.0.0"] = ENDPOINT_DISCOVERY_SCOPE_VERSION
+    mode: EndpointDiscoveryMode
+    biological_target: str | None = Field(default=None, max_length=500)
+    fixed_modality: EndpointSemanticModality | None = None
+    candidate_modalities: list[EndpointSemanticModality] = Field(
+        default_factory=list, max_length=20
+    )
+    explicitly_excluded_modalities: list[EndpointSemanticModality] = Field(
+        default_factory=list, max_length=20
+    )
+    preserve_modalities_separately: bool = True
+    aggregation_allowed_later: bool = False
+    aggregation_requires_human_approval: bool = True
+    aggregation_active_during_discovery: Literal[False] = False
+    selection_deferred_until: Literal[
+        "source_inventory_review", "assembly_strategy_review"
+    ] | None = None
+    scientific_scope: str = Field(min_length=10, max_length=4000)
+    provenance: list[EndpointDiscoveryScopeProvenance] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_mode_contract(self) -> EndpointDiscoveryScope:
+        candidates = list(dict.fromkeys(self.candidate_modalities))
+        if len(candidates) != len(self.candidate_modalities):
+            raise ValueError("candidate modalities must be unique")
+        if set(candidates) & set(self.explicitly_excluded_modalities):
+            raise ValueError("candidate modalities cannot also be explicitly excluded")
+        if self.aggregation_allowed_later and not self.aggregation_requires_human_approval:
+            raise ValueError("later aggregation requires explicit human approval")
+        if not self.preserve_modalities_separately and candidates:
+            raise ValueError("raw discovery must preserve candidate modalities separately")
+        if self.mode is EndpointDiscoveryMode.FIXED_MODALITY:
+            if not self.biological_target or self.fixed_modality is None:
+                raise ValueError("fixed-modality discovery requires a target and fixed modality")
+            if candidates != [self.fixed_modality]:
+                raise ValueError("fixed-modality candidates must contain only the fixed modality")
+            if self.selection_deferred_until is not None:
+                raise ValueError("fixed-modality selection cannot be deferred")
+        elif self.mode is EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION:
+            if not self.biological_target:
+                raise ValueError("broad discovery requires a biological target")
+            if self.fixed_modality is not None:
+                raise ValueError("broad discovery cannot define a fixed modality")
+            if len(candidates) < 2:
+                raise ValueError("broad discovery requires at least two candidate modalities")
+            if not self.preserve_modalities_separately:
+                raise ValueError("broad discovery must preserve modalities separately")
+            if self.selection_deferred_until is None:
+                raise ValueError("broad discovery requires a deferred-selection stage")
+        elif self.mode is EndpointDiscoveryMode.PHENOTYPE_EXPLORATION:
+            if not self.biological_target:
+                raise ValueError("phenotype exploration requires a bounded biological scope")
+            if self.fixed_modality is not None:
+                raise ValueError("phenotype exploration cannot define a fixed assay modality")
+            if self.selection_deferred_until is None:
+                raise ValueError("phenotype exploration requires a deferred-selection stage")
+        elif self.mode is EndpointDiscoveryMode.NEEDS_HUMAN_CLARIFICATION:
+            if self.fixed_modality is not None or candidates:
+                raise ValueError("clarification scope cannot preselect modalities")
+
+        normalized_scope = self.scientific_scope.casefold()
+        forbidden_source_hints = (
+            "doi",
+            "assay id",
+            "accession",
+            "pubmed",
+            "pubchem",
+            "geo",
+            "toxcast",
+            "lincs",
+            "expected count",
+            "expected overlap",
+            "winning modality",
+        )
+        if any(token in normalized_scope for token in forbidden_source_hints):
+            raise ValueError("endpoint discovery scope must not contain source or result hints")
+        return self
 
 
 class CoreEndpointDefinitionStatus(StrEnum):
@@ -319,7 +416,11 @@ class TrainingDatasetSpecification(StrictContract):
     specification_id: str = Field(min_length=3, max_length=160)
     endpoint_name: str = Field(min_length=3, max_length=160)
     biological_target: str = Field(min_length=1, max_length=500)
-    endpoint_modality: str = Field(min_length=1, max_length=300)
+    endpoint_modality: str | None = Field(default=None, max_length=300)
+    endpoint_discovery_scope: EndpointDiscoveryScope | None = None
+    candidate_modalities: list[EndpointSemanticModality] = Field(
+        default_factory=list, max_length=20
+    )
     endpoint_definition: str = Field(min_length=10, max_length=4000)
     intended_prediction_task: str = Field(min_length=10, max_length=2000)
     prediction_unit: PredictionUnit
@@ -368,6 +469,16 @@ class TrainingDatasetSpecification(StrictContract):
         }
         if invalid:
             raise ValueError("allowed_missingness values must be between zero and one")
+        if self.endpoint_discovery_scope is not None:
+            expected = self.endpoint_discovery_scope.candidate_modalities
+            if self.candidate_modalities != expected:
+                raise ValueError("specification candidate modalities must match discovery scope")
+            if (
+                self.endpoint_discovery_scope.mode
+                is EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION
+                and self.endpoint_modality is not None
+            ):
+                raise ValueError("broad discovery cannot materialize a fixed endpoint modality")
         return self
 
 
@@ -384,7 +495,10 @@ class TrainingDatasetSpecificationDraft(BaseModel):
     schema_version: Literal["1.0.0"]
     endpoint_name: str = Field(min_length=3, max_length=160)
     biological_target: str = Field(min_length=1, max_length=500)
-    endpoint_modality: str = Field(min_length=1, max_length=300)
+    endpoint_modality: str | None = Field(default=None, max_length=300)
+    candidate_modalities: list[EndpointSemanticModality] = Field(
+        default_factory=list, max_length=20
+    )
     endpoint_definition: str = Field(min_length=10, max_length=4000)
     intended_prediction_task: str = Field(min_length=10, max_length=2000)
     candidate_prediction_grain: PredictionUnit
@@ -416,6 +530,8 @@ class TrainingDatasetSpecificationDraft(BaseModel):
             and not self.explicit_prediction_grain
         ):
             raise ValueError("explicit_prediction_grain is required for explicit_other")
+        if len(self.candidate_modalities) > 1 and self.endpoint_modality is not None:
+            raise ValueError("multi-modality discovery draft cannot define a fixed modality")
         return self
 
 
@@ -456,10 +572,11 @@ class TrainingDatasetSpecificationApprovalPolicy(StrictContract):
 
 class DatasetSpecificationCompilationOutcome(StrictContract):
     status: Literal["compiled", "needs_human_clarification"]
-    compiler_version: Literal["1.0.0"] = DATASET_SPECIFICATION_COMPILER_VERSION
+    compiler_version: Literal["1.1.0"] = DATASET_SPECIFICATION_COMPILER_VERSION
     platform_policy_version: Literal["1.0.0"] = PLATFORM_SPECIFICATION_POLICY_VERSION
     deterministic_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     specification: TrainingDatasetSpecificationDraft | None
+    endpoint_discovery_scope: EndpointDiscoveryScope | None = None
     missing_core_elements: list[MissingCoreEndpointElement] = Field(max_length=4)
     blocking_questions: list[str] = Field(max_length=50)
     approval_questions: list[str] = Field(max_length=100)
@@ -470,11 +587,15 @@ class DatasetSpecificationCompilationOutcome(StrictContract):
     def require_compilation_semantics(self) -> DatasetSpecificationCompilationOutcome:
         if self.status == "compiled" and self.specification is None:
             raise ValueError("compiled outcome requires a deterministic specification")
+        if self.status == "compiled" and self.endpoint_discovery_scope is None:
+            raise ValueError("compiled outcome requires an endpoint discovery scope")
         if self.status == "compiled" and (self.missing_core_elements or self.blocking_questions):
             raise ValueError("compiled outcome cannot retain blocking core questions")
         if self.status == "needs_human_clarification":
             if self.specification is not None:
                 raise ValueError("clarification outcome cannot contain a complete specification")
+            if self.endpoint_discovery_scope is not None:
+                raise ValueError("clarification outcome cannot contain a resolved discovery scope")
             if not self.missing_core_elements or not self.blocking_questions:
                 raise ValueError(
                     "clarification outcome requires exact missing fields and questions"
@@ -576,6 +697,15 @@ class DatasetSpecificationCompiler:
         "What minimum usable coverage is required?",
         "What missingness policy is acceptable for optional and contextual fields?",
     ]
+    _broad_approval_questions = [
+        "Which modality-specific datasets are sufficiently supported?",
+        "Should separate modality-specific models be built?",
+        "Is a functional union such as agonism OR antagonism scientifically justified?",
+        "How should inactive and inconclusive activity records be defined?",
+        "How should conflicts and missing assays be handled?",
+        "Which transcriptomic contexts should be retained?",
+        "What minimum coverage and quality requirements are acceptable?",
+    ]
 
     def compile(
         self,
@@ -585,20 +715,32 @@ class DatasetSpecificationCompiler:
         semantic_hints: EndpointRequestSemanticHints,
         target_training_dataset_contract: dict[str, Any],
         approved_platform_policies: list[str],
+        discovery_scope: EndpointDiscoveryScope | None = None,
         schema_version: str = TRAINING_DATASET_CONTRACT_VERSION,
     ) -> DatasetSpecificationCompilationOutcome:
-        if semantic_hints.core_definition_status is not CoreEndpointDefinitionStatus.SUFFICIENT:
+        scope = discovery_scope or self._scope_from_semantic_hints(semantic_hints)
+        missing = list(semantic_hints.missing_core_elements)
+        if scope is not None:
+            missing = [
+                item
+                for item in missing
+                if item
+                not in {
+                    MissingCoreEndpointElement.BIOLOGICAL_TARGET_OR_PROCESS,
+                    MissingCoreEndpointElement.REQUESTED_MODALITY_OR_PREDICTION_CLAIM,
+                }
+            ]
+        if scope is None or missing:
+            missing = missing or [MissingCoreEndpointElement.REQUESTED_MODALITY_OR_PREDICTION_CLAIM]
             questions = [
-                self._blocking_question(item) for item in semantic_hints.missing_core_elements
+                self._blocking_question(item) for item in missing
             ]
             payload = {
                 "status": "needs_human_clarification",
                 "compiler_version": self.version,
                 "platform_policy_version": self.policy_version,
                 "specification": None,
-                "missing_core_elements": [
-                    item.value for item in semantic_hints.missing_core_elements
-                ],
+                "missing_core_elements": [item.value for item in missing],
                 "blocking_questions": questions,
                 "approval_questions": [],
                 "limitations": [
@@ -614,22 +756,57 @@ class DatasetSpecificationCompiler:
                 deterministic_hash=self._hash(payload),
             )
 
-        target = semantic_hints.explicit_target_terms[0]
-        modality = semantic_hints.explicit_modality_terms[0].value
-        exclusions = self._exclusions(target, modality)
-        assumptions = list(self._approval_questions)
+        if scope.mode not in {
+            EndpointDiscoveryMode.FIXED_MODALITY,
+            EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION,
+        }:
+            missing = [MissingCoreEndpointElement.REQUESTED_MODALITY_OR_PREDICTION_CLAIM]
+            payload = {
+                "status": "needs_human_clarification",
+                "compiler_version": self.version,
+                "platform_policy_version": self.policy_version,
+                "specification": None,
+                "missing_core_elements": [item.value for item in missing],
+                "blocking_questions": [self._blocking_question(item) for item in missing],
+                "approval_questions": [],
+                "limitations": ["The selected discovery mode is not yet a compilable endpoint."],
+                "provider_invocations": 0,
+            }
+            return DatasetSpecificationCompilationOutcome(
+                **payload,
+                deterministic_hash=self._hash(payload),
+            )
+
+        target = scope.biological_target or ""
+        broad = scope.mode is EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION
+        modality = None if broad else scope.fixed_modality.value if scope.fixed_modality else None
+        exclusions = self._broad_exclusions(target) if broad else self._exclusions(
+            target, modality or "activity"
+        )
+        assumptions = list(
+            self._broad_approval_questions if broad else self._approval_questions
+        )
         provenance = self._provenance()
         draft = TrainingDatasetSpecificationDraft(
             schema_version=schema_version,
             endpoint_name=endpoint_name,
             biological_target=target,
             endpoint_modality=modality,
+            candidate_modalities=scope.candidate_modalities,
             endpoint_definition=(
-                f"Compound activity relative to {target} {modality}; adjacent modalities and "
-                "downstream phenotypes remain outside scope unless a human revises the endpoint."
+                f"Exploratory compound-level discovery for {target} across separately retained "
+                "candidate assay modalities. No final activity label or aggregation is defined "
+                "before source inventory and assembly review."
+                if broad
+                else f"Compound activity relative to {target} {modality}; adjacent modalities "
+                "and downstream phenotypes remain outside scope unless a human revises the "
+                "endpoint."
             ),
             intended_prediction_task=(
-                f"Predict compound activity relative to {target} {modality} using "
+                "Determine which modality-specific or scientifically aggregated compound-level "
+                "endpoints can be connected to compound-induced transcriptomic responses."
+                if broad
+                else f"Predict compound activity relative to {target} {modality} using "
                 "compound-induced transcriptomic responses and compound identity and structure "
                 "information."
             ),
@@ -665,15 +842,39 @@ class DatasetSpecificationCompiler:
                 "transcriptomic control or reference definition",
                 "activity assay identifier and context",
             ],
-            mandatory_target_table_fields=list(self._mandatory_fields),
+            mandatory_target_table_fields=list(
+                dict.fromkeys(
+                    [
+                        *[
+                            field
+                            for field in self._mandatory_fields
+                            if field != "endpoint_activity_label"
+                        ],
+                        "biological_target",
+                        "measurement_type",
+                        "activity_outcome",
+                        "source_provenance",
+                    ]
+                    if broad
+                    else self._mandatory_fields
+                )
+            ),
             minimum_evidence_requirements=[
-                "experimentally measured endpoint-modality activity",
+                (
+                    "experimentally measured, modality-specific activity with original assay "
+                    "and source provenance"
+                    if broad
+                    else "experimentally measured endpoint-modality activity"
+                ),
                 "retain continuous primary measurements when available",
                 "record confirmatory and counter-screen evidence when available",
                 "bind every derived label to a later human-approved policy",
             ],
             intended_scope_of_claim=(
-                f"A public-data training table for compound-level prediction of {target} "
+                f"Source-neutral exploration of {target} activity modalities with assay-level "
+                "provenance preserved; endpoint selection and label construction remain deferred."
+                if broad
+                else f"A public-data training table for compound-level prediction of {target} "
                 f"{modality}, with transcriptomic experimental context retained."
             ),
             explicit_exclusions=exclusions,
@@ -684,12 +885,19 @@ class DatasetSpecificationCompiler:
             approval_questions=assumptions,
             field_provenance=provenance,
         )
+        if broad:
+            draft.explicit_prediction_grain = (
+                "Activity evidence: compound x assay x modality. Transcriptomic evidence: "
+                "compound x transcriptomic experimental context. Eventual training-table grain "
+                "requires later human approval."
+            )
         draft_payload = draft.model_dump(mode="json")
         outcome_payload = {
             "status": "compiled",
             "compiler_version": self.version,
             "platform_policy_version": self.policy_version,
             "specification": draft_payload,
+            "endpoint_discovery_scope": scope.model_dump(mode="json"),
             "missing_core_elements": [],
             "blocking_questions": [],
             "approval_questions": assumptions,
@@ -703,6 +911,63 @@ class DatasetSpecificationCompiler:
         return DatasetSpecificationCompilationOutcome(
             **outcome_payload,
             deterministic_hash=self._hash(outcome_payload),
+        )
+
+    @staticmethod
+    def _scope_from_semantic_hints(
+        semantic_hints: EndpointRequestSemanticHints,
+    ) -> EndpointDiscoveryScope | None:
+        if not semantic_hints.target_present or not semantic_hints.explicit_modality_terms:
+            return None
+        target = semantic_hints.explicit_target_terms[0]
+        modalities = list(dict.fromkeys(semantic_hints.explicit_modality_terms))
+        provenance = [
+            EndpointDiscoveryScopeProvenance.USER_REQUEST,
+            EndpointDiscoveryScopeProvenance.DETERMINISTIC_COMPILER,
+            EndpointDiscoveryScopeProvenance.APPROVED_PLATFORM_POLICY,
+        ]
+        if len(modalities) == 1:
+            fixed = modalities[0]
+            adjacent = [
+                item
+                for item in (
+                    EndpointSemanticModality.BINDING,
+                    EndpointSemanticModality.AGONISM,
+                    EndpointSemanticModality.ANTAGONISM,
+                )
+                if item is not fixed
+            ]
+            return EndpointDiscoveryScope(
+                mode=EndpointDiscoveryMode.FIXED_MODALITY,
+                biological_target=target,
+                fixed_modality=fixed,
+                candidate_modalities=[fixed],
+                explicitly_excluded_modalities=adjacent,
+                preserve_modalities_separately=True,
+                aggregation_allowed_later=True,
+                aggregation_requires_human_approval=True,
+                selection_deferred_until=None,
+                scientific_scope=(
+                    f"Discover assay-level {fixed.value} evidence for {target} without combining "
+                    "adjacent modalities during discovery."
+                ),
+                provenance=provenance,
+            )
+        return EndpointDiscoveryScope(
+            mode=EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION,
+            biological_target=target,
+            fixed_modality=None,
+            candidate_modalities=modalities,
+            explicitly_excluded_modalities=[],
+            preserve_modalities_separately=True,
+            aggregation_allowed_later=True,
+            aggregation_requires_human_approval=True,
+            selection_deferred_until="assembly_strategy_review",
+            scientific_scope=(
+                f"Compare separately preserved assay modalities for {target}; defer endpoint "
+                "selection and any aggregation until assembly review."
+            ),
+            provenance=provenance,
         )
 
     @staticmethod
@@ -746,6 +1011,25 @@ class DatasetSpecificationCompiler:
             )
         return generic
 
+    @staticmethod
+    def _broad_exclusions(target: str) -> list[str]:
+        exclusions = [
+            "binding silently interpreted as functional agonism or antagonism",
+            "automatic modality aggregation during source discovery",
+            "activity labels without assay-level modality and provenance",
+            "general downstream phenotypes without target-specific evidence",
+        ]
+        if target.casefold() == "thyroid hormone receptor":
+            exclusions.extend(
+                [
+                    "thyroid peroxidase inhibition",
+                    "sodium-iodide symporter effects",
+                    "deiodinase effects",
+                    "TSH receptor effects",
+                ]
+            )
+        return exclusions
+
     @classmethod
     def _provenance(cls) -> list[SpecificationFieldProvenance]:
         user = [SpecificationFieldOrigin.USER_REQUEST, SpecificationFieldOrigin.SEMANTIC_HINT]
@@ -757,6 +1041,11 @@ class DatasetSpecificationCompiler:
             ("endpoint_name", user, "Copied from the endpoint request."),
             ("biological_target", user, "Parsed deterministically from user-authored text."),
             ("endpoint_modality", user, "Parsed from the bounded modality vocabulary."),
+            (
+                "candidate_modalities",
+                user + human,
+                "Controlled-vocabulary modalities preserved separately during discovery.",
+            ),
             (
                 "endpoint_definition",
                 user + policy,
@@ -1012,7 +1301,13 @@ def validate_dataset_specification_semantics(
             requires_explicit_human_rerun=True,
         )
 
-    modality_text = f"{draft.endpoint_modality} {draft.endpoint_definition}".casefold()
+    modality_text = " ".join(
+        [
+            str(draft.endpoint_modality or ""),
+            draft.endpoint_definition,
+            *[item.value for item in draft.candidate_modalities],
+        ]
+    ).casefold()
     missing_modalities = [
         modality.value
         for modality in hints.explicit_modality_terms
@@ -1070,6 +1365,7 @@ def materialize_training_dataset_specification(
     *,
     specification_id: str,
     approved_policy: TrainingDatasetSpecificationApprovalPolicy | None = None,
+    endpoint_discovery_scope: EndpointDiscoveryScope | None = None,
 ) -> TrainingDatasetSpecification:
     """Create the full approved contract without inventing policy thresholds."""
 
@@ -1084,6 +1380,8 @@ def materialize_training_dataset_specification(
         endpoint_name=draft.endpoint_name,
         biological_target=draft.biological_target,
         endpoint_modality=draft.endpoint_modality,
+        endpoint_discovery_scope=endpoint_discovery_scope,
+        candidate_modalities=draft.candidate_modalities,
         endpoint_definition=draft.endpoint_definition,
         intended_prediction_task=draft.intended_prediction_task,
         prediction_unit=draft.candidate_prediction_grain,
@@ -1153,6 +1451,11 @@ def derive_component_requirements(
     """Derive the source ontology deterministically; this is not a source strategy."""
 
     identity_ids = list(specification.compound_identity_requirements)
+    scope = specification.endpoint_discovery_scope
+    broad = bool(
+        scope and scope.mode is EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION
+    )
+    candidate_modalities = [item.value for item in specification.candidate_modalities]
     endpoint_exclusions = list(specification.excluded_modalities) or [
         "activity outside the approved endpoint modality"
     ]
@@ -1167,10 +1470,23 @@ def derive_component_requirements(
             role=ComponentRole.ENDPOINT_ACTIVITY,
             mandatory=True,
             acceptable_data_forms=[
-                item.value for item in specification.acceptable_activity_representations
+                *[item.value for item in specification.acceptable_activity_representations],
+                *(
+                    [f"{modality} assay evidence" for modality in candidate_modalities]
+                    if broad
+                    else []
+                ),
             ],
             acceptable_identifier_types=identity_ids,
-            minimum_metadata=["assay_id", "measurement_type", "assay_context"],
+            minimum_metadata=[
+                "assay_id",
+                "biological_target",
+                "endpoint_modality",
+                "measurement_type",
+                "activity_value_or_outcome",
+                "assay_context",
+                "source_provenance",
+            ],
             quality_requirements=["primary public records", "explicit endpoint modality"],
             explicit_exclusions=endpoint_exclusions,
             unresolved_discovery_questions=discovery_questions,
@@ -1185,6 +1501,44 @@ def derive_component_requirements(
             depends_on=["endpoint-activity"],
             explicit_exclusions=["publication prose without compound-level primary records"],
             unresolved_discovery_questions=discovery_questions,
+        ),
+        *(
+            [
+                ComponentRequirement(
+                    requirement_id="modality-specific-evidence-preservation",
+                    role=ComponentRole.ASSAY_METADATA,
+                    mandatory=True,
+                    acceptable_data_forms=[
+                        "binding assay record",
+                        "agonist assay record",
+                        "antagonist assay record",
+                    ],
+                    minimum_metadata=[
+                        "original_modality",
+                        "assay_id",
+                        "source_identifier",
+                        "measurement_type",
+                        "activity_value_or_outcome",
+                        "complete_provenance",
+                    ],
+                    quality_requirements=[
+                        "original assay records remain immutable",
+                        "no modality aggregation during discovery",
+                        "binding is not silently promoted to functional activity",
+                    ],
+                    depends_on=["endpoint-activity", "assay-metadata"],
+                    explicit_exclusions=[
+                        "automatic agonism-or-antagonism union",
+                        "overwriting assay-specific modality",
+                    ],
+                    unresolved_discovery_questions=[
+                        *discovery_questions,
+                        "What modality-specific evidence and overlap are available?",
+                    ],
+                )
+            ]
+            if broad
+            else []
         ),
         ComponentRequirement(
             requirement_id="compound-identity",
@@ -2337,7 +2691,11 @@ SPECIALIZED_AGENT_SEQUENCE = [
             "inspect_epa_release_manifest",
             "inspect_epa_related_assay_components",
         ],
-        receives_artifacts=["training_dataset_specification", "component_requirements"],
+        receives_artifacts=[
+            "training_dataset_specification",
+            "endpoint_discovery_scope",
+            "component_requirements",
+        ],
         produces_artifact="activity_source_inventory_fragment",
     ),
     SpecializedAgentDefinition(

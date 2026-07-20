@@ -232,6 +232,7 @@ class TrainingDatasetWorkflowRow(Base):
     contract_version: Mapped[str] = mapped_column(String(40), default="1.0.0")
     benchmark_mode: Mapped[str] = mapped_column(String(120), index=True)
     initial_context_json: Mapped[str] = mapped_column(Text)
+    endpoint_discovery_scope_json: Mapped[str | None] = mapped_column(Text)
     specification_draft_json: Mapped[str | None] = mapped_column(Text)
     specification_outcome_json: Mapped[str | None] = mapped_column(Text)
     specification_semantic_validation_json: Mapped[str | None] = mapped_column(Text)

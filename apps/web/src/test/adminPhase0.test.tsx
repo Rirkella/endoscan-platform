@@ -331,6 +331,87 @@ describe("Phase-0 build detail information architecture", () => {
     expect(screen.getByText("No agent run yet.")).toBeInTheDocument();
   });
 
+  it("renders a broad endpoint discovery scope without implying a selected modality", async () => {
+    const scope = {
+      schema_version: "1.0.0",
+      mode: "broad_modality_exploration",
+      biological_target: "Thyroid hormone receptor",
+      fixed_modality: null,
+      candidate_modalities: ["binding", "agonism", "antagonism"],
+      explicitly_excluded_modalities: [],
+      preserve_modalities_separately: true,
+      aggregation_allowed_later: true,
+      aggregation_requires_human_approval: true,
+      aggregation_active_during_discovery: false,
+      selection_deferred_until: "assembly_strategy_review",
+      scientific_scope: "Explore candidate modalities separately.",
+      provenance: ["human_scoped_configuration"],
+    };
+    const specificationApproval: AdminApproval = {
+      ...approval,
+      stage: "AWAITING_DATASET_SPECIFICATION_REVIEW",
+      approval_type: "dataset_specification",
+    };
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      contract_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      benchmark_mode: "blind_training_dataset_discovery",
+      legacy: false,
+      endpoint_discovery_scope: scope,
+      specification_compilation_outcome: {
+        compiler_version: "1.1.0",
+        deterministic_hash: "b".repeat(64),
+        limitations: ["No scientific source was consulted."],
+      },
+      specification_review: {
+        status: "not_run",
+        safe_summary: "Optional AI review has not been requested.",
+      },
+      specification_draft: {
+        biological_target: "Thyroid hormone receptor",
+        endpoint_modality: null,
+        candidate_modalities: ["binding", "agonism", "antagonism"],
+        intended_prediction_task: "Determine which modality-specific endpoints are supported.",
+        explicit_prediction_grain: "Activity evidence: compound x assay x modality.",
+        mandatory_target_table_fields: ["canonical_compound_id", "endpoint_modality", "assay_id"],
+        compound_identity_requirements: ["canonical compound identifier"],
+        chemical_structure_requirements: ["canonical SMILES"],
+        acceptable_transcriptomic_evidence_types: ["compound-induced signature"],
+        acceptable_activity_evidence_types: ["continuous_activity"],
+        experimental_context_requirements: ["cell", "dose", "duration", "control"],
+        intended_scope_of_claim: "Compare modalities without selecting or aggregating them.",
+        explicit_exclusions: ["automatic modality aggregation during source discovery"],
+        blocking_questions: [],
+        approval_questions: ["Which modality-specific datasets are sufficiently supported?"],
+        assumptions: [],
+        field_provenance: [],
+      },
+      target_specification: null,
+      component_requirements: null,
+      verified_source_inventory: null,
+      capability_matrix: null,
+      assembly_strategies: null,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVIEW", 4, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: approvalId,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [specificationApproval] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findAllByRole("heading", { name: "Review endpoint discovery scope" })).toHaveLength(2);
+    expect(screen.getAllByText("The system is not choosing a final endpoint yet. It will first compare the public evidence available for each candidate modality.")).toHaveLength(2);
+    expect(screen.getByText("Binding, Agonism, Antagonism")).toBeInTheDocument();
+    expect(screen.getByText("Assembly strategy review")).toBeInTheDocument();
+    expect(screen.queryByText("Dataset specification needs revision")).not.toBeInTheDocument();
+  });
+
   it("renders a source-neutral multi-source training-dataset workspace", async () => {
     const training: AdminTrainingDatasetWorkflow = {
       schema_version: "1.0.0",

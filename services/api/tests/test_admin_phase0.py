@@ -206,6 +206,84 @@ def test_training_dataset_start_compiles_specification_and_persists_approval(
         assert approvals[-1]["status"] == "pending"
 
 
+def test_broad_endpoint_retry_accepts_human_discovery_scope_without_provider_calls(
+    repo_root, monkeypatch, tmp_path
+) -> None:
+    configure(monkeypatch, tmp_path)
+    with TestClient(create_app(repo_root)) as client:
+        created = post(
+            client,
+            "/admin/endpoint-builds",
+            {
+                "endpoint_name": "Thyroid hormone receptor activity",
+                "endpoint_slug": "thyroid-receptor-activity-broad-api",
+                "biological_goal": (
+                    "Determine which public compound-level thyroid hormone receptor activity "
+                    "modalities can connect to compound-induced transcriptomic responses."
+                ),
+                "created_by": "local-admin",
+                "workflow_kind": "training_dataset_discovery",
+                "benchmark_mode": "blind_training_dataset_discovery",
+            },
+            "api-broad-create",
+        ).json()
+        revision = post(
+            client,
+            f"/admin/endpoint-builds/{created['id']}/start",
+            {"expected_version": created["version"], "actor": "local-admin"},
+            "api-broad-start",
+        ).json()
+        assert revision["current_stage"] == "AWAITING_DATASET_SPECIFICATION_REVISION"
+        waiting = post(
+            client,
+            f"/admin/endpoint-builds/{created['id']}/retry-dataset-specification",
+            {
+                "expected_version": revision["version"],
+                "actor": "local-admin",
+                "endpoint_discovery_scope": {
+                    "schema_version": "1.0.0",
+                    "mode": "broad_modality_exploration",
+                    "biological_target": "Thyroid hormone receptor",
+                    "fixed_modality": None,
+                    "candidate_modalities": ["binding", "agonism", "antagonism"],
+                    "explicitly_excluded_modalities": [],
+                    "preserve_modalities_separately": True,
+                    "aggregation_allowed_later": True,
+                    "aggregation_requires_human_approval": True,
+                    "aggregation_active_during_discovery": False,
+                    "selection_deferred_until": "assembly_strategy_review",
+                    "scientific_scope": (
+                        "Explore binding, agonism, and antagonism separately and defer endpoint "
+                        "selection."
+                    ),
+                    "provenance": ["human_scoped_configuration"],
+                },
+            },
+            "api-broad-retry",
+        )
+        assert waiting.status_code == 200, waiting.text
+        assert waiting.json()["current_stage"] == "AWAITING_DATASET_SPECIFICATION_REVIEW"
+        workflow = client.get(
+            f"/admin/endpoint-builds/{created['id']}/training-dataset-workflow",
+            headers=ADMIN,
+        ).json()
+        assert workflow["endpoint_discovery_scope"]["candidate_modalities"] == [
+            "binding",
+            "agonism",
+            "antagonism",
+        ]
+        assert workflow["specification_draft"]["endpoint_modality"] is None
+        assert workflow["component_requirements"] is None
+        approvals = client.get(
+            f"/admin/endpoint-builds/{created['id']}/approvals", headers=ADMIN
+        ).json()
+        assert approvals[-1]["approval_type"] == "dataset_specification"
+        assert approvals[-1]["status"] == "pending"
+        assert client.get(
+            f"/admin/endpoint-builds/{created['id']}/agent-runs", headers=ADMIN
+        ).json() == []
+
+
 def test_specialized_boundary_probes_are_zero_network(repo_root, monkeypatch, tmp_path) -> None:
     configure(monkeypatch, tmp_path)
     with TestClient(create_app(repo_root)) as client:

@@ -46,6 +46,7 @@ export interface AdminTrainingDatasetWorkflow {
   legacy: boolean;
   label?: string;
   initial_context?: Record<string, unknown>;
+  endpoint_discovery_scope?: Record<string, unknown> | null;
   target_specification?: Record<string, unknown> | null;
   specification_draft?: Record<string, unknown> | null;
   specification_agent_outcome?: Record<string, unknown> | null;

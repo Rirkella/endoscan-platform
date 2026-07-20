@@ -20,6 +20,9 @@ from endoscan_workflows.training_dataset import (
     DatasetSpecificationReviewOutcome,
     DatasetSpecificationSuggestedCorrection,
     DiscoveryBeforeStrategyGuard,
+    EndpointDiscoveryMode,
+    EndpointDiscoveryScope,
+    EndpointDiscoveryScopeProvenance,
     EndpointSemanticModality,
     GraphNodeType,
     JoinabilityDiagnostic,
@@ -1078,6 +1081,118 @@ def test_dataset_specification_compiler_is_deterministic_source_neutral_and_prov
         "doi",
     ):
         assert prohibited not in serialized
+
+
+def broad_tr_scope(**changes) -> EndpointDiscoveryScope:
+    values = {
+        "mode": EndpointDiscoveryMode.BROAD_MODALITY_EXPLORATION,
+        "biological_target": "Thyroid hormone receptor",
+        "fixed_modality": None,
+        "candidate_modalities": [
+            EndpointSemanticModality.BINDING,
+            EndpointSemanticModality.AGONISM,
+            EndpointSemanticModality.ANTAGONISM,
+        ],
+        "explicitly_excluded_modalities": [],
+        "preserve_modalities_separately": True,
+        "aggregation_allowed_later": True,
+        "aggregation_requires_human_approval": True,
+        "selection_deferred_until": "assembly_strategy_review",
+        "scientific_scope": (
+            "Explore binding, agonism, and antagonism separately and defer endpoint selection."
+        ),
+        "provenance": [EndpointDiscoveryScopeProvenance.HUMAN_SCOPED_CONFIGURATION],
+    }
+    values.update(changes)
+    return EndpointDiscoveryScope(**values)
+
+
+def test_fixed_antagonist_compiles_to_fixed_discovery_scope() -> None:
+    endpoint = "Thyroid hormone receptor antagonist"
+    goal = "Construct a compound-level transcriptomic training dataset."
+    outcome = DatasetSpecificationCompiler().compile(
+        endpoint_name=endpoint,
+        biological_goal=goal,
+        semantic_hints=derive_endpoint_request_semantic_hints(endpoint, goal),
+        target_training_dataset_contract={},
+        approved_platform_policies=[],
+    )
+    assert outcome.specification is not None
+    scope = outcome.endpoint_discovery_scope
+    assert scope is not None
+    assert scope.mode is EndpointDiscoveryMode.FIXED_MODALITY
+    assert scope.fixed_modality is EndpointSemanticModality.ANTAGONISM
+    assert scope.candidate_modalities == [EndpointSemanticModality.ANTAGONISM]
+
+
+def test_human_scoped_broad_tr_compiles_without_automatic_aggregation() -> None:
+    endpoint = "Thyroid hormone receptor activity"
+    goal = (
+        "Determine which public compound-level thyroid hormone receptor activity modalities can "
+        "be connected to public compound-induced transcriptomic responses to construct training "
+        "datasets."
+    )
+    scope = broad_tr_scope()
+    outcome = DatasetSpecificationCompiler().compile(
+        endpoint_name=endpoint,
+        biological_goal=goal,
+        semantic_hints=derive_endpoint_request_semantic_hints(endpoint, goal),
+        target_training_dataset_contract={},
+        approved_platform_policies=[],
+        discovery_scope=scope,
+    )
+    assert outcome.status == "compiled"
+    assert outcome.provider_invocations == 0
+    assert outcome.specification is not None
+    draft = outcome.specification
+    assert draft.endpoint_modality is None
+    assert draft.candidate_modalities == scope.candidate_modalities
+    assert outcome.endpoint_discovery_scope == scope
+    assert scope.aggregation_active_during_discovery is False
+    assert scope.aggregation_allowed_later is True
+    assert scope.aggregation_requires_human_approval is True
+    assert "compound x assay x modality" in (draft.explicit_prediction_grain or "")
+    assert "source_provenance" in draft.mandatory_target_table_fields
+
+    specification = materialize_training_dataset_specification(
+        draft,
+        specification_id="spec-broad-thyroid-receptor",
+        endpoint_discovery_scope=scope,
+    )
+    requirements = derive_component_requirements(specification)
+    activity = next(
+        item
+        for item in requirements.requirements
+        if item.requirement_id == "endpoint-activity"
+    )
+    assert {
+        "binding assay evidence",
+        "agonism assay evidence",
+        "antagonism assay evidence",
+    }.issubset(activity.acceptable_data_forms)
+    preservation = next(
+        item
+        for item in requirements.requirements
+        if item.requirement_id == "modality-specific-evidence-preservation"
+    )
+    assert preservation.mandatory is True
+    assert "no modality aggregation during discovery" in preservation.quality_requirements
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"candidate_modalities": [EndpointSemanticModality.BINDING]},
+        {"fixed_modality": EndpointSemanticModality.BINDING},
+        {"preserve_modalities_separately": False},
+        {"selection_deferred_until": None},
+        {"aggregation_requires_human_approval": False},
+        {"scientific_scope": "Use a PubChem assay ID as the expected winning modality."},
+    ],
+)
+def test_broad_scope_rejects_invalid_or_source_hint_configuration(changes: dict) -> None:
+    with pytest.raises(ValidationError):
+        broad_tr_scope(**changes)
 
 
 def test_compiler_keeps_construction_policies_as_approval_questions() -> None:

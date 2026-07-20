@@ -79,6 +79,8 @@ function record(value: unknown): Record<string, unknown> {
 function CompiledSpecificationWorkspace({ data }: { data: AdminTrainingDatasetWorkflow }) {
   const draft = record(data.specification_draft);
   if (!Object.keys(draft).length) return null;
+  const discoveryScope = record(draft.endpoint_discovery_scope ?? data.endpoint_discovery_scope);
+  const isBroadScope = discoveryScope.mode === "broad_modality_exploration";
   const compilation = record(data.specification_compilation_outcome);
   const review = record(data.specification_review);
   const provenance = records(draft.field_provenance);
@@ -89,15 +91,22 @@ function CompiledSpecificationWorkspace({ data }: { data: AdminTrainingDatasetWo
     .join(", ") || "Compiler contract";
   return <div className="admin-training-workspace" data-testid="compiled-specification-workspace">
     <section className="admin-panel">
-      <div className="admin-panel-heading"><h2>Review target training dataset</h2><span>Compiler {String(compilation.compiler_version ?? "1.0.0")}</span></div>
+      <div className="admin-panel-heading"><h2>{isBroadScope ? "Review endpoint discovery scope" : "Review target training dataset"}</h2><span>Compiler {String(compilation.compiler_version ?? "1.0.0")}</span></div>
       <p><strong>Draft produced deterministically from the request and approved platform contract.</strong></p>
+      {isBroadScope && <p><strong>The system is not choosing a final endpoint yet. It will first compare the public evidence available for each candidate modality.</strong></p>}
       <p>Deterministic hash: <code>{String(compilation.deterministic_hash ?? "not available")}</code></p>
     </section>
     <section className="admin-panel">
       <div className="admin-panel-heading"><h2>Request interpretation</h2><span>Source-neutral</span></div>
       <dl className="admin-candidate-facts">
         <div><dt>Target</dt><dd>{String(draft.biological_target ?? "Unresolved")} <small>{provenanceFor("biological_target")}</small></dd></div>
-        <div><dt>Modality</dt><dd>{humanizeMachineValue(String(draft.endpoint_modality ?? "unresolved"))} <small>{provenanceFor("endpoint_modality")}</small></dd></div>
+        <div><dt>Discovery mode</dt><dd>{humanizeMachineValue(String(discoveryScope.mode ?? "fixed_modality"))}</dd></div>
+        <div><dt>Fixed modality</dt><dd>{humanizeMachineValue(String(discoveryScope.fixed_modality ?? draft.endpoint_modality ?? "none"))} <small>{provenanceFor("endpoint_modality")}</small></dd></div>
+        <div><dt>Candidate modalities</dt><dd>{textList(discoveryScope.candidate_modalities ?? draft.candidate_modalities).map(humanizeMachineValue).join(", ") || "Unresolved"}</dd></div>
+        <div><dt>Preserve modalities separately</dt><dd>{discoveryScope.preserve_modalities_separately === true ? "Yes" : "No"}</dd></div>
+        <div><dt>Later aggregation allowed</dt><dd>{discoveryScope.aggregation_allowed_later === true ? "Yes" : "No"}</dd></div>
+        <div><dt>Human approval for aggregation</dt><dd>{discoveryScope.aggregation_requires_human_approval === true ? "Required" : "Not required"}</dd></div>
+        <div><dt>Selection deferred until</dt><dd>{humanizeMachineValue(String(discoveryScope.selection_deferred_until ?? "not deferred"))}</dd></div>
         <div><dt>Prediction goal</dt><dd>{String(draft.intended_prediction_task ?? "Unresolved")}</dd></div>
       </dl>
     </section>
@@ -111,7 +120,7 @@ function CompiledSpecificationWorkspace({ data }: { data: AdminTrainingDatasetWo
       <h3>Experimental contexts</h3><ul>{textList(draft.experimental_context_requirements).map((item) => <li key={item}>{item}</li>)}</ul>
     </section>
     <section className="admin-panel">
-      <div className="admin-panel-heading"><h2>Scientific scope</h2><span>{humanizeMachineValue(String(draft.endpoint_modality ?? "unresolved"))}</span></div>
+      <div className="admin-panel-heading"><h2>Scientific scope</h2><span>{humanizeMachineValue(String(discoveryScope.mode ?? draft.endpoint_modality ?? "unresolved"))}</span></div>
       <p>{String(draft.intended_scope_of_claim ?? draft.endpoint_definition ?? "Unresolved")}</p>
       <h3>Explicit exclusions</h3><ul>{textList(draft.explicit_exclusions).map((item) => <li key={item}>{item}</li>)}</ul>
       <h3>Limitations</h3><ul>{textList(compilation.limitations).map((item) => <li key={item}>{item}</li>)}</ul>
@@ -672,6 +681,11 @@ export function AdminEndpointDetail() {
   const hasCandidateRecommendation = Boolean(pending && recommended && candidates.length > 0);
   const isAssemblyApproval = pending?.approval_type === "training_dataset_assembly_strategy";
   const isSpecificationApproval = pending?.approval_type === "dataset_specification";
+  const activeDiscoveryScope = record(
+    trainingWorkflow?.endpoint_discovery_scope
+      ?? record(trainingWorkflow?.specification_draft).endpoint_discovery_scope,
+  );
+  const isBroadDiscoveryScope = activeDiscoveryScope.mode === "broad_modality_exploration";
   const isSpecificationRevision = build.current_stage === "AWAITING_DATASET_SPECIFICATION_REVISION";
   const specificationOutcome = record(trainingWorkflow?.specification_agent_outcome);
   const specificationSemanticValidation = record(
@@ -784,8 +798,8 @@ export function AdminEndpointDetail() {
             <div className="admin-decision-heading">
               <div>
                 <span className="admin-section-kicker">Human decision</span>
-                <h2 id="decision-title">{isSpecificationRevision ? specificationRevisionTitle : isAssemblyApproval ? "Assembly strategy review required" : isSpecificationApproval ? "Review target training dataset" : pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
-                <p>{isSpecificationRevision ? specificationRevisionExplanation : isAssemblyApproval ? "Approve only the immutable verified source graph and deterministic preparation plan; training remains deferred." : isSpecificationApproval ? "The draft was produced deterministically from the request and approved platform contract; no source discovery has started." : pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
+                <h2 id="decision-title">{isSpecificationRevision ? specificationRevisionTitle : isAssemblyApproval ? "Assembly strategy review required" : isSpecificationApproval ? (isBroadDiscoveryScope ? "Review endpoint discovery scope" : "Review target training dataset") : pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
+                <p>{isSpecificationRevision ? specificationRevisionExplanation : isAssemblyApproval ? "Approve only the immutable verified source graph and deterministic preparation plan; training remains deferred." : isSpecificationApproval ? (isBroadDiscoveryScope ? "The system is not choosing a final endpoint yet. It will first compare the public evidence available for each candidate modality." : "The draft was produced deterministically from the request and approved platform contract; no source discovery has started.") : pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
               </div>
               {pending && <span className="admin-review-flag">Action required</span>}
             </div>
