@@ -7,7 +7,9 @@ import type {
   AdminApproval,
   AdminArtifact,
   AdminBuild,
+  AdminProviderPreflight,
   AdminTimelineEvent,
+  AdminTrainingDatasetWorkflow,
   AdminWorkflowError,
 } from "../api/types";
 import { installFetchMock } from "./mockApi";
@@ -18,6 +20,7 @@ const artifactId = "art-00000000-0000-4000-8000-000000000002";
 const approvalId = "approval-00000000-0000-4000-8000-000000000003";
 const runId = "run-00000000-0000-4000-8000-000000000004";
 const now = "2026-07-17T10:00:00Z";
+const writeClipboard = vi.fn().mockResolvedValue(undefined);
 
 function build(stage = "AWAITING_DATASET_APPROVAL", version = 3, overrides: Partial<AdminBuild> = {}): AdminBuild {
   return {
@@ -97,7 +100,7 @@ const events: AdminTimelineEvent[] = [
 const run: AdminAgentRun = {
   schema_version: "1.0.0", id: runId, workflow_id: buildId, step_id: "step-discovery",
   agent_name: "Dataset Discovery Agent", provider: "fake", model_identifier: "fake-phase0-v1",
-  status: "approval_required", turns: 2, duration_ms: 18,
+  run_mode: "replay", status: "approval_required", turns: 2, duration_ms: 18,
   usage: { input_tokens: 120, output_tokens: 80, estimated_cost_usd: 0 },
   tools: [
     { id: "tool-1", tool_name: "inspect_endpoint_registry", status: "completed", duration_ms: 2 },
@@ -126,17 +129,49 @@ const candidates = [
   },
 ];
 
+const replayCapabilities = {
+  schema_version: "1.0.0",
+  provider: "fake",
+  model: "prepared-fixture",
+  run_mode: "replay",
+  api_key_present: false,
+  live_mode_enabled: false,
+  source_tools_available: false,
+  tracing_enabled: false,
+  configured_budget: {
+    maximum_turns: 6,
+    maximum_tool_calls: 6,
+    timeout_seconds: 120,
+    maximum_input_tokens: 8000,
+    maximum_output_tokens: 1500,
+    maximum_cost_usd: 0.2,
+    retry_count: 0,
+    input_cost_per_million_usd: 0,
+    output_cost_per_million_usd: 0,
+  },
+} as const;
+
 function detailRoutes(
   current: () => AdminBuild,
   errors: AdminWorkflowError[] = [],
 ) {
   return {
+    "GET /api/admin/capabilities": { body: replayCapabilities },
     [`GET /api/admin/endpoint-builds/${buildId}`]: () => ({ body: current() }),
     [`GET /api/admin/endpoint-builds/${buildId}/timeline`]: { body: events },
     [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [artifact] },
     [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [approval] },
     [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [run] },
     [`GET /api/admin/endpoint-builds/${buildId}/errors`]: { body: errors },
+    [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: {
+      body: {
+        schema_version: "1.0.0",
+        workflow_id: buildId,
+        workflow_kind: "legacy_single_source_discovery",
+        legacy: true,
+        label: "Legacy single-source discovery",
+      },
+    },
     [`GET /api/admin/artifacts/${artifactId}/preview`]: { body: { artifact, content: { live_discovery: false, candidates } } },
     [`GET /api/admin/agent-runs/${runId}`]: { body: run },
   };
@@ -144,6 +179,11 @@ function detailRoutes(
 
 beforeEach(() => {
   window.localStorage.clear();
+  writeClipboard.mockClear();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: writeClipboard },
+  });
 });
 
 describe("Phase-0 endpoint-build list and creation", () => {
@@ -160,9 +200,9 @@ describe("Phase-0 endpoint-build list and creation", () => {
     expect(screen.getAllByText("Waiting for dataset review")).toHaveLength(2);
     expect(screen.getByText("Review required")).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /Open Oxidative stress, build/ })).toHaveLength(2);
-    expect(screen.getAllByText("Simulation mode")).toHaveLength(1);
+    expect(screen.getAllByText("Replay mode")).toHaveLength(1);
     expect(screen.queryByRole("form")).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("opens creation in a focus-managed dialog and creates a durable route", async () => {
     const NativeRequest = globalThis.Request;
@@ -211,6 +251,540 @@ describe("Phase-0 endpoint-build list and creation", () => {
 });
 
 describe("Phase-0 build detail information architecture", () => {
+  it("renders a deterministic specification draft and pending human review gate", async () => {
+    const specificationApproval: AdminApproval = {
+      ...approval,
+      stage: "AWAITING_DATASET_SPECIFICATION_REVIEW",
+      approval_type: "dataset_specification",
+      request: {
+        ...approval.request,
+        proposed_decision: "Approve this target training-dataset specification before public-source discovery begins.",
+        evidence_summary: "Draft produced deterministically from the request and approved platform contract.",
+      },
+    };
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      contract_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      benchmark_mode: "blind_training_dataset_discovery",
+      legacy: false,
+      specification_compilation_outcome: {
+        compiler_version: "1.0.0",
+        deterministic_hash: "e".repeat(64),
+        limitations: ["No scientific source was consulted."],
+      },
+      specification_review: {
+        status: "not_run",
+        safe_summary: "Optional AI review has not been requested.",
+      },
+      specification_draft: {
+        biological_target: "Thyroid hormone receptor",
+        endpoint_modality: "antagonism",
+        intended_prediction_task: "Predict compound activity relative to thyroid hormone receptor antagonism.",
+        explicit_prediction_grain: "compound × transcriptomic experimental context",
+        mandatory_target_table_fields: ["canonical_compound_id", "canonical_smiles", "inchikey"],
+        compound_identity_requirements: ["canonical compound identifier", "InChIKey"],
+        chemical_structure_requirements: ["canonical SMILES"],
+        acceptable_transcriptomic_evidence_types: ["compound-induced perturbational gene-expression signature"],
+        acceptable_activity_evidence_types: ["continuous_activity"],
+        experimental_context_requirements: ["cell or tissue model", "dose", "exposure duration"],
+        intended_scope_of_claim: "Source-neutral thyroid hormone receptor antagonism only.",
+        explicit_exclusions: ["receptor agonism", "thyroid peroxidase inhibition"],
+        blocking_questions: [],
+        approval_questions: ["Should continuous activity values be preserved, classes derived, or both?"],
+        assumptions: ["Final observation grain requires human approval."],
+        field_provenance: [
+          { field_name: "biological_target", origins: ["user_request", "semantic_hint"] },
+          { field_name: "endpoint_modality", origins: ["semantic_hint"] },
+        ],
+      },
+      target_specification: null,
+      component_requirements: null,
+      verified_source_inventory: null,
+      capability_matrix: null,
+      assembly_strategies: null,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVIEW", 2, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: approvalId,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [specificationApproval] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findAllByRole("heading", { name: "Review target training dataset" })).toHaveLength(2);
+    expect(
+      screen.getAllByText("Draft produced deterministically from the request and approved platform contract."),
+    ).toHaveLength(2);
+    expect(screen.getAllByText("Thyroid hormone receptor", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByText("compound × transcriptomic experimental context")).toBeInTheDocument();
+    expect(screen.getByText("Should continuous activity values be preserved, classes derived, or both?")).toBeInTheDocument();
+    expect(screen.getByText("Optional AI review has not been requested.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run optional AI review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve target specification" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit approval choices" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    expect(screen.getByText("No agent run yet.")).toBeInTheDocument();
+  });
+
+  it("renders a broad endpoint discovery scope without implying a selected modality", async () => {
+    const scope = {
+      schema_version: "1.0.0",
+      mode: "broad_modality_exploration",
+      biological_target: "Thyroid hormone receptor",
+      fixed_modality: null,
+      candidate_modalities: ["binding", "agonism", "antagonism"],
+      explicitly_excluded_modalities: [],
+      preserve_modalities_separately: true,
+      aggregation_allowed_later: true,
+      aggregation_requires_human_approval: true,
+      aggregation_active_during_discovery: false,
+      selection_deferred_until: "assembly_strategy_review",
+      scientific_scope: "Explore candidate modalities separately.",
+      provenance: ["human_scoped_configuration"],
+    };
+    const specificationApproval: AdminApproval = {
+      ...approval,
+      stage: "AWAITING_DATASET_SPECIFICATION_REVIEW",
+      approval_type: "dataset_specification",
+    };
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      contract_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      benchmark_mode: "blind_training_dataset_discovery",
+      legacy: false,
+      endpoint_discovery_scope: scope,
+      specification_compilation_outcome: {
+        compiler_version: "1.1.0",
+        deterministic_hash: "b".repeat(64),
+        limitations: ["No scientific source was consulted."],
+      },
+      specification_review: {
+        status: "not_run",
+        safe_summary: "Optional AI review has not been requested.",
+      },
+      specification_draft: {
+        biological_target: "Thyroid hormone receptor",
+        endpoint_modality: null,
+        candidate_modalities: ["binding", "agonism", "antagonism"],
+        intended_prediction_task: "Determine which modality-specific endpoints are supported.",
+        explicit_prediction_grain: "Activity evidence: compound x assay x modality.",
+        mandatory_target_table_fields: ["canonical_compound_id", "endpoint_modality", "assay_id"],
+        compound_identity_requirements: ["canonical compound identifier"],
+        chemical_structure_requirements: ["canonical SMILES"],
+        acceptable_transcriptomic_evidence_types: ["compound-induced signature"],
+        acceptable_activity_evidence_types: ["continuous_activity"],
+        experimental_context_requirements: ["cell", "dose", "duration", "control"],
+        intended_scope_of_claim: "Compare modalities without selecting or aggregating them.",
+        explicit_exclusions: ["automatic modality aggregation during source discovery"],
+        blocking_questions: [],
+        approval_questions: ["Which modality-specific datasets are sufficiently supported?"],
+        assumptions: [],
+        field_provenance: [],
+      },
+      target_specification: null,
+      component_requirements: null,
+      verified_source_inventory: null,
+      capability_matrix: null,
+      assembly_strategies: null,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVIEW", 4, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: approvalId,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [specificationApproval] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findAllByRole("heading", { name: "Review endpoint discovery scope" })).toHaveLength(2);
+    expect(screen.getAllByText("The system is not choosing a final endpoint yet. It will first compare the public evidence available for each candidate modality.")).toHaveLength(2);
+    expect(screen.getByText("Binding, Agonism, Antagonism")).toBeInTheDocument();
+    expect(screen.getByText("Assembly strategy review")).toBeInTheDocument();
+    expect(screen.queryByText("Dataset specification needs revision")).not.toBeInTheDocument();
+  });
+
+  it("renders a source-neutral multi-source training-dataset workspace", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      contract_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      benchmark_mode: "blind_training_dataset_discovery",
+      legacy: false,
+      target_specification: {
+        intended_prediction_task: "Predict endpoint-relative activity",
+        prediction_unit: "compound_context",
+        acceptable_activity_representations: ["continuous_activity"],
+        mandatory_output_fields: ["canonical_compound_id", "transcriptomic_signature"],
+      },
+      component_requirements: {
+        requirements: [{ requirement_id: "activity", role: "endpoint_activity", mandatory: true }],
+      },
+      verified_source_inventory: {
+        sources: [{
+          source_id: "source-a",
+          source_system: "official_activity_source",
+          stable_accession: "A-1",
+          source_roles: ["endpoint_activity"],
+          limitations: ["Full records require an approved download."],
+        }],
+      },
+      capability_matrix: {
+        cells: [{ source_id: "source-a", component: "endpoint_activity", status: "verified_available" }],
+      },
+      assembly_review: {
+        recommended_strategy_id: "strategy-1",
+        strategies: [{
+          strategy_id: "strategy-1",
+          scientific_risks: ["Context coverage requires review."],
+          source_graph: {
+            nodes: [
+              { node_id: "source", label: "Activity source", node_type: "source" },
+              { node_id: "rows", label: "Training rows", node_type: "final_dataset" },
+            ],
+            edges: [{ from_node: "source", to_node: "rows" }],
+          },
+          preparation_plan: {
+            steps: [{ step_id: "retrieve", action: "Retrieve approved records", status: "requires_download" }],
+          },
+        }],
+      },
+      gap_report: { gaps: [{ gap_id: "identity", description: "Identity bridge is unresolved." }] },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("BUILDING_SOURCE_INVENTORY", 4, {
+        workflow_kind: "training_dataset_discovery",
+        benchmark_mode: "blind_training_dataset_discovery",
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByTestId("training-dataset-workspace")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Target training dataset" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Verified source inventory" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Capability matrix" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Recommended assembly graph" })).toBeInTheDocument();
+    expect(screen.getByText("source → rows")).toBeInTheDocument();
+    expect(screen.getByText(/Identity bridge is unresolved/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+  });
+
+  it("renders reviewed-adapter readiness and the explicit bounded authorization action", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      contract_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      benchmark_mode: "blind_training_dataset_discovery",
+      legacy: false,
+      target_specification: { specification_id: "spec-ready" },
+      component_requirements: {
+        requirements: [{ requirement_id: "activity", role: "endpoint_activity", mandatory: true }],
+      },
+      source_discovery_readiness: {
+        ready: true,
+        provider_ready: true,
+        reviewed_adapters: {
+          ready: true,
+          approved_adapter_count: 4,
+          covered_roles: ["endpoint_activity", "transcriptomic_matrix", "compound_identity", "chemical_structure"],
+          source_retries: 0,
+        },
+        reviewed_adapter_inventory: [{
+          adapter_id: "pubchem-bioassay",
+          adapter_version: "1.0.0",
+          official_source_system: "PubChem BioAssay",
+          allowlisted_domains: ["eutils.ncbi.nlm.nih.gov", "pubchem.ncbi.nlm.nih.gov"],
+          approved_operations: ["search_activity_sources", "validate_activity_source"],
+          request_timeout_seconds: 15,
+          maximum_response_bytes: 500000,
+          requests_per_second: 2,
+          source_retry_count: 0,
+          cache_ttl_seconds: 86400,
+        }],
+        budget: {
+          maximum_agent_runs: 4,
+          maximum_turns_per_agent: 6,
+          maximum_total_tool_calls: 24,
+          maximum_total_cost_usd: 0.8,
+          provider_retries: 0,
+        },
+      },
+      verified_source_inventory: null,
+      capability_matrix: null,
+      gap_report: null,
+      assembly_strategies: null,
+    };
+    const requirementArtifact = { ...artifact, artifact_type: "component_requirements" };
+    installFetchMock({
+      ...detailRoutes(() => build("DERIVING_COMPONENT_REQUIREMENTS", 4, {
+        workflow_kind: "training_dataset_discovery",
+        benchmark_mode: "blind_training_dataset_discovery",
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [requirementArtifact] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+      [`POST /api/admin/endpoint-builds/${buildId}/authorize-source-discovery`]: {
+        body: build("DISCOVERING_ACTIVITY_EVIDENCE", 5, { workflow_kind: "training_dataset_discovery" }),
+      },
+      [`POST /api/admin/endpoint-builds/${buildId}/continue-training-dataset`]: {
+        body: build("AWAITING_SOURCE_INVENTORY_REVIEW", 10, { workflow_kind: "training_dataset_discovery" }),
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByTestId("source-discovery-readiness")).toHaveTextContent("Ready");
+    expect(screen.getByText(/PubChem BioAssay/)).toBeInTheDocument();
+    expect(screen.getByText(/24 total tools/)).toBeInTheDocument();
+    expect(screen.getByText(/0 provider retries/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Authorize reviewed source discovery" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /Approve assembly strategy/ })).not.toBeInTheDocument();
+  });
+
+  it("renders verified source review without downstream ingestion or training actions", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      legacy: false,
+      source_observations: [{
+        observation_artifact_hash: "f".repeat(64),
+        observation: {
+          observation_id: "obs-1",
+          source_system: "PubChem BioAssay",
+          stable_source_identifier: "AID:1001",
+          adapter_id: "pubchem-bioassay",
+          adapter_version: "1.0.0",
+          public_validation_status: "verified",
+          data_access_status: "requires_download",
+          limitations: ["Full results are not ingested."],
+        },
+      }],
+      source_fragments: [{
+        agent_name: "Activity Evidence Discovery Agent",
+        fragment: {
+          fragment_id: "fragment-1",
+          agent_review_status: "unavailable",
+          observation_ids: ["obs-1"],
+          limitations: ["Invalid final output; verified tool evidence was preserved."],
+        },
+      }],
+      verified_source_inventory: { sources: [{
+        source_id: "source-1",
+        source_system: "PubChem BioAssay",
+        stable_accession: "AID:1001",
+        source_roles: ["endpoint_activity"],
+        measurement_fields: ["activity outcome"],
+        identifier_fields: ["PubChem CID"],
+        structure_fields: [],
+        experimental_context_fields: ["assay context"],
+        count_status: "metadata_only",
+        access_status: "requires_download",
+        strengths: ["Official metadata verified."],
+        limitations: ["Full records require download."],
+        next_required_ingestion_actions: ["Review before bounded ingestion."],
+      }] },
+      capability_matrix: { cells: [], field_cells: [{
+        source_id: "source-1", field: "endpoint_activity", status: "requires_download",
+      }] },
+      gap_report: { gaps: [{ gap_id: "gap-identity", description: "No compound identifier bridge is verified." }] },
+      assembly_strategies: null,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_SOURCE_INVENTORY_REVIEW", 10, {
+        workflow_kind: "training_dataset_discovery",
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByRole("heading", { name: "Verified source inventory" })).toBeInTheDocument();
+    expect(screen.getAllByText(/AID:1001/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Metadata only · Access: Requires download/)).toBeInTheDocument();
+    expect(screen.getByText(/No compound identifier bridge/)).toBeInTheDocument();
+    expect(screen.getByText(/Invalid final output; verified tool evidence was preserved/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review source inventory" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Request later targeted discovery" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /ingest/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /train/i })).not.toBeInTheDocument();
+  });
+
+  it("distinguishes incomplete source execution from a scientific no-data conclusion", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      legacy: false,
+      source_discovery_execution: {
+        status: "discovery_execution_incomplete",
+        execution_complete: false,
+        scope_revision_required: false,
+        next_action: "Correct the bounded tool contract before a separately authorized run.",
+      },
+      source_search_outcomes: [{
+        search_outcome: {
+          outcome_id: "search-zero",
+          source_family: "NCBI GEO",
+          operation: "search_transcriptomic_sources",
+          rendered_query: "bounded synthetic query",
+          query_scope: { perturbation_type: "chemical" },
+          result_count: 0,
+          outcome: "completed_no_candidates",
+          cache_status: "fixture",
+        },
+      }],
+      source_fragments: [{
+        agent_name: "Activity Evidence Discovery Agent",
+        fragment: {
+          fragment_id: "fragment-rejected",
+          agent_review_status: "tool_invocation_rejected",
+          agent_terminal_outcome: "tool_invocation_rejected",
+          observation_ids: [],
+          scientific_source_requests: 0,
+          incomplete_stage: "candidate_search",
+          limitations: ["The request was rejected before source transport."],
+        },
+      }, {
+        agent_name: "Chemical Identity and Structure Source Discovery Agent",
+        fragment: {
+          fragment_id: "fragment-skipped",
+          agent_review_status: "skipped_dependency_not_met",
+          agent_terminal_outcome: "skipped_dependency_not_met",
+          observation_ids: [],
+          scientific_source_requests: 0,
+          missing_prerequisites: ["stable source identifier"],
+        },
+      }],
+      verified_source_inventory: { sources: [] },
+      capability_matrix: { cells: [], field_cells: [] },
+      gap_report: {
+        classification: "discovery_execution_incomplete",
+        requires_human_scope_review: false,
+        gaps: [],
+      },
+      assembly_strategies: null,
+    };
+    const diagnosticError: AdminWorkflowError = {
+      schema_version: "1.0.0",
+      id: "error-contract",
+      step_id: "step-activity",
+      code: "tool_input_invalid",
+      category: "validation",
+      retryable: false,
+      safe_message: "Tool input validation failed for: endpoint_modality",
+      detail: {
+        tool_diagnostic: {
+          tool_name: "search_activity_sources",
+          tool_schema_version: "reviewed-source-v1",
+          tool_schema_hash: "f".repeat(64),
+          agent_role: "Activity Evidence Discovery Agent",
+          invocation_stage: "input_validation",
+          supplied_argument_field_names: ["endpoint_modality", "query"],
+          normalized_argument_field_names: ["endpoint_modality", "query"],
+          validation_error_category: "input_schema_validation",
+          field_errors: [{ field: "endpoint_modality", category: "enum", message: "Use one controlled modality." }],
+          dependency_status: "prerequisites_satisfied",
+          adapter_resolution_status: "not_started",
+          source_transport_started: false,
+          exception_class: "ValidationError",
+          safe_message: "Tool input validation failed for: endpoint_modality",
+          retryable: false,
+        },
+      },
+      created_at: now,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_SOURCE_INVENTORY_REVIEW", 12, {
+        workflow_kind: "training_dataset_discovery",
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/errors`]: { body: [diagnosticError] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByTestId("source-discovery-incomplete")).toHaveTextContent("Source discovery did not complete");
+    expect(screen.getByText(/No conclusion about public-data availability/)).toBeInTheDocument();
+    expect(screen.getByText(/Completed no candidates/)).toBeInTheDocument();
+    expect(screen.getByText(/Skipped dependency not met/)).toBeInTheDocument();
+    expect(screen.getByText("Scientific request").parentElement).toHaveTextContent("Not started");
+    expect(screen.getByText("Invocation stage").parentElement).toHaveTextContent("Input validation");
+    expect(screen.queryByText("No usable sources exist")).not.toBeInTheDocument();
+  });
+
+  it("shows compact build and current-run IDs and copies their complete values", async () => {
+    installFetchMock(detailRoutes(() => build()));
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText(`Build 00000000`)).toBeInTheDocument();
+    expect(screen.getByText(`Run 00000000`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: `Copy full build ID ${buildId}` }));
+    fireEvent.click(screen.getByRole("button", { name: `Copy full run ID ${runId}` }));
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(2));
+    expect(writeClipboard).toHaveBeenNthCalledWith(1, buildId);
+    expect(writeClipboard).toHaveBeenNthCalledWith(2, runId);
+  });
+
+  it("does not render a run identifier before an agent run exists", async () => {
+    installFetchMock({
+      ...detailRoutes(() => build("DRAFT", 0)),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText("No agent run yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Copy full run ID/ })).not.toBeInTheDocument();
+  });
+
+  it("uses authoritative live capabilities before the first training agent run", async () => {
+    installFetchMock({
+      ...detailRoutes(() => build("SPECIFYING_TARGET_DATASET", 1, {
+        workflow_kind: "training_dataset_discovery",
+        benchmark_mode: "blind_training_dataset_discovery",
+      })),
+      "GET /api/admin/capabilities": {
+        body: {
+          ...replayCapabilities,
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          run_mode: "live",
+        },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText("Live agent mode")).toBeInTheDocument();
+    expect(screen.queryByText("Replay mode")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue active stage" })).toBeInTheDocument();
+  });
+
+  it("uses the latest persisted run identifier when multiple attempts exist", async () => {
+    const olderRun = { ...run, id: "run-11111111-1111-4111-8111-111111111111" };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [olderRun, run] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: run },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByRole("button", { name: `Copy full run ID ${runId}` })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: `Copy full run ID ${olderRun.id}` })).not.toBeInTheDocument();
+  });
+
   it("leads with the stepper and decision, compares fixtures, and keeps machine detail secondary", async () => {
     installFetchMock(detailRoutes(() => build(), workflowErrors));
     renderApp(`/admin/endpoints/${buildId}`);
@@ -220,13 +794,13 @@ describe("Phase-0 build detail information architecture", () => {
     expect(screen.getByLabelText("Endpoint build stages").children).toHaveLength(10);
     expect(screen.getAllByText("SIM-OS-001")).toHaveLength(2);
     expect(screen.getByText("SIM-OS-002")).toBeInTheDocument();
-    expect(screen.getAllByText("Prepared simulation fixture")).toHaveLength(2);
+    expect(screen.getAllByText("Prepared replay fixture")).toHaveLength(2);
     expect(screen.getByText("168")).toBeInTheDocument();
     expect(screen.getByText("Why it is recommended")).toBeInTheDocument();
     expect(screen.getAllByText("Limitations").length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "Agent activity" })).toBeInTheDocument();
     expect(screen.getByText("Inspected endpoint registry")).toBeInTheDocument();
-    expect(screen.queryByText("120")).not.toBeInTheDocument();
+    expect(screen.getByText("120")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Dataset review requested")).toBeInTheDocument();
     expect(document.querySelector(".admin-timeline")).not.toBeInTheDocument();
@@ -332,5 +906,834 @@ describe("Phase-0 build detail information architecture", () => {
     await screen.findAllByText("Preparing the selected dataset");
     const versions = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(String(init?.body)).expected_version);
     expect(versions).toEqual([0, 3, 4]);
+  });
+
+  it.each([
+    { retryable: true, visible: true },
+    { retryable: false, visible: false },
+  ])("shows Retry only when the latest workflow error is retryable", async ({ retryable, visible }) => {
+    installFetchMock(detailRoutes(
+      () => build("FAILED", 4),
+      [{ ...workflowErrors[0], retryable }],
+    ));
+    renderApp(`/admin/endpoints/${buildId}`);
+    await screen.findByRole("heading", { name: "Dataset review required" });
+    if (visible) {
+      expect(await screen.findByRole("button", { name: "Retry failed step" })).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole("button", { name: "Retry failed step" })).not.toBeInTheDocument();
+    }
+  });
+});
+
+describe("Phase-1 live discovery presentation", () => {
+  it("runs provider preflight only after an explicit administrator action", async () => {
+    let preflightCalls = 0;
+    const result: AdminProviderPreflight = {
+      schema_version: "1.0.0",
+      provider: "openai",
+      configured_model: "gpt-5.4-mini",
+      api_key_present: true,
+      authentication_accepted: true,
+      model_accessible: true,
+      http_status: 200,
+      provider_error_code: null,
+      provider_error_type: null,
+      request_id: "req_preflight-safe",
+      billing_status: "not_checked",
+      generation_capability: "not_checked",
+      checked_at: "2026-07-18T12:00:00Z",
+    };
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "GET /api/admin/capabilities": {
+        body: {
+          schema_version: "1.0.0",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          run_mode: "live",
+          api_key_present: true,
+          live_mode_enabled: true,
+          source_tools_available: true,
+          tracing_enabled: false,
+          configured_budget: {
+            maximum_turns: 6,
+            maximum_tool_calls: 6,
+            timeout_seconds: 120,
+            maximum_input_tokens: 8000,
+            maximum_output_tokens: 1500,
+            maximum_cost_usd: 0.2,
+            retry_count: 0,
+            input_cost_per_million_usd: 0.75,
+            output_cost_per_million_usd: 4.5,
+          },
+        },
+      },
+      "POST /api/admin/agent-provider/preflight": () => {
+        preflightCalls += 1;
+        return { body: result };
+      },
+    });
+    renderApp("/admin/endpoints");
+    const button = await screen.findByRole("button", { name: "Check provider access" });
+    expect(preflightCalls).toBe(0);
+    expect(screen.queryByText("Provider access confirmed")).not.toBeInTheDocument();
+    await userEvent.click(button);
+    expect(await screen.findByText("Provider access confirmed")).toBeInTheDocument();
+    expect(screen.getByText("API credentials accepted: yes")).toBeInTheDocument();
+    expect(screen.getByText("Configured model accessible: yes")).toBeInTheDocument();
+    expect(screen.getByText("Billing and generation: not checked")).toBeInTheDocument();
+    expect(screen.getByText(/provider retries: 0/)).toBeInTheDocument();
+    expect(preflightCalls).toBe(1);
+  });
+
+  it("renders safe preflight failure categories without raw provider text", async () => {
+    const failed: AdminProviderPreflight = {
+      schema_version: "1.0.0",
+      provider: "openai",
+      configured_model: "gpt-5.4-mini",
+      api_key_present: true,
+      authentication_accepted: false,
+      model_accessible: false,
+      http_status: 401,
+      provider_error_code: "invalid_api_key",
+      provider_error_type: "authentication_error",
+      request_id: "req_preflight-failed",
+      billing_status: "not_checked",
+      generation_capability: "not_checked",
+      checked_at: "2026-07-18T12:00:00Z",
+    };
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "POST /api/admin/agent-provider/preflight": { body: failed },
+    });
+    renderApp("/admin/endpoints");
+    await userEvent.click(await screen.findByRole("button", { name: "Check provider access" }));
+    expect(await screen.findByText("Authentication rejected")).toBeInTheDocument();
+    expect(screen.queryByText(/raw provider/i)).not.toBeInTheDocument();
+  });
+
+  it("shows provider-unavailable status while keeping replay usable", async () => {
+    installFetchMock({
+      "GET /api/admin/endpoint-builds": { body: [] },
+      "GET /api/admin/capabilities": {
+        body: {
+          schema_version: "1.0.0",
+          provider: "openai",
+          model: "gpt-5.4-mini",
+          run_mode: "replay",
+          api_key_present: false,
+          live_mode_enabled: false,
+          source_tools_available: true,
+          tracing_enabled: false,
+          configured_budget: {
+            maximum_turns: 8,
+            maximum_tool_calls: 12,
+            timeout_seconds: 90,
+            maximum_input_tokens: 12000,
+            maximum_output_tokens: 3000,
+            maximum_cost_usd: 0.5,
+            retry_count: 0,
+            input_cost_per_million_usd: 0.75,
+            output_cost_per_million_usd: 4.5,
+          },
+        },
+      },
+    });
+    renderApp("/admin/endpoints");
+    expect(await screen.findByText("Replay mode")).toBeInTheDocument();
+    expect(screen.getByText(/API key present: no/)).toBeInTheDocument();
+    expect(screen.getByText(/Live runs are disabled/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["live", "Live agent mode"],
+    ["cached", "Cached mode"],
+    ["replay", "Replay mode"],
+  ])("renders the %s badge", async (mode, label) => {
+    const modeRun = { ...run, run_mode: mode as AdminAgentRun["run_mode"] };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: { artifact, content: { run_mode: mode, candidates } },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [modeRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: modeRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText(label)).toBeInTheDocument();
+  });
+
+  it("presents real candidate evidence, source links, usage, and unresolved questions", async () => {
+    const liveRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live" as const,
+      turns: 2,
+      duration_ms: 1540,
+      usage: { input_tokens: 3880, output_tokens: 500, cached_tokens: 120, cost_cents: 0.3 },
+      tools: [{ id: "tool-live", tool_name: "search_geo_series", status: "completed", duration_ms: 40 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: { output: {
+          rendered_query: '"oxidative stress"[All Fields] AND "Homo sapiens"[Organism]',
+          result_count: 2,
+          cache_status: "live",
+          strategy_reason: "Focused human oxidative-stress search.",
+        } },
+      }],
+      trace: { events: [
+        { event_type: "provider.turn.completed" },
+        { event_type: "tool_call.completed" },
+        { event_type: "provider.turn.completed" },
+      ] },
+    };
+    const liveCandidates = [
+      {
+        candidate_id: "candidate-gse-12345",
+        accession: "GSE12345",
+        title: "Oxidative stress response in human cells",
+        source: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
+        organism: ["Homo sapiens"],
+        data_type: "RNA sequencing",
+        sample_count: 12,
+        biological_context: "HepG2 cells",
+        treatment_control_evidence: "Vehicle and treatment groups were detected.",
+        dose_time_evidence: "10 uM for 24 h",
+        strengths: ["Official accession validated"],
+        limitations: ["Human label review required"],
+        recommendation_status: "recommended_for_human_review",
+        accession_verified: true,
+      },
+      {
+        candidate_id: "candidate-gse-12346",
+        accession: "GSE12346",
+        title: "Alternative series",
+        source: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12346",
+        organism: ["Homo sapiens"],
+        data_type: "Microarray",
+        sample_count: 8,
+        biological_context: "Primary cells",
+        treatment_control_evidence: "Control evidence is ambiguous.",
+        dose_time_evidence: "Not reported",
+        limitations: ["Control metadata is unclear"],
+        recommendation_status: "alternative",
+        accession_verified: true,
+      },
+    ];
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: {
+          artifact,
+          content: {
+            run_mode: "live",
+            live_discovery: true,
+            candidates: liveCandidates,
+            decision_summary: "GSE12345 has the stronger verifiable design.",
+            unresolved_questions: ["Are the treatment labels scientifically acceptable?"],
+          },
+        },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [liveRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: liveRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Live agent mode")).toBeInTheDocument();
+    expect(screen.getAllByText("GSE12345").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "NCBI GEO" })[0]).toHaveAttribute(
+      "href",
+      "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
+    );
+    expect(screen.getAllByText("Homo sapiens").length).toBeGreaterThan(0);
+    expect(screen.getByText("GSE12345 has the stronger verifiable design.")).toBeInTheDocument();
+    expect(screen.getByText("Are the treatment labels scientifically acceptable?")).toBeInTheDocument();
+    expect(screen.getByText("gpt-5.4-mini")).toBeInTheDocument();
+    expect(screen.getByText("$0.0030")).toBeInTheDocument();
+    const activity = screen.getByRole("heading", { name: "Agent activity" }).closest("section")!;
+    expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("2");
+    expect(within(activity).getByText("Provider retries").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Tool calls").parentElement).toHaveTextContent("1");
+    expect(screen.getByText("Rendered GEO queries")).toBeInTheDocument();
+    expect(screen.getByText(/oxidative stress.*Homo sapiens/)).toBeInTheDocument();
+    expect(screen.getByText(/2 results/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh source metadata" })).toBeInTheDocument();
+    expect(screen.queryByText(/chain of thought/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve dataset" })).toBeInTheDocument();
+  });
+
+  it("presents safe optional-filter normalization only as secondary trace detail", async () => {
+    const originalArguments = {
+      scientific_terms: ["oxidative stress"],
+      organism_alternatives: ["Homo sapiens"],
+      study_type_alternatives: ["expression profiling by array"],
+      cell_tissue_terms: [""],
+      treatment_terms: ["ROS"],
+      maximum_results: 5,
+      publication_date_start: null,
+      publication_date_end: null,
+      strategy_reason: "Focused oxidative-stress search.",
+    };
+    const normalizedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      turns: 2,
+      tools: [{ id: "tool-normalized", tool_name: "search_geo_series", status: "completed", duration_ms: 20 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: {
+          output: {
+            rendered_query: '"oxidative stress"[All Fields]',
+            result_count: 1,
+            cache_status: "cached",
+            strategy_reason: "Focused oxidative-stress search.",
+          },
+          original_arguments: originalArguments,
+          normalized_arguments: { ...originalArguments, cell_tissue_terms: [] },
+          normalization_warnings: [{
+            schema_version: "1.0.0",
+            code: "empty_optional_search_term_removed",
+            field: "cell_tissue_terms",
+            original_index: 0,
+          }],
+        },
+      }],
+    };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [normalizedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: normalizedRun },
+    });
+    const user = userEvent.setup();
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText(/1 empty optional filter was removed before execution/i)).toBeInTheDocument();
+    expect(screen.queryByText(/tool input invalid/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View trace" }));
+    expect(await screen.findAllByText(/empty_optional_search_term_removed/)).toHaveLength(2);
+    expect(screen.getByText(/"cell_tissue_terms":\[""\]/)).toBeInTheDocument();
+    expect(screen.getByText(/"cell_tissue_terms":\[\]/)).toBeInTheDocument();
+  });
+
+  it("presents controlled-vocabulary canonicalization as a compact note and detailed trace", async () => {
+    const originalArguments = {
+      scientific_terms: ["oxidative stress", "transcriptomic"],
+      organism_alternatives: ["Homo sapiens", "Mus musculus"],
+      study_type_alternatives: ["expression profiling by array", "high throughput sequencing"],
+      cell_tissue_terms: [],
+      treatment_terms: [],
+      maximum_results: 5,
+      publication_date_start: null,
+      publication_date_end: null,
+      strategy_reason: "Find bounded oxidative-stress transcriptomic GEO Series.",
+    };
+    const normalizedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      tools: [{ id: "tool-vocabulary", tool_name: "search_geo_series", status: "completed", duration_ms: 20 }],
+      tool_calls: [{
+        tool_name: "search_geo_series",
+        result: {
+          output: {
+            rendered_query: '"Expression profiling by array" OR "Expression profiling by high throughput sequencing"',
+            result_count: 0,
+            cache_status: "cached",
+            strategy_reason: "Bounded controlled-vocabulary search.",
+          },
+          original_arguments: originalArguments,
+          normalized_arguments: {
+            ...originalArguments,
+            study_type_alternatives: [
+              "Expression profiling by array",
+              "Expression profiling by high throughput sequencing",
+            ],
+          },
+          normalization_warnings: [
+            {
+              code: "controlled_vocabulary_alias_canonicalized",
+              field: "study_type_alternatives",
+              original_index: 0,
+              original: "expression profiling by array",
+              normalized: "Expression profiling by array",
+              policy_version: "phase1-controlled-vocabulary-v1",
+            },
+            {
+              code: "controlled_vocabulary_alias_canonicalized",
+              field: "study_type_alternatives",
+              original_index: 1,
+              original: "high throughput sequencing",
+              normalized: "Expression profiling by high throughput sequencing",
+              policy_version: "phase1-controlled-vocabulary-v1",
+            },
+          ],
+        },
+      }],
+    };
+    installFetchMock({
+      ...detailRoutes(() => build()),
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [normalizedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: normalizedRun },
+    });
+    const user = userEvent.setup();
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByText("2 controlled-vocabulary values were normalized before execution.")).toBeInTheDocument();
+    expect(screen.queryByText(/tool input invalid/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "View trace" }));
+    expect(screen.getAllByText(/phase1-controlled-vocabulary-v1/)).toHaveLength(2);
+    expect(screen.getByText(/high throughput sequencing → Expression profiling by high throughput sequencing/)).toBeInTheDocument();
+  });
+
+  it("shows a structured no-candidate outcome without a dataset approval action", async () => {
+    const searchReview: AdminApproval = {
+      ...approval,
+      stage: "AWAITING_SEARCH_REVIEW",
+      approval_type: "search_revision",
+      request: {
+        ...approval.request,
+        evidence_summary: "Five public-valid candidates were inspected without a suitable result.",
+        agent_recommendation: "Target direct oxidant perturbations with matched controls.",
+        requested_action: "Request a revised search or cancel the workflow.",
+      },
+    };
+    const noCandidateRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "completed",
+      turns: 3,
+      tools: [
+        { id: "tool-search-1", tool_name: "search_geo_series", status: "completed", duration_ms: 20 },
+        { id: "tool-validation", tool_name: "validate_geo_accessions", status: "completed", duration_ms: 20 },
+        { id: "tool-inspection", tool_name: "inspect_geo_candidates", status: "completed", duration_ms: 20 },
+      ],
+      tool_calls: [{
+        tool_name: "inspect_geo_candidates",
+        result: { output: { inspected_count: 5, failed_count: 0 } },
+      }],
+      trace: { events: [
+        { event_type: "provider.turn.started", detail: { turn: 1, discovery_substage: "search_planning", tools_exposed: ["search_geo_series"] } },
+        { event_type: "provider.turn.started", detail: { turn: 2, discovery_substage: "candidate_validation", tools_exposed: ["validate_geo_accessions"] } },
+        { event_type: "provider.turn.started", detail: { turn: 3, discovery_substage: "candidate_inspection", tools_exposed: ["inspect_geo_candidates"] } },
+        { event_type: "provider.turn.started", detail: { turn: 4, discovery_substage: "final_output", tools_exposed: [] } },
+      ] },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_SEARCH_REVIEW", 4, { pending_approval_id: approvalId })),
+      [`GET /api/admin/artifacts/${artifactId}/preview`]: {
+        body: {
+          artifact,
+          content: {
+            run_mode: "live",
+            live_discovery: true,
+            candidates: [],
+            recommended_candidate_id: null,
+          },
+        },
+      },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [searchReview] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [noCandidateRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: noCandidateRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Search review required")).toBeInTheDocument();
+    expect(screen.getByText("Bounded GEO searches found no suitable candidate")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request revised search" })).toBeInTheDocument();
+    expect(screen.getByText("Target direct oxidant perturbations with matched controls.")).toBeInTheDocument();
+    expect(screen.getByText("Tools exposed per turn")).toBeInTheDocument();
+    expect(screen.getByText("5 inspected / 0 unresolved")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed for review")).not.toBeInTheDocument();
+  });
+
+  it("shows a failed live run from persisted run truth without replay or review claims", async () => {
+    const failedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "failed",
+      turns: 1,
+      duration_ms: 16,
+      usage: { input_tokens: 0, output_tokens: 0, cached_tokens: 0, cost_cents: 0 },
+      tools: [],
+      trace: {
+        events: [
+          {
+            event_type: "provider.turn.failed",
+            detail: {
+              retryable: false,
+              exception_class: "UserError",
+              developer_message: "additionalProperties should not be set for object types.",
+            },
+          },
+        ],
+      },
+    };
+    const terminalError: AdminWorkflowError = {
+      ...workflowErrors[0],
+      code: "provider_failure",
+      retryable: false,
+      safe_message: "Provider failed after bounded retries.",
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("FAILED", 4), [terminalError]),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [failedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: failedRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Live agent run failed")).toBeInTheDocument();
+    expect(screen.getByText("Live agent mode")).toBeInTheDocument();
+    expect(screen.getByText("No recommendation available")).toBeInTheDocument();
+    expect(screen.getByText("additionalProperties should not be set for object types.")).toBeInTheDocument();
+    expect(screen.getByText("No review required")).toBeInTheDocument();
+    expect(screen.queryByText("Replay mode")).not.toBeInTheDocument();
+    expect(screen.queryByText("Completed for review")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry failed step" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    const activity = screen.getByRole("heading", { name: "Agent activity" }).closest("section")!;
+    expect(within(activity).getByText("Provider retries").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Tool calls").parentElement).toHaveTextContent("0");
+    expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("1");
+  });
+
+  it("shows the specification revision gate without fake usage or source claims", async () => {
+    const revisionRun: AdminAgentRun = {
+      ...run,
+      agent_name: "Dataset Specification Agent",
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "completed",
+      turns: 1,
+      tools: [],
+      usage: {
+        usage_status: "usage_unavailable",
+        input_tokens: 0,
+        output_tokens: 0,
+        cached_tokens: 0,
+        cost_cents: 0,
+        provider_invocations: 1,
+      },
+      trace: {
+        events: [{
+          event_type: "provider.turn.completed",
+          detail: {
+            structured_output_diagnostic: {
+              developer_message: "The model response did not match the required structured schema.",
+              failure_classification: "schema_validation_failed",
+              output_schema_name: "DatasetSpecificationAgentOutcome",
+              output_schema_version: "1.0.0",
+              provider_request_ids: ["req_safe_123"],
+              provider_response_ids: ["resp_safe_456"],
+              usage: { usage_status: "usage_unavailable" },
+              error_handler: "invalid_final_output",
+            },
+          },
+        }],
+      },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVISION", 2, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: null,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [revisionRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: revisionRun },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: {
+        body: {
+          schema_version: "1.0.0",
+          workflow_id: buildId,
+          workflow_kind: "training_dataset_discovery",
+          benchmark_mode: "blind_training_dataset_discovery",
+          legacy: false,
+          specification_draft: null,
+          target_specification: null,
+          verified_source_inventory: null,
+          assembly_strategies: null,
+          specification_agent_outcome: {
+            status: "invalid_model_output",
+            failure_category: "schema_validation_failed",
+          },
+        } satisfies AdminTrainingDatasetWorkflow,
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByRole("heading", { name: "Dataset specification needs revision" })).toBeInTheDocument();
+    expect(screen.getByText("The agent response did not match the required structured contract. No source discovery was started.")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Revise endpoint request" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Retry specification" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "Use another planner model" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Usage unavailable after structured-output failure")).toBeInTheDocument();
+    expect(screen.getByText("req_safe_123")).toBeInTheDocument();
+    expect(screen.getByText("resp_safe_456")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Verified source inventory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve dataset" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Bounded GEO searches found no suitable candidate")).not.toBeInTheDocument();
+  });
+
+  it("renders a valid historical insufficient outcome without a schema-failure claim", async () => {
+    const historicalRun: AdminAgentRun = {
+      ...run,
+      agent_name: "Dataset Specification Agent",
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "completed",
+      turns: 1,
+      duration_ms: 1234,
+      tools: [],
+      usage: {
+        usage_status: "usage_recorded",
+        input_tokens: 321,
+        output_tokens: 123,
+        cached_tokens: 45,
+        cost_cents: 0.42,
+        provider_invocations: 1,
+        provider_request_ids: ["req_historical_safe"],
+        provider_response_ids: ["resp_historical_safe"],
+      },
+      trace: { events: [] },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVISION", 2, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: null,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [historicalRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: historicalRun },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: {
+        body: {
+          schema_version: "1.0.0",
+          workflow_id: buildId,
+          workflow_kind: "training_dataset_discovery",
+          benchmark_mode: "blind_training_dataset_discovery",
+          legacy: false,
+          specification_draft: null,
+          specification_agent_outcome: {
+            status: "insufficient_endpoint_definition",
+            specification: null,
+            decision_summary: "A construction-policy choice was treated as blocking.",
+            unresolved_questions: ["Should activity be binary or continuous?"],
+            limitations: ["No source discovery was started."],
+            failure_category: null,
+          },
+        } satisfies AdminTrainingDatasetWorkflow,
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByRole("heading", { name: "Endpoint definition needs clarification" })).toBeInTheDocument();
+    expect(screen.getByText("The agent produced a valid structured response but could not create a dataset-specification draft from the endpoint definition.")).toBeInTheDocument();
+    expect(screen.getByText("A construction-policy choice was treated as blocking.")).toBeInTheDocument();
+    expect(screen.getByText("Should activity be binary or continuous?")).toBeInTheDocument();
+    expect(screen.queryByText(/schema mismatch/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unknown model behavior/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByText("Technical audit"));
+    expect(screen.getByText("req_historical_safe")).toBeInTheDocument();
+    expect(screen.getByText("resp_historical_safe")).toBeInTheDocument();
+  });
+
+  it("presents semantic-policy mismatch separately from malformed output", async () => {
+    const semanticRun: AdminAgentRun = {
+      ...run,
+      agent_name: "Dataset Specification Agent",
+      status: "completed",
+      tools: [],
+      trace: { events: [] },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_DATASET_SPECIFICATION_REVISION", 2, {
+        workflow_kind: "training_dataset_discovery",
+        pending_approval_id: null,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [semanticRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: semanticRun },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: {
+        body: {
+          schema_version: "1.0.0",
+          workflow_id: buildId,
+          workflow_kind: "training_dataset_discovery",
+          legacy: false,
+          specification_agent_outcome: {
+            status: "insufficient_endpoint_definition",
+            decision_summary: "Policy choices prevented a draft.",
+          },
+          specification_semantic_validation: {
+            status: "semantic_contract_violation",
+            violation_code: "non_blocking_policy_treated_as_core_missing",
+          },
+        } satisfies AdminTrainingDatasetWorkflow,
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByRole("heading", { name: "Dataset specification policy needs revision" })).toBeInTheDocument();
+    expect(screen.getByText("The endpoint already contains an explicit target and modality, but the agent treated non-blocking dataset-policy choices as blocking.")).toBeInTheDocument();
+    expect(screen.queryByText(/schema mismatch/i)).not.toBeInTheDocument();
+  });
+
+  it("renders only allowlisted scientific-source diagnostics", async () => {
+    const sourceDiagnostic = {
+      tool_name: "validate_geo_accessions",
+      source_host: "www.ncbi.nlm.nih.gov",
+      safe_url_path: "/geo/query/acc.cgi",
+      http_method: "GET" as const,
+      http_status: 200,
+      final_approved_host: "www.ncbi.nlm.nih.gov",
+      content_type: "geo/text",
+      artifact_content_type: "text/plain",
+      response_byte_count: 512,
+      parser_outcome: "public_valid",
+      source_artifact_id: "art-geo-source",
+      cache_status: "live" as const,
+      exception_class: "SourceFormatError",
+      source_error_category: "unexpected_content_type",
+      retryable: false,
+      attempt_number: 1,
+      request_duration_ms: 562,
+      developer_message: "Expected a machine-readable GEO response.",
+    };
+    const failedRun: AdminAgentRun = {
+      ...run,
+      provider: "openai",
+      model_identifier: "gpt-5.4-mini",
+      run_mode: "live",
+      status: "failed",
+      turns: 1,
+      tools: [{
+        id: "tool-source-failure",
+        tool_name: "validate_geo_accessions",
+        status: "failed",
+        duration_ms: 562,
+      }],
+      tool_calls: [{
+        tool_name: "validate_geo_accessions",
+        result: { source_diagnostic: sourceDiagnostic },
+      }],
+    };
+    const sourceError: AdminWorkflowError = {
+      ...workflowErrors[0],
+      code: "source_unexpected_content_type",
+      category: "source_tool",
+      retryable: false,
+      safe_message: "Scientific source returned an unexpected content type.",
+      detail: { source_diagnostic: sourceDiagnostic },
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("FAILED", 4), [sourceError]),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [failedRun] },
+      [`GET /api/admin/agent-runs/${runId}`]: { body: failedRun },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+    expect(await screen.findByText("Scientific-source diagnostics")).toBeInTheDocument();
+    expect(screen.getAllByText("www.ncbi.nlm.nih.gov/geo/query/acc.cgi")).toHaveLength(2);
+    expect(screen.getAllByText(/GET.*200/)).toHaveLength(2);
+    expect(screen.getAllByText(/geo\/text.*512 bytes/)).toHaveLength(2);
+    expect(screen.getAllByText("text/plain")).toHaveLength(2);
+    expect(screen.getAllByText("Public valid")).toHaveLength(2);
+    expect(screen.getAllByText("art-geo-source")).toHaveLength(2);
+    expect(screen.getAllByText("SourceFormatError")).toHaveLength(2);
+    expect(screen.getAllByText("Expected a machine-readable GEO response.")).toHaveLength(2);
+    expect(document.body).not.toHaveTextContent("do-not-store");
+    expect(document.body).not.toHaveTextContent("Authorization");
+  });
+
+  it("renders semantics-v2 artifacts separately and requires explicit strategy approval", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      contract_version: "2.0.0",
+      workflow_semantics_version: "2.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      legacy: false,
+      legacy_semantics_read_only: false,
+      discovery_round: 0,
+      discovery_plan: {
+        discovery_round: 0,
+        plan_fingerprint: "1".repeat(64),
+        applicable_registered_providers: ["activity-a", "transcript-b"],
+        requested_modalities: ["binding", "agonism"],
+      },
+      discovery_execution_ledger: {
+        records: [
+          { task_id: "task-binding", provider: "activity-a", modality: "binding", status: "completed" },
+          { task_id: "task-transcript", provider: "transcript-b", evidence_role: "transcriptomic", status: "completed" },
+        ],
+      },
+      provider_capability_findings: {
+        findings: [{ provider: "lincs-l1000", missing_capability: "signature_metadata_catalogue", scientific_consequence: "LINCS context coverage cannot yet be computed through a typed operation." }],
+      },
+      source_candidates: {
+        candidates: [
+          { candidate_id: "candidate-activity-1", source_identifier: "ASSAY:1", provider: "activity-a", modality: "binding", candidate_status: "metadata_candidate" },
+          { candidate_id: "candidate-transcript-1", source_identifier: "STUDY:2", provider: "transcript-b", evidence_role: "transcriptomic", candidate_status: "discovered" },
+        ],
+      },
+      hydrated_sources: {
+        sources: [{ hydrated_source_id: "hydrated-activity-1", source_identifier: "ASSAY:1", completeness_status: "complete", explicit_missing_fields: [] }],
+      },
+      combination_coverage: {
+        combinations: [{ coverage_id: "coverage-1", requested_modality: "binding", overlap_count: 42, activity_compound_count: 120, transcriptomic_compound_count: 80 }],
+      },
+      strategy_proposals: {
+        proposals: [
+          { proposal_id: "proposal-1", proposal_status: "viable", modalities: ["binding"], expected_dataset_size: 42, identifier_losses: 3, proposed_context: { cell: "reviewed context" }, proposed_label_policy: { rule: "source-backed activity call" }, exclusions: ["ambiguous activity"] },
+          { proposal_id: "proposal-2", proposal_status: "viable", modalities: ["agonism"], expected_dataset_size: 19, identifier_losses: 1, proposed_context: { cell: "second context" }, proposed_label_policy: { rule: "source-backed activity call" }, exclusions: [] },
+        ],
+      },
+      assembly_recipe: null,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_ASSEMBLY_STRATEGY_REVIEW", 8, {
+        workflow_kind: "training_dataset_discovery",
+        workflow_semantics_version: "2.0.0",
+        pending_approval_id: null,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: { body: training },
+      [`POST /api/admin/endpoint-builds/${buildId}/approve-assembly-strategy`]: {
+        body: build("ASSEMBLY_RECIPE_APPROVED", 9, { workflow_kind: "training_dataset_discovery" }),
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    expect(await screen.findByTestId("semantics-v2-review-workspace")).toBeInTheDocument();
+    expect(screen.getByText("Candidate ranking is descriptive metadata, not source selection.")).toBeInTheDocument();
+    expect(screen.getByText(/No dataset has been assembled/)).toBeInTheDocument();
+    expect(screen.getByText(/No expression matrix has been downloaded/)).toBeInTheDocument();
+    expect(screen.getByTestId("v2-discovery-plan")).toHaveTextContent("2 / 2 tasks terminal");
+    expect(screen.getByTestId("v2-source-candidates")).toHaveTextContent("ASSAY:1");
+    expect(screen.getByTestId("v2-source-candidates")).toHaveTextContent("STUDY:2");
+    expect(screen.getByTestId("v2-combination-coverage")).toHaveTextContent("42 overlapping compounds");
+    expect(screen.getAllByRole("button", { name: "Approve this strategy" })).toHaveLength(2);
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Approve this strategy" })[0]);
+    await waitFor(() => expect(
+      vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(1));
+    const approvalRequest = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST")?.[1];
+    expect(JSON.parse(String(approvalRequest?.body))).toMatchObject({
+      strategy_proposal_id: "proposal-1",
+      approved_modality_aggregation: { human_approved: true },
+    });
   });
 });

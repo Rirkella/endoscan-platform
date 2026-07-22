@@ -1,0 +1,8 @@
+pert_id	pert_iname	pert_type	inchi_key	pubchem_cid	canonical_smiles	aliases
+BRD-A00000001	Alpha compound	trt_cp	AAAAAAAAAAAAAA-BBBBBBBBBB-C	111	CCO	Alpha|Compound A
+BRD-B00000002	Beta compound	trt_cp		222	CCC	Beta
+BRD-C00000003	Shared exact name	trt_cp	CCCCCCCCCCCCCC-DDDDDDDDDD-E	333	CCN	Shared
+BRD-D00000004	Shared exact name	trt_cp	EEEEEEEEEEEEEE-FFFFFFFFFF-G	444	CCCl	Shared
+BRD-E00000005	Provider-only compound	trt_cp
+CTL-VEHICLE	Vehicle control	ctl_vehicle				DMSO
+	Incomplete chemical	trt_cp

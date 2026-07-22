@@ -5,6 +5,12 @@
     "status": "experimental",
     "input_type": "transcriptomics",
     "frozen": true,
+    "validation_status": {
+      "implementation": "implemented",
+      "offline": "offline_validated",
+      "live": "live_validation_pending",
+      "scientific": "scientifically_validation_pending"
+    },
     "explanation": { "declared_method": "tree_shap", "available": true, "missing_dependencies": [], "reason": null }
   },
   {
@@ -13,6 +19,12 @@
     "status": "experimental",
     "input_type": "transcriptomics",
     "frozen": false,
+    "validation_status": {
+      "implementation": "implemented",
+      "offline": "offline_validated",
+      "live": "live_validation_pending",
+      "scientific": "scientifically_validation_pending"
+    },
     "explanation": { "declared_method": "linear_coefficient", "available": true, "missing_dependencies": [], "reason": null }
   }
 ]

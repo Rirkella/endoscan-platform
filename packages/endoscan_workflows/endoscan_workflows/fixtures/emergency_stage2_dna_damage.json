@@ -1,0 +1,11 @@
+{
+  "fixture_id": "emergency-stage2-dna-damage",
+  "endpoint_name": "DNA damage pathway activation",
+  "endpoint_slug": "offline-dna-damage",
+  "biological_goal": "Build a compound-level DNA damage pathway activation training dataset linked to compound-induced transcriptomic profiles.",
+  "modalities": ["pathway_activation"],
+  "approved_modality": "pathway_activation",
+  "activity_source": "OFFLINE_ACTIVITY_DNA_DAMAGE",
+  "transcriptomic_source": "OFFLINE_TRANSCRIPTOMICS_DNA_DAMAGE",
+  "target": "DNA damage response"
+}

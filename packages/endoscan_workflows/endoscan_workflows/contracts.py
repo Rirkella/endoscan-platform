@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SCHEMA_VERSION = "1.0.0"
 ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{2,127}$")
@@ -25,8 +25,43 @@ class StrictContract(BaseModel):
 
 class WorkflowState(str, Enum):
     DRAFT = "DRAFT"
+    COMPILING_TARGET_DATASET_SPECIFICATION = "COMPILING_TARGET_DATASET_SPECIFICATION"
+    AWAITING_DATASET_SPECIFICATION_REVIEW = "AWAITING_DATASET_SPECIFICATION_REVIEW"
+    REVIEWING_DATASET_SPECIFICATION = "REVIEWING_DATASET_SPECIFICATION"
+    SPECIFYING_TARGET_DATASET = "SPECIFYING_TARGET_DATASET"
+    AWAITING_DATASET_SPECIFICATION_APPROVAL = "AWAITING_DATASET_SPECIFICATION_APPROVAL"
+    AWAITING_DATASET_SPECIFICATION_REVISION = "AWAITING_DATASET_SPECIFICATION_REVISION"
+    DERIVING_COMPONENT_REQUIREMENTS = "DERIVING_COMPONENT_REQUIREMENTS"
+    DISCOVERING_ACTIVITY_EVIDENCE = "DISCOVERING_ACTIVITY_EVIDENCE"
+    DISCOVERING_TRANSCRIPTOMIC_EVIDENCE = "DISCOVERING_TRANSCRIPTOMIC_EVIDENCE"
+    DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES = "DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES"
+    DISCOVERING_SUPPORTING_METADATA = "DISCOVERING_SUPPORTING_METADATA"
+    VALIDATING_DISCOVERED_SOURCES = "VALIDATING_DISCOVERED_SOURCES"
+    BUILDING_SOURCE_INVENTORY = "BUILDING_SOURCE_INVENTORY"
+    AWAITING_SOURCE_INVENTORY_REVIEW = "AWAITING_SOURCE_INVENTORY_REVIEW"
+    AWAITING_SOURCE_DISCOVERY_REVISION = "AWAITING_SOURCE_DISCOVERY_REVISION"
+    SOURCE_ACCESS_BLOCKED = "SOURCE_ACCESS_BLOCKED"
+    PLANNING_ASSEMBLY_STRATEGIES = "PLANNING_ASSEMBLY_STRATEGIES"
+    EVALUATING_JOINABILITY = "EVALUATING_JOINABILITY"
+    IDENTIFYING_ASSEMBLY_GAPS = "IDENTIFYING_ASSEMBLY_GAPS"
+    GAP_DIRECTED_DISCOVERY = "GAP_DIRECTED_DISCOVERY"
+    COMPARING_ASSEMBLY_STRATEGIES = "COMPARING_ASSEMBLY_STRATEGIES"
+    AWAITING_ASSEMBLY_STRATEGY_APPROVAL = "AWAITING_ASSEMBLY_STRATEGY_APPROVAL"
+    # Workflow-semantics v2. Historical builds retain the states above and are
+    # never rewritten into this graph.
+    APPROVED_SPECIFICATION = "APPROVED_SPECIFICATION"
+    DISCOVERY_PLANNING = "DISCOVERY_PLANNING"
+    REGISTERED_PROVIDER_CAPABILITY_BLOCKED = "REGISTERED_PROVIDER_CAPABILITY_BLOCKED"
+    DISCOVERING_SOURCE_CANDIDATES = "DISCOVERING_SOURCE_CANDIDATES"
+    HYDRATING_SOURCE_CANDIDATES = "HYDRATING_SOURCE_CANDIDATES"
+    COMPUTING_COMBINATION_COVERAGE = "COMPUTING_COMBINATION_COVERAGE"
+    GENERATING_ASSEMBLY_STRATEGIES = "GENERATING_ASSEMBLY_STRATEGIES"
+    AWAITING_ASSEMBLY_STRATEGY_REVIEW = "AWAITING_ASSEMBLY_STRATEGY_REVIEW"
+    ASSEMBLY_RECIPE_APPROVED = "ASSEMBLY_RECIPE_APPROVED"
+    ASSEMBLING_APPROVED_DATASET = "ASSEMBLING_APPROVED_DATASET"
     DISCOVERING_DATA = "DISCOVERING_DATA"
     AWAITING_DATASET_APPROVAL = "AWAITING_DATASET_APPROVAL"
+    AWAITING_SEARCH_REVIEW = "AWAITING_SEARCH_REVIEW"
     CURATING_DATA = "CURATING_DATA"
     AWAITING_LABEL_APPROVAL = "AWAITING_LABEL_APPROVAL"
     RESOLVING_IDENTITIES = "RESOLVING_IDENTITIES"
@@ -73,12 +108,20 @@ class ActorType(str, Enum):
 
 class ApprovalType(str, Enum):
     ENDPOINT_DEFINITION = "endpoint_definition"
+    DATASET_SPECIFICATION = "dataset_specification"
     DATASET_SELECTION = "dataset_selection"
+    SEARCH_REVISION = "search_revision"
     LABEL_RULES = "label_rules"
     IDENTITY_CONFLICT = "identity_conflict"
     TRAINING_AUTHORIZATION = "training_authorization"
     MODEL_ACCEPTANCE = "model_acceptance"
     REGISTRY_PUBLICATION = "registry_publication"
+    TRAINING_DATASET_ASSEMBLY_STRATEGY = "training_dataset_assembly_strategy"
+
+
+class WorkflowKind(str, Enum):
+    LEGACY_SINGLE_SOURCE_DISCOVERY = "legacy_single_source_discovery"
+    TRAINING_DATASET_DISCOVERY = "training_dataset_discovery"
 
 
 class ApprovalStatus(str, Enum):
@@ -121,6 +164,8 @@ class EndpointBuildCreate(StrictContract):
     biological_goal: str = Field(min_length=10, max_length=4000)
     created_by: str = Field(min_length=2, max_length=120)
     idempotency_key: str = Field(min_length=8, max_length=160)
+    workflow_kind: WorkflowKind = WorkflowKind.LEGACY_SINGLE_SOURCE_DISCOVERY
+    benchmark_mode: str = Field(default="none", min_length=1, max_length=120)
 
     @field_validator("endpoint_slug")
     @classmethod
@@ -135,6 +180,9 @@ class WorkflowSnapshot(StrictContract):
     endpoint_name: str
     endpoint_slug: str
     biological_goal: str
+    workflow_kind: WorkflowKind = WorkflowKind.LEGACY_SINGLE_SOURCE_DISCOVERY
+    benchmark_mode: str = "none"
+    workflow_semantics_version: str = "1.0.0"
     state: WorkflowState
     status: WorkflowStatus
     current_stage: WorkflowState
@@ -149,6 +197,7 @@ class WorkflowSnapshot(StrictContract):
     paused_at: datetime | None = None
     cancelled_at: datetime | None = None
     completed_at: datetime | None = None
+    discovery_progress: dict[str, Any] | None = None
 
 
 class TransitionRequest(StrictContract):
@@ -182,6 +231,7 @@ class ApprovalDecision(StrictContract):
     expected_version: int = Field(ge=0)
     idempotency_key: str = Field(min_length=8, max_length=160)
     artifact_hashes: list[str] = Field(min_length=1, max_length=100)
+    dataset_specification_policy: dict[str, Any] | None = None
 
 
 class ArtifactDescriptor(StrictContract):
@@ -229,11 +279,159 @@ class AgentRunRequest(StrictContract):
 
 
 class UsageReport(StrictContract):
+    usage_status: Literal["usage_recorded", "usage_unavailable", "usage_partial"] = (
+        "usage_unavailable"
+    )
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     cached_tokens: int = Field(default=0, ge=0)
     cost_cents: float = Field(default=0.0, ge=0)
     provider_request_ids: list[str] = Field(default_factory=list)
+    provider_response_ids: list[str] = Field(default_factory=list)
+    provider_invocations: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def infer_legacy_recorded_usage(self) -> UsageReport:
+        evidence = bool(
+            self.input_tokens
+            or self.output_tokens
+            or self.cached_tokens
+            or self.cost_cents
+            or self.provider_request_ids
+            or self.provider_response_ids
+        )
+        if evidence and "usage_status" not in self.model_fields_set:
+            object.__setattr__(self, "usage_status", "usage_recorded")
+        if evidence and not self.provider_invocations:
+            object.__setattr__(
+                self,
+                "provider_invocations",
+                max(1, len(self.provider_request_ids), len(self.provider_response_ids)),
+            )
+        return self
+
+
+class StructuredOutputRequestFingerprint(StrictContract):
+    """Safe proof of the exact structured-output contract used for one model turn."""
+
+    agent_name: str = Field(min_length=2, max_length=120)
+    output_type_name: str = Field(min_length=1, max_length=160)
+    schema_version: Literal["1.0.0"] = SCHEMA_VERSION
+    schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    schema_byte_size: int = Field(ge=2, le=1_000_000)
+    strict_json_schema: bool
+    api_surface: Literal["responses", "chat_completions"]
+    provider_class: str = Field(min_length=1, max_length=160)
+    configured_model: str = Field(min_length=1, max_length=160)
+    tool_count: int = Field(ge=0, le=64)
+    tool_choice_mode: Literal["none", "auto", "required"]
+    sdk_version: str = Field(min_length=1, max_length=80)
+    model_settings_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    boundary_probe_configuration_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    runtime_configuration_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    boundary_runtime_contracts_match: bool
+    output_type_present: bool
+
+
+class StructuredOutputDiagnostic(StrictContract):
+    """Bounded, allowlisted SDK metadata; never raw prompts or model output."""
+
+    exception_class: str = Field(min_length=1, max_length=160)
+    developer_message: str = Field(min_length=1, max_length=800)
+    sdk_version: str = Field(min_length=1, max_length=80)
+    provider: str = Field(min_length=1, max_length=80)
+    configured_model: str = Field(min_length=1, max_length=160)
+    agent_role: str = Field(min_length=1, max_length=120)
+    last_agent_name: str | None = Field(default=None, max_length=120)
+    output_schema_name: str = Field(min_length=1, max_length=160)
+    output_schema_version: str = Field(min_length=1, max_length=40)
+    output_schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    adapter_operation: str = Field(min_length=1, max_length=120)
+    provider_request_ids: list[str] = Field(default_factory=list, max_length=20)
+    provider_response_ids: list[str] = Field(default_factory=list, max_length=20)
+    provider_parameter: str | None = Field(default=None, max_length=120)
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    response_status: str | None = Field(default=None, max_length=120)
+    incomplete_reason: str | None = Field(default=None, max_length=240)
+    refusal_present: bool = False
+    output_item_types: list[str] = Field(default_factory=list, max_length=40)
+    output_item_count: int = Field(default=0, ge=0, le=100)
+    text_output_present: bool = False
+    bounded_text_length: int = Field(default=0, ge=0, le=100_000)
+    json_object_present: bool = False
+    raw_response_count: int = Field(default=0, ge=0, le=100)
+    strict_mode: bool = False
+    request_fingerprint: StructuredOutputRequestFingerprint | None = None
+    usage: UsageReport = Field(default_factory=UsageReport)
+    duration_ms: int = Field(default=0, ge=0)
+    retryable: bool = False
+    failure_classification: Literal[
+        "malformed_json",
+        "schema_validation_failed",
+        "missing_structured_output",
+        "response_incomplete",
+        "model_refusal",
+        "unexpected_tool_call",
+        "unknown_model_behavior",
+    ]
+    provider_response_received: bool = False
+    error_handler: Literal["invalid_final_output", "model_refusal", "none"] = "none"
+    handler_outcome: str | None = Field(default=None, max_length=120)
+
+
+class SourceToolDiagnostic(StrictContract):
+    """Allowlisted scientific-source diagnostics safe for durable admin traces."""
+
+    tool_name: str = Field(pattern=r"^[a-z][a-z0-9_]{2,79}$")
+    source_host: str = Field(min_length=1, max_length=253)
+    safe_url_path: str = Field(pattern=r"^/", max_length=500)
+    http_method: Literal["GET"] = "GET"
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    final_approved_host: str | None = Field(default=None, max_length=253)
+    redirect_count: int = Field(default=0, ge=0, le=3)
+    # ``content_type`` is always the exact upstream response MIME. Textual artifacts may
+    # use a narrower normalized MIME, recorded separately below.
+    content_type: str | None = Field(default=None, max_length=160)
+    artifact_content_type: str | None = Field(default=None, max_length=160)
+    response_byte_count: int | None = Field(default=None, ge=0)
+    parser_outcome: str | None = Field(default=None, max_length=120)
+    source_artifact_id: str | None = Field(default=None, max_length=160)
+    cache_status: Literal["live", "cached", "not_available"] | None = None
+    exception_class: str | None = Field(default=None, max_length=160)
+    source_error_category: str = Field(min_length=1, max_length=120)
+    retryable: bool = False
+    attempt_number: int = Field(default=1, ge=1, le=10)
+    request_duration_ms: int = Field(default=0, ge=0)
+    developer_message: str | None = Field(default=None, max_length=500)
+
+
+class ToolInvocationFailureDiagnostic(StrictContract):
+    """Body-free diagnostic for failures before a reviewed source transport starts."""
+
+    tool_name: str = Field(pattern=r"^[a-z][a-z0-9_]{2,79}$")
+    tool_schema_version: str = Field(min_length=1, max_length=40)
+    tool_schema_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    agent_role: str = Field(min_length=1, max_length=120)
+    invocation_stage: Literal[
+        "tool_lookup",
+        "policy_validation",
+        "argument_normalization",
+        "input_validation",
+        "dependency_validation",
+        "adapter_resolution",
+        "request_construction",
+        "tool_implementation",
+    ]
+    supplied_argument_field_names: list[str] = Field(default_factory=list, max_length=80)
+    normalized_argument_field_names: list[str] = Field(default_factory=list, max_length=80)
+    validation_error_category: str = Field(min_length=1, max_length=120)
+    field_errors: list[dict[str, str]] = Field(default_factory=list, max_length=30)
+    dependency_status: str = Field(default="not_applicable", max_length=120)
+    adapter_resolution_status: str = Field(default="not_started", max_length=120)
+    source_transport_started: bool = False
+    exception_class: str = Field(min_length=1, max_length=160)
+    safe_message: str = Field(min_length=1, max_length=1000)
+    retryable: bool = False
 
 
 class NormalizedAgentError(StrictContract):
@@ -241,6 +439,35 @@ class NormalizedAgentError(StrictContract):
     safe_message: str = Field(min_length=1, max_length=2000)
     retryable: bool = False
     category: str = Field(default="provider", max_length=80)
+    source_diagnostic: SourceToolDiagnostic | None = None
+    tool_diagnostic: ToolInvocationFailureDiagnostic | None = None
+
+
+class ProviderPreflightResult(StrictContract):
+    provider: str = Field(min_length=1, max_length=80)
+    configured_model: str = Field(min_length=1, max_length=160)
+    api_key_present: bool
+    authentication_accepted: bool
+    model_accessible: bool
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    provider_error_code: str | None = Field(default=None, max_length=200)
+    provider_error_type: str | None = Field(default=None, max_length=200)
+    request_id: str | None = Field(default=None, max_length=200)
+    billing_status: Literal["not_checked"] = "not_checked"
+    generation_capability: Literal["not_checked"] = "not_checked"
+    checked_at: datetime = Field(default_factory=utc_now)
+
+
+class AdapterBoundaryProbeResult(StrictContract):
+    local_sdk_configuration_valid: bool
+    model_call_boundary_reached: bool
+    developer_message: str | None = Field(default=None, max_length=800)
+    exception_class: str | None = Field(default=None, max_length=160)
+    sdk_version: str = Field(min_length=1, max_length=80)
+    model: str = Field(min_length=1, max_length=160)
+    tool_count: int = Field(ge=0, le=64)
+    output_schema_name: str = Field(min_length=1, max_length=160)
+    network_requests: int = Field(default=0, ge=0)
 
 
 class TraceEvent(StrictContract):
@@ -281,6 +508,11 @@ class IdempotencyClassification(str, Enum):
     NON_IDEMPOTENT = "non_idempotent"
 
 
+class ToolAccessPhase(str, Enum):
+    PRE_APPROVAL_METADATA = "pre_approval_metadata"
+    POST_APPROVAL_EXTRACTION = "post_approval_extraction"
+
+
 class ToolDefinition(StrictContract):
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{2,79}$")
     description: str = Field(min_length=5, max_length=1000)
@@ -289,17 +521,30 @@ class ToolDefinition(StrictContract):
     required_permissions: list[str] = Field(default_factory=list)
     side_effect: SideEffectClassification
     idempotency: IdempotencyClassification
-    timeout_seconds: float = Field(gt=0, le=120)
+    timeout_seconds: float = Field(gt=0, le=180)
     allowed_workflow_stages: list[WorkflowState]
     implementation_version: str = Field(min_length=1, max_length=40)
+    access_phase: ToolAccessPhase = ToolAccessPhase.PRE_APPROVAL_METADATA
 
 
 class ToolInvocation(StrictContract):
     tool_name: str
     arguments: dict[str, Any]
+    workflow_id: str | None = None
+    step_id: str | None = None
     workflow_stage: WorkflowState
     permission_scope: list[str] = Field(default_factory=list)
+    run_context: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str | None = Field(default=None, max_length=160)
+
+
+class ToolNormalizationWarning(StrictContract):
+    code: str = Field(pattern=r"^[a-z][a-z0-9_]{2,79}$")
+    field: str = Field(pattern=r"^[a-z][a-z0-9_]{1,79}$")
+    original_index: int = Field(ge=0)
+    original: str | None = Field(default=None, max_length=500)
+    normalized: str | None = Field(default=None, max_length=500)
+    policy_version: str | None = Field(default=None, max_length=80)
 
 
 class ToolResult(StrictContract):
@@ -309,6 +554,10 @@ class ToolResult(StrictContract):
     error: NormalizedAgentError | None = None
     duration_ms: int = Field(default=0, ge=0)
     replayed: bool = False
+    original_arguments: dict[str, Any] | None = None
+    normalized_arguments: dict[str, Any] | None = None
+    normalization_warnings: list[ToolNormalizationWarning] = Field(default_factory=list)
+    source_diagnostic: SourceToolDiagnostic | None = None
 
 
 class ProviderToolRequest(StrictContract):
@@ -324,3 +573,4 @@ class ProviderTurn(StrictContract):
     approval: ApprovalRequest | None = None
     usage: UsageReport = Field(default_factory=UsageReport)
     error: NormalizedAgentError | None = None
+    diagnostic: StructuredOutputDiagnostic | None = None

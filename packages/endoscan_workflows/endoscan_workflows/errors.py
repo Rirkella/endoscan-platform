@@ -33,6 +33,11 @@ class GuardNotSatisfied(WorkflowConflict):
     code = "guard_not_satisfied"
 
 
+class SourceDiscoveryNotReady(WorkflowError):
+    code = "source_discovery_not_ready"
+    status_code = 422
+
+
 class ArtifactError(WorkflowError):
     code = "artifact_error"
     status_code = 422

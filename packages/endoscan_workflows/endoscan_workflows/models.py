@@ -17,6 +17,10 @@ class EndpointBuildRow(Base):
     endpoint_name: Mapped[str] = mapped_column(String(120))
     endpoint_slug: Mapped[str] = mapped_column(String(80), index=True)
     biological_goal: Mapped[str] = mapped_column(Text)
+    workflow_kind: Mapped[str] = mapped_column(
+        String(80), default="legacy_single_source_discovery", index=True
+    )
+    benchmark_mode: Mapped[str] = mapped_column(String(120), default="none", index=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     current_stage: Mapped[str] = mapped_column(String(64), index=True)
     paused_from_state: Mapped[str | None] = mapped_column(String(64))
@@ -198,6 +202,68 @@ class WorkflowErrorRow(Base):
     safe_message: Mapped[str] = mapped_column(Text)
     detail_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(String(40))
+
+
+class SourceCacheRow(Base):
+    __tablename__ = "source_response_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tool_name: Mapped[str] = mapped_column(String(80), index=True)
+    normalized_arguments_json: Mapped[str] = mapped_column(Text)
+    policy_version: Mapped[str] = mapped_column(String(40))
+    source_version: Mapped[str | None] = mapped_column(String(120))
+    source_url: Mapped[str] = mapped_column(String(1000))
+    http_metadata_json: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    parsed_output_json: Mapped[str] = mapped_column(Text)
+    raw_artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"), index=True)
+    retrieved_at: Mapped[str] = mapped_column(String(40))
+    expires_at: Mapped[str] = mapped_column(String(40), index=True)
+
+
+class TrainingDatasetWorkflowRow(Base):
+    """Mutable latest-document pointers; every durable decision remains an artifact/event."""
+
+    __tablename__ = "training_dataset_workflows"
+
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), primary_key=True
+    )
+    contract_version: Mapped[str] = mapped_column(String(40), default="1.0.0")
+    workflow_semantics_version: Mapped[str] = mapped_column(String(40), default="1.0.0")
+    benchmark_mode: Mapped[str] = mapped_column(String(120), index=True)
+    initial_context_json: Mapped[str] = mapped_column(Text)
+    endpoint_discovery_scope_json: Mapped[str | None] = mapped_column(Text)
+    specification_draft_json: Mapped[str | None] = mapped_column(Text)
+    specification_outcome_json: Mapped[str | None] = mapped_column(Text)
+    specification_semantic_validation_json: Mapped[str | None] = mapped_column(Text)
+    specification_compilation_outcome_json: Mapped[str | None] = mapped_column(Text)
+    specification_review_record_json: Mapped[str | None] = mapped_column(Text)
+    specification_json: Mapped[str | None] = mapped_column(Text)
+    component_requirements_json: Mapped[str | None] = mapped_column(Text)
+    source_discovery_authorization_json: Mapped[str | None] = mapped_column(Text)
+    source_discovery_budget_json: Mapped[str | None] = mapped_column(Text)
+    source_observations_json: Mapped[str | None] = mapped_column(Text)
+    source_fragments_json: Mapped[str | None] = mapped_column(Text)
+    source_inventory_json: Mapped[str | None] = mapped_column(Text)
+    capability_matrix_json: Mapped[str | None] = mapped_column(Text)
+    assembly_strategies_json: Mapped[str | None] = mapped_column(Text)
+    joinability_diagnostics_json: Mapped[str | None] = mapped_column(Text)
+    gap_report_json: Mapped[str | None] = mapped_column(Text)
+    preparation_plan_json: Mapped[str | None] = mapped_column(Text)
+    assembly_review_json: Mapped[str | None] = mapped_column(Text)
+    discovery_plan_json: Mapped[str | None] = mapped_column(Text)
+    discovery_execution_ledger_json: Mapped[str | None] = mapped_column(Text)
+    source_candidates_json: Mapped[str | None] = mapped_column(Text)
+    hydrated_sources_json: Mapped[str | None] = mapped_column(Text)
+    combination_coverage_json: Mapped[str | None] = mapped_column(Text)
+    strategy_proposals_json: Mapped[str | None] = mapped_column(Text)
+    assembly_recipe_json: Mapped[str | None] = mapped_column(Text)
+    provider_capability_findings_json: Mapped[str | None] = mapped_column(Text)
+    strategy_set_rejection_json: Mapped[str | None] = mapped_column(Text)
+    discovery_round: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = mapped_column(String(40))
+    updated_at: Mapped[str] = mapped_column(String(40))
 
 
 Index("ix_build_status_updated", EndpointBuildRow.status, EndpointBuildRow.updated_at)

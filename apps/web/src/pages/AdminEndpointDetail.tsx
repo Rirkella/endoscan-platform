@@ -8,7 +8,10 @@ import type {
   AdminArtifact,
   AdminBuild,
   AdminTimelineEvent,
+  AdminTrainingDatasetWorkflow,
   AdminWorkflowError,
+  AdminSourceToolDiagnostic,
+  AdminToolInvocationFailureDiagnostic,
 } from "../api/types";
 import {
   WORKFLOW_STAGES,
@@ -18,6 +21,7 @@ import {
   humanizeMachineValue,
   relativeTime,
   shortBuildId,
+  shortRunId,
   stageLabel,
   stageProgress,
   toolLabel,
@@ -26,22 +30,327 @@ import { AdminModal } from "../components/AdminModal";
 
 type Candidate = {
   candidate_id: string;
+  accession?: string;
   title: string;
   source: string;
-  recommendation: string;
+  recommendation?: string;
+  recommendation_status?: string;
   limitations: string[];
+  strengths?: string[];
+  organism?: string[];
   sample_count?: number;
   controls_available?: boolean;
   data_type?: string;
   context?: string;
+  biological_context?: string;
+  treatment_control_evidence?: string;
+  dose_time_evidence?: string;
+  accession_verified?: boolean;
+  geo_validation_status?: string | null;
   description?: string;
+};
+
+type CandidateArtifact = {
+  candidates?: Candidate[];
+  recommended_candidate_id?: string | null;
+  run_mode?: "live" | "cached" | "replay";
+  simulation_label?: string | null;
+  live_discovery?: boolean;
+  decision_summary?: string;
+  unresolved_questions?: string[];
 };
 
 type Decision = "approve" | "reject" | "request_revision" | "choose_alternative";
 type Confirmation = { kind: Decision | "cancel"; approval?: AdminApproval };
 
+function records(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    : [];
+}
+
+function textList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function CompiledSpecificationWorkspace({ data }: { data: AdminTrainingDatasetWorkflow }) {
+  const draft = record(data.specification_draft);
+  if (!Object.keys(draft).length) return null;
+  const discoveryScope = record(draft.endpoint_discovery_scope ?? data.endpoint_discovery_scope);
+  const isBroadScope = discoveryScope.mode === "broad_modality_exploration";
+  const compilation = record(data.specification_compilation_outcome);
+  const review = record(data.specification_review);
+  const provenance = records(draft.field_provenance);
+  const provenanceFor = (field: string) => provenance
+    .filter((item) => item.field_name === field)
+    .flatMap((item) => textList(item.origins))
+    .map(humanizeMachineValue)
+    .join(", ") || "Compiler contract";
+  return <div className="admin-training-workspace" data-testid="compiled-specification-workspace">
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>{isBroadScope ? "Review endpoint discovery scope" : "Review target training dataset"}</h2><span>Compiler {String(compilation.compiler_version ?? "1.0.0")}</span></div>
+      <p><strong>Draft produced deterministically from the request and approved platform contract.</strong></p>
+      {isBroadScope && <p><strong>The system is not choosing a final endpoint yet. It will first compare the public evidence available for each candidate modality.</strong></p>}
+      <p>Deterministic hash: <code>{String(compilation.deterministic_hash ?? "not available")}</code></p>
+    </section>
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Request interpretation</h2><span>Source-neutral</span></div>
+      <dl className="admin-candidate-facts">
+        <div><dt>Target</dt><dd>{String(draft.biological_target ?? "Unresolved")} <small>{provenanceFor("biological_target")}</small></dd></div>
+        <div><dt>Discovery mode</dt><dd>{humanizeMachineValue(String(discoveryScope.mode ?? "fixed_modality"))}</dd></div>
+        <div><dt>Fixed modality</dt><dd>{humanizeMachineValue(String(discoveryScope.fixed_modality ?? draft.endpoint_modality ?? "none"))} <small>{provenanceFor("endpoint_modality")}</small></dd></div>
+        <div><dt>Candidate modalities</dt><dd>{textList(discoveryScope.candidate_modalities ?? draft.candidate_modalities).map(humanizeMachineValue).join(", ") || "Unresolved"}</dd></div>
+        <div><dt>Preserve modalities separately</dt><dd>{discoveryScope.preserve_modalities_separately === true ? "Yes" : "No"}</dd></div>
+        <div><dt>Later aggregation allowed</dt><dd>{discoveryScope.aggregation_allowed_later === true ? "Yes" : "No"}</dd></div>
+        <div><dt>Human approval for aggregation</dt><dd>{discoveryScope.aggregation_requires_human_approval === true ? "Required" : "Not required"}</dd></div>
+        <div><dt>Selection deferred until</dt><dd>{humanizeMachineValue(String(discoveryScope.selection_deferred_until ?? "not deferred"))}</dd></div>
+        <div><dt>Prediction goal</dt><dd>{String(draft.intended_prediction_task ?? "Unresolved")}</dd></div>
+      </dl>
+    </section>
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Target table</h2><span>{textList(draft.mandatory_target_table_fields).length} mandatory fields</span></div>
+      <h3>Observation grain</h3><p>{String(draft.explicit_prediction_grain ?? draft.candidate_prediction_grain ?? "Unresolved")}</p>
+      <h3>Mandatory fields</h3><ul>{textList(draft.mandatory_target_table_fields).map((item) => <li key={item}>{humanizeMachineValue(item)}</li>)}</ul>
+      <h3>Identity and structures</h3><ul>{[...textList(draft.compound_identity_requirements), ...textList(draft.chemical_structure_requirements)].map((item) => <li key={item}>{item}</li>)}</ul>
+      <h3>Transcriptomic response</h3><ul>{textList(draft.acceptable_transcriptomic_evidence_types).map((item) => <li key={item}>{item}</li>)}</ul>
+      <h3>Activity evidence</h3><ul>{textList(draft.acceptable_activity_evidence_types).map((item) => <li key={item}>{humanizeMachineValue(item)}</li>)}</ul>
+      <h3>Experimental contexts</h3><ul>{textList(draft.experimental_context_requirements).map((item) => <li key={item}>{item}</li>)}</ul>
+    </section>
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Scientific scope</h2><span>{humanizeMachineValue(String(discoveryScope.mode ?? draft.endpoint_modality ?? "unresolved"))}</span></div>
+      <p>{String(draft.intended_scope_of_claim ?? draft.endpoint_definition ?? "Unresolved")}</p>
+      <h3>Explicit exclusions</h3><ul>{textList(draft.explicit_exclusions).map((item) => <li key={item}>{item}</li>)}</ul>
+      <h3>Limitations</h3><ul>{textList(compilation.limitations).map((item) => <li key={item}>{item}</li>)}</ul>
+    </section>
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Decisions required</h2><span>Human approval</span></div>
+      <h3>Blocking questions</h3>{textList(draft.blocking_questions).length ? <ul>{textList(draft.blocking_questions).map((item) => <li key={item}>{item}</li>)}</ul> : <p>None.</p>}
+      <h3>Approval questions</h3><ul>{textList(draft.approval_questions ?? draft.human_decisions_required).map((item) => <li key={item}>{item}</li>)}</ul>
+      <h3>Assumptions</h3><ul>{textList(draft.assumptions).map((item) => <li key={item}>{item}</li>)}</ul>
+    </section>
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Optional AI review</h2><span>{humanizeMachineValue(String(review.status ?? "not_run"))}</span></div>
+      <p>{String(review.safe_summary ?? "Optional AI review has not been requested.")}</p>
+      <p>The deterministic draft remains authoritative if review is refused, invalid, or unavailable.</p>
+    </section>
+  </div>;
+}
+
+function SemanticsV2ReviewWorkspace({
+  data,
+  stage,
+  busy,
+  onApprove,
+  onCalculateCoverage,
+  onGenerateStrategies,
+  onRequestRevision,
+  onReject,
+}: {
+  data: AdminTrainingDatasetWorkflow;
+  stage: string;
+  busy: boolean;
+  onApprove: (proposal: Record<string, unknown>) => void;
+  onCalculateCoverage: () => void;
+  onGenerateStrategies: () => void;
+  onRequestRevision: () => void;
+  onReject: () => void;
+}) {
+  const plan = record(data.discovery_plan);
+  const ledger = records(record(data.discovery_execution_ledger).records);
+  const findings = records(record(data.provider_capability_findings).findings);
+  const candidates = records(record(data.source_candidates).candidates);
+  const hydrated = records(record(data.hydrated_sources).sources);
+  const coverage = records(record(data.combination_coverage).combinations);
+  const proposals = records(record(data.strategy_proposals).proposals);
+  const recipe = record(data.assembly_recipe);
+  const terminalLedger = ledger.filter((item) => [
+    "completed",
+    "completed_no_candidates",
+    "failed",
+    "blocked_provider_capability_missing",
+  ].includes(String(item.status))).length;
+
+  return <div className="admin-training-workspace" data-testid="semantics-v2-review-workspace">
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Discovery and assembly strategy</h2><span>Semantics v2</span></div>
+      <p><strong>Candidate ranking is descriptive metadata, not source selection.</strong></p>
+      <p>No dataset has been assembled. No expression matrix has been downloaded.</p>
+      <p>Exactly one strategy must be explicitly approved before later assembly can begin.</p>
+    </section>
+    <section className="admin-panel" data-testid="v2-discovery-plan">
+      <div className="admin-panel-heading"><h2>Discovery plan completion</h2><span>{terminalLedger} / {ledger.length} tasks terminal</span></div>
+      <dl className="admin-candidate-facts">
+        <div><dt>Round</dt><dd>{String(plan.discovery_round ?? data.discovery_round ?? 0)}</dd></div>
+        <div><dt>Plan fingerprint</dt><dd><code>{String(plan.plan_fingerprint ?? "Not compiled")}</code></dd></div>
+        <div><dt>Registered providers</dt><dd>{textList(plan.applicable_registered_providers).join(", ") || "Not compiled"}</dd></div>
+        <div><dt>Requested modalities</dt><dd>{textList(plan.requested_modalities).map(humanizeMachineValue).join(", ") || "Not compiled"}</dd></div>
+      </dl>
+      {ledger.length > 0 && <ul>{ledger.map((item) => <li key={String(item.task_id)}><strong>{String(item.provider)}</strong> / {humanizeMachineValue(String(item.modality ?? item.evidence_role))}: {humanizeMachineValue(String(item.status))}</li>)}</ul>}
+    </section>
+    <section className="admin-panel" data-testid="v2-capability-blockers">
+      <div className="admin-panel-heading"><h2>Provider capability blockers</h2><span>{findings.length}</span></div>
+      {findings.length ? <ul>{findings.map((item, index) => <li key={`${String(item.provider)}-${String(item.missing_capability)}-${index}`}><strong>{String(item.provider)}</strong>: {humanizeMachineValue(String(item.missing_capability))}. {String(item.scientific_consequence)}</li>)}</ul> : <p>No registered-provider capability gaps are recorded for this round.</p>}
+    </section>
+    <section className="admin-panel" data-testid="v2-source-candidates">
+      <div className="admin-panel-heading"><h2>All source candidates</h2><span>{candidates.length}</span></div>
+      {candidates.length ? <ul>{candidates.map((item) => <li key={String(item.candidate_id)}><strong>{String(item.source_identifier)}</strong> — {String(item.provider)} / {humanizeMachineValue(String(item.modality ?? item.evidence_role))} / {humanizeMachineValue(String(item.candidate_status))}</li>)}</ul> : <p>No candidate records have been persisted.</p>}
+    </section>
+    <section className="admin-panel" data-testid="v2-hydrated-sources">
+      <div className="admin-panel-heading"><h2>Hydrated and verified sources</h2><span>{hydrated.length}</span></div>
+      {hydrated.length ? <ul>{hydrated.map((item) => <li key={String(item.hydrated_source_id)}><strong>{String(item.source_identifier)}</strong> — {humanizeMachineValue(String(item.completeness_status))}{textList(item.explicit_missing_fields).length ? `; missing ${textList(item.explicit_missing_fields).join(", ")}` : ""}</li>)}</ul> : <p>Hydration has not produced verified source records.</p>}
+    </section>
+    <section className="admin-panel" data-testid="v2-combination-coverage">
+      <div className="admin-panel-heading"><h2>Combination coverage</h2><span>{coverage.length}</span></div>
+      {coverage.length ? <ul>{coverage.map((item) => <li key={String(item.coverage_id)}><strong>{humanizeMachineValue(String(item.requested_modality))}</strong>: {String(item.overlap_count ?? 0)} overlapping compounds; {String(item.activity_compound_count ?? 0)} activity / {String(item.transcriptomic_compound_count ?? 0)} transcriptomic</li>)}</ul> : <p>No deterministic source-combination coverage has been computed.</p>}
+      {stage === "COMPUTING_COMBINATION_COVERAGE" && <button className="admin-primary" disabled={busy} onClick={onCalculateCoverage}>Calculate all source combinations</button>}
+    </section>
+    <section className="admin-panel" data-testid="v2-strategy-proposals">
+      <div className="admin-panel-heading"><h2>Strategy proposals</h2><span>{proposals.length}</span></div>
+      {proposals.length ? proposals.map((proposal) => <article className="admin-approval-card" key={String(proposal.proposal_id)}>
+        <div className="admin-recommendation"><span>{humanizeMachineValue(String(proposal.proposal_status))}</span><h3>{String(proposal.proposal_id)}</h3><p>{textList(proposal.modalities).map(humanizeMachineValue).join(", ")}</p></div>
+        <dl className="admin-candidate-facts">
+          <div><dt>Expected rows</dt><dd>{String(proposal.expected_dataset_size ?? "Not established")}</dd></div>
+          <div><dt>Expected compounds</dt><dd>{String(proposal.expected_unique_compounds ?? "Not established")}</dd></div>
+          <div><dt>Class balance</dt><dd>{JSON.stringify(proposal.expected_class_balance ?? {})}</dd></div>
+          <div><dt>Identifier losses</dt><dd>{String(proposal.identifier_losses ?? 0)}</dd></div>
+          <div><dt>Metadata losses</dt><dd>{JSON.stringify(proposal.metadata_losses ?? {})}</dd></div>
+          <div><dt>Strengths</dt><dd>{textList(proposal.scientific_strengths).join("; ") || "None recorded"}</dd></div>
+          <div><dt>Limitations</dt><dd>{textList(proposal.limitations).join("; ") || "None recorded"}</dd></div>
+          <div><dt>Risks</dt><dd>{textList(proposal.scientific_risks).join("; ") || "None recorded"}</dd></div>
+        </dl>
+        {proposal.proposal_status === "viable" && <button className="admin-primary" disabled={busy || Object.keys(recipe).length > 0} onClick={() => onApprove(proposal)}>{record(proposal.proposed_label_policy).operator === "functional_or" ? "Approve functional union" : "Approve this strategy"}</button>}
+      </article>) : <p>No assembly strategy has been proposed.</p>}
+      {stage === "GENERATING_ASSEMBLY_STRATEGIES" && <button className="admin-primary" disabled={busy} onClick={onGenerateStrategies}>Generate coverage-bound strategies</button>}
+      {proposals.length > 0 && !Object.keys(recipe).length && <div className="admin-approval-actions"><button className="admin-secondary" disabled={busy} onClick={onRequestRevision}>Request expanded discovery</button><button className="admin-danger-outline" disabled={busy} onClick={onReject}>Reject all proposals</button></div>}
+    </section>
+    <section className="admin-panel" data-testid="v2-assembly-recipe">
+      <div className="admin-panel-heading"><h2>Approved assembly recipe</h2><span>{Object.keys(recipe).length ? "Approved immutable" : "Not approved"}</span></div>
+      {Object.keys(recipe).length ? <><p>Proposal: {String(recipe.selected_strategy_proposal_id)}</p><p>Fingerprint: <code>{String(recipe.recipe_fingerprint)}</code></p><dl className="admin-candidate-facts"><div><dt>Activity sources</dt><dd>{textList(recipe.approved_activity_sources).join(", ")}</dd></div><div><dt>Transcriptomic sources</dt><dd>{textList(recipe.approved_transcriptomic_sources).join(", ")}</dd></div><div><dt>Modalities</dt><dd>{textList(recipe.approved_modalities).join(", ")}</dd></div><div><dt>Aggregation</dt><dd>{JSON.stringify(recipe.approved_modality_aggregation ?? {})}</dd></div><div><dt>Label policy</dt><dd>{JSON.stringify(recipe.approved_label_policy ?? {})}</dd></div><div><dt>Context filters</dt><dd>{JSON.stringify(recipe.approved_context_filters ?? {})}</dd></div><div><dt>Split policy</dt><dd>{JSON.stringify(recipe.split_requirements ?? {})}</dd></div><div><dt>Exclusions</dt><dd>{textList(recipe.exclusion_rules).join("; ") || "None"}</dd></div></dl><p>The recipe is immutable. Assembly still requires an explicit developer action.</p></> : <p>No recipe exists. Source extraction and dataset construction remain locked.</p>}
+    </section>
+  </div>;
+}
+
+function EndpointCompletionWorkspace({
+  data,
+  stage,
+  busy,
+  onRunAssembly,
+  onApproveDataset,
+  onReviseDataset,
+  onRunBenchmark,
+  onSelectModel,
+  onReviewModels,
+  onPublish,
+}: {
+  data: AdminTrainingDatasetWorkflow;
+  stage: string;
+  busy: boolean;
+  onRunAssembly: () => void;
+  onApproveDataset: () => void;
+  onReviseDataset: (decision: "rejected" | "revision_requested") => void;
+  onRunBenchmark: () => void;
+  onSelectModel: (candidateId: string) => void;
+  onReviewModels: (decision: "reject_all_models" | "request_new_benchmark") => void;
+  onPublish: () => void;
+}) {
+  const bundle = record(data.dataset_bundle);
+  const quality = record(data.dataset_quality_report);
+  const explore = record(data.explore_manifest);
+  const results = records(data.model_benchmark_results);
+  const validation = record(data.final_validation_report);
+  const publication = record(data.publication_receipt);
+  const validationStatus = record(data.implementation_validation_status);
+  return <div className="admin-training-workspace" data-testid="endpoint-completion-workspace">
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Dataset assembly and quality</h2><span>{Object.keys(bundle).length ? "Artifact-backed" : "Not assembled"}</span></div>
+      {Object.keys(bundle).length ? <dl className="admin-candidate-facts"><div><dt>Unique compounds</dt><dd>{String(bundle.unique_compounds)}</dd></div><div><dt>Profiles</dt><dd>{String(bundle.total_profiles)}</dd></div><div><dt>Inline large data</dt><dd>{String(bundle.large_data_inline)}</dd></div><div><dt>Leakage check</dt><dd>{quality.leakage_check_passed === true ? "Passed" : "Not passed"}</dd></div><div><dt>Class distribution</dt><dd>{JSON.stringify(quality.class_distribution ?? {})}</dd></div><div><dt>Context distributions</dt><dd>{JSON.stringify(quality.context_distributions ?? {})}</dd></div><div><dt>Split sizes</dt><dd>{JSON.stringify(quality.split_sizes ?? {})}</dd></div><div><dt>Missing values</dt><dd>{String(quality.missing_values ?? 0)}</dd></div><div><dt>Identifier losses</dt><dd>{String(quality.identifier_resolution_losses ?? 0)}</dd></div><div><dt>Conflicts and exclusions</dt><dd>{String(quality.conflicts_and_exclusions ?? 0)}</dd></div><div><dt>Provenance artifacts</dt><dd>{records(quality.source_provenance).length}</dd></div><div><dt>Warnings</dt><dd>{textList(quality.quality_warnings).join("; ") || "None"}</dd></div></dl> : <p>An approved recipe is required before extraction and assembly.</p>}
+      {stage === "ASSEMBLY_RECIPE_APPROVED" && <button className="admin-primary" disabled={busy} onClick={onRunAssembly}>Run approved offline assembly</button>}
+      {stage === "AWAITING_DATASET_APPROVAL" && <div className="admin-approval-actions"><button className="admin-primary" disabled={busy || quality.leakage_check_passed !== true} onClick={onApproveDataset}>Approve dataset for benchmarking</button><button className="admin-secondary" disabled={busy} onClick={() => onReviseDataset("revision_requested")}>Request new assembly</button><button className="admin-danger-outline" disabled={busy} onClick={() => onReviseDataset("rejected")}>Reject dataset</button></div>}
+    </section>
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Explore publication artifacts</h2><span>{Object.keys(explore).length ? humanizeMachineValue(String(explore.projection_method)) : "Pending dataset approval"}</span></div>
+      <p>Coordinates and nearest-neighbour data are persisted; the browser does not recompute them.</p>
+    </section>
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Model benchmark and review</h2><span>{results.length} candidates</span></div>
+      {results.map((result) => { const metrics = record(result.metrics); return <article className="admin-approval-card" key={String(result.candidate_id)}><h3>{humanizeMachineValue(String(result.model_name))}</h3><dl className="admin-candidate-facts"><div><dt>ROC-AUC / PR-AUC</dt><dd>{String(metrics.roc_auc ?? "n/a")} / {String(metrics.pr_auc ?? "n/a")}</dd></div><div><dt>Balanced accuracy</dt><dd>{String(metrics.balanced_accuracy ?? "n/a")}</dd></div><div><dt>Sensitivity / specificity</dt><dd>{String(metrics.sensitivity ?? "n/a")} / {String(metrics.specificity ?? "n/a")}</dd></div><div><dt>Precision / F1</dt><dd>{String(metrics.precision ?? "n/a")} / {String(metrics.f1 ?? "n/a")}</dd></div><div><dt>Calibration / Brier</dt><dd>{String(metrics.calibration_summary ?? "n/a")} / {String(metrics.brier_score ?? "n/a")}</dd></div><div><dt>Fold stability</dt><dd>{String(metrics.fold_stability ?? "n/a")}</dd></div><div><dt>Training / inference</dt><dd>{String(metrics.training_time_ms ?? "n/a")} ms / {String(metrics.inference_time_ms ?? "n/a")} ms</dd></div><div><dt>Model size</dt><dd>{String(metrics.model_size_bytes ?? "n/a")} bytes</dd></div><div><dt>Explanations</dt><dd>{metrics.explanation_available === true ? "Available" : "Not available"}</dd></div><div><dt>Failed folds</dt><dd>{String(metrics.failed_folds ?? 0)}</dd></div><div><dt>Warnings</dt><dd>{textList(metrics.warnings).join("; ") || "None"}</dd></div></dl>{stage === "AWAITING_SCIENTIFIC_APPROVAL" && !Object.keys(validation).length && <button className="admin-primary" disabled={busy} onClick={() => onSelectModel(String(result.candidate_id))}>Select and validate on held-out test</button>}</article>; })}
+      {stage === "AWAITING_TRAINING_APPROVAL" && <button className="admin-primary" disabled={busy} onClick={onRunBenchmark}>Authorize and run baseline benchmark</button>}
+      {stage === "AWAITING_SCIENTIFIC_APPROVAL" && !Object.keys(validation).length && results.length > 0 && <div className="admin-approval-actions"><button className="admin-secondary" disabled={busy} onClick={() => onReviewModels("request_new_benchmark")}>Request new benchmark</button><button className="admin-danger-outline" disabled={busy} onClick={() => onReviewModels("reject_all_models")}>Reject all models</button></div>}
+    </section>
+    <section className="admin-panel">
+      <div className="admin-panel-heading"><h2>Validation and publication</h2><span>{Object.keys(publication).length ? "Published" : Object.keys(validation).length ? "Awaiting publication approval" : "Not validated"}</span></div>
+      {Object.keys(validation).length && <><p>Selected candidate: {String(validation.candidate_id)}</p><p>Held-out metrics: {JSON.stringify(validation.held_out_metrics ?? {})}</p></>}
+      <p>Implementation: {humanizeMachineValue(String(validationStatus.implementation_status ?? "implemented"))}; offline: {humanizeMachineValue(String(validationStatus.offline_validation_status ?? "pending"))}; live: {humanizeMachineValue(String(validationStatus.live_validation_status ?? "pending"))}; scientific: {humanizeMachineValue(String(validationStatus.scientific_validation_status ?? "pending"))}.</p>
+      {stage === "AWAITING_SCIENTIFIC_APPROVAL" && Object.keys(validation).length > 0 && <button className="admin-primary" disabled={busy} onClick={onPublish}>Approve experimental registry publication</button>}
+      {Object.keys(publication).length > 0 && <p>Model Library endpoint: <strong>{String(publication.endpoint_id)}</strong> version {String(publication.endpoint_version)}</p>}
+    </section>
+  </div>;
+}
+
+function TrainingDatasetWorkspace({ data, artifacts }: { data: AdminTrainingDatasetWorkflow; artifacts: AdminArtifact[] }) {
+  if (data.legacy) {
+    return <section className="admin-panel" data-testid="legacy-read-only-workflow"><h2>Legacy single-source discovery</h2><p>Historical records remain unchanged and read-only. Refresh only reloads persisted state and never starts provider or scientific-source work.</p></section>;
+  }
+  const specification = record(data.target_specification);
+  const requirements = records(record(data.component_requirements).requirements);
+  const plannedAgents = records(data.planned_discovery_agents);
+  const specificationArtifact = [...artifacts].reverse().find((item) => item.artifact_type === "training_dataset_specification");
+  const humanPolicyArtifact = [...artifacts].reverse().find((item) => item.artifact_type === "dataset_specification_human_policy");
+  const sources = records(record(data.verified_source_inventory).sources);
+  const discoveryReadiness = record(data.source_discovery_readiness);
+  const adapterReadiness = record(discoveryReadiness.reviewed_adapters);
+  const adapterInventory = records(discoveryReadiness.reviewed_adapter_inventory);
+  const discoveryBudget = record(data.source_discovery_budget ?? discoveryReadiness.budget);
+  const sourceObservations = records(data.source_observations);
+  const sourceSearchOutcomes = records(data.source_search_outcomes);
+  const sourceDiscoveryExecution = record(data.source_discovery_execution);
+  const discoveryExecutionIncomplete = sourceDiscoveryExecution.status === "discovery_execution_incomplete";
+  const sourceFragments = records(data.source_fragments);
+  const cells = records(record(data.capability_matrix).cells);
+  const fieldCells = records(record(data.capability_matrix).field_cells);
+  const review = record(data.assembly_review);
+  const strategies = records(review.strategies ?? record(data.assembly_strategies).strategies);
+  const recommendedId = typeof review.recommended_strategy_id === "string" ? review.recommended_strategy_id : null;
+  const recommended = strategies.find((item) => item.strategy_id === recommendedId) ?? strategies[0];
+  const graph = record(recommended?.source_graph);
+  const nodes = records(graph.nodes);
+  const edges = records(graph.edges);
+  const plan = record(recommended?.preparation_plan ?? data.preparation_plan);
+  const gaps = records(record(data.gap_report).gaps);
+  return (
+    <div className="admin-training-workspace" data-testid="training-dataset-workspace">
+      <CompiledSpecificationWorkspace data={data} />
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Target training dataset</h2><span>{data.benchmark_mode ?? "standard"}</span></div>
+        {Object.keys(specification).length ? <><dl className="admin-candidate-facts"><div><dt>Specification</dt><dd>{String(specification.specification_id)} · version {String(specification.contract_version ?? "1.0.0")}</dd></div><div><dt>Immutable hash</dt><dd><code>{specificationArtifact?.sha256 ?? "not available"}</code></dd></div><div><dt>Human policy</dt><dd>version {String(specification.approved_policy_version ?? "not applied")} · <code>{humanPolicyArtifact?.sha256 ?? "not available"}</code></dd></div><div><dt>Prediction task</dt><dd>{String(specification.intended_prediction_task ?? "Unresolved")}</dd></div><div><dt>Prediction unit</dt><dd>{String(specification.prediction_unit ?? "Unresolved")}</dd></div><div><dt>Activity representation</dt><dd>{textList(specification.acceptable_activity_representations).join(", ") || "Unresolved"}</dd></div><div><dt>Required fields</dt><dd>{textList(specification.mandatory_output_fields).join(", ") || "Awaiting specification"}</dd></div><div><dt>Nullable fields</dt><dd>{textList(specification.nullable_output_fields).join(", ") || "None"}</dd></div><div><dt>Optional fields</dt><dd>{textList(specification.optional_output_fields).join(", ") || "None"}</dd></div></dl><h3>Approved human policy decisions</h3><ul>{textList(specification.approved_policy_decisions).map((item) => <li key={item}>{item}</li>)}</ul></> : <p>Awaiting a strict, human-reviewed target specification.</p>}
+      </section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Planned source-discovery agents</h2><span>{plannedAgents.length} not started</span></div>{plannedAgents.map((item) => <article key={String(item.agent_name)}><h3>{String(item.agent_name)}</h3><p>{String(item.provider)} / {String(item.model)} · {String(item.maximum_turns)} turns · {String(item.maximum_tool_calls)} tools · {String(item.maximum_input_tokens)} input tokens · {String(item.maximum_output_tokens)} output tokens · ${String(item.maximum_cost_usd)} · {String(item.timeout_seconds)} s · {String(item.provider_retries)} retries</p><p>Tools: {textList(item.allowed_tools).join(", ") || "none"}</p><p>Official adapters: {textList(item.allowed_official_source_adapters).join(", ")}</p><p>Output: {String(item.output_schema_name)}</p></article>)}</section>
+      <section className="admin-panel" data-testid="source-discovery-readiness"><div className="admin-panel-heading"><h2>Reviewed source adapters</h2><span>{discoveryReadiness.ready === true ? "Ready" : "Blocked"}</span></div>
+        <p>{String(adapterReadiness.approved_adapter_count ?? 0)} approved adapters cover {textList(adapterReadiness.covered_roles).length} component roles. Source retries: {String(adapterReadiness.source_retries ?? 0)}.</p>
+        {adapterInventory.map((adapter) => <article key={String(adapter.adapter_id)}><h3>{String(adapter.official_source_system)} · {String(adapter.adapter_id)}@{String(adapter.adapter_version)}</h3><p>Domains: {textList(adapter.allowlisted_domains).join(", ")}</p><p>Operations: {textList(adapter.approved_operations).join(", ")}</p><p>{String(adapter.request_timeout_seconds)} s · {String(adapter.maximum_response_bytes)} bytes · {String(adapter.requests_per_second)} req/s · {String(adapter.source_retry_count)} retries · cache {String(adapter.cache_ttl_seconds)} s</p></article>)}
+        <h3>Controlled workflow budget</h3><p>{String(discoveryBudget.maximum_agent_runs ?? 4)} agent runs · {String(discoveryBudget.maximum_turns_per_agent ?? 6)} turns/agent · {String(discoveryBudget.maximum_total_tool_calls ?? 24)} total tools · ${String(discoveryBudget.maximum_total_cost_usd ?? 0.8)} total · {String(discoveryBudget.provider_retries ?? 0)} provider retries</p>
+        {discoveryReadiness.ready !== true && <p>Execution remains fail-closed until provider, specification, requirements, stage, and reviewed adapters are ready.</p>}
+      </section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Component requirements</h2><span>{requirements.length}</span></div>{requirements.length ? <ul>{requirements.map((item) => <li key={String(item.requirement_id)}><strong>{humanizeMachineValue(String(item.role))}</strong> — {item.mandatory ? "required" : "optional"}</li>)}</ul> : <p>No requirements derived yet.</p>}</section>
+      {discoveryExecutionIncomplete && <section className="admin-panel admin-errors-panel" role="status" data-testid="source-discovery-incomplete"><div className="admin-panel-heading"><h2>Source discovery did not complete</h2><span>Technical follow-up</span></div><p>The empty or partial inventory does not establish that no public data exist. Review the stage diagnostics before interpreting scientific coverage.</p><p>Next: {String(sourceDiscoveryExecution.next_action ?? "Correct the bounded execution path, then authorize a new workflow separately.")}</p></section>}
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Source search outcomes</h2><span>{sourceSearchOutcomes.length}</span></div>{sourceSearchOutcomes.length ? sourceSearchOutcomes.map((item, index) => { const outcome = record(item.search_outcome); return <article key={String(outcome.outcome_id ?? index)}><h3>{String(outcome.source_family ?? "Reviewed source")} · {humanizeMachineValue(String(outcome.outcome ?? "completed"))}</h3><p>{String(outcome.rendered_query ?? "Bounded reviewed operation")} · {String(outcome.result_count ?? 0)} results · {humanizeMachineValue(String(outcome.cache_status ?? "not_available"))}</p><p>{String(outcome.query_scope ?? "Scope recorded in immutable provenance.")}</p></article>; }) : <p>No completed source search outcome has been persisted.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Source observations</h2><span>{sourceObservations.length}</span></div>{sourceObservations.length ? sourceObservations.map((item, index) => { const observation = record(item.observation); return <article key={String(observation.observation_id ?? index)}><h3>{String(observation.source_system)} · {String(observation.stable_source_identifier)}</h3><p>{String(observation.adapter_id)}@{String(observation.adapter_version)} · {humanizeMachineValue(String(observation.public_validation_status))} · {humanizeMachineValue(String(observation.data_access_status))}</p><p>Artifact <code>{String(item.observation_artifact_hash ?? observation.response_artifact_hash)}</code></p><p>{textList(observation.limitations).join(" ") || "No recorded limitation."}</p></article>; }) : <p>No reviewed-adapter observations have been persisted.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Agent source reviews</h2><span>{sourceFragments.length}</span></div>{sourceFragments.length ? sourceFragments.map((item, index) => { const fragment = record(item.fragment); return <article key={String(fragment.fragment_id ?? index)}><h3>{String(item.agent_name)}</h3><p>{humanizeMachineValue(String(fragment.agent_review_status ?? "structured_review_unavailable"))} ({humanizeMachineValue(String(fragment.agent_terminal_outcome ?? "unavailable"))}) · {textList(fragment.observation_ids).length} authoritative observations · {String(fragment.scientific_source_requests ?? 0)} source requests</p>{typeof fragment.incomplete_stage === "string" && <p>Incomplete stage: {humanizeMachineValue(fragment.incomplete_stage)}</p>}{textList(fragment.missing_prerequisites).length > 0 && <p>Missing prerequisites: {textList(fragment.missing_prerequisites).join("; ")}</p>}<p>{textList(fragment.limitations).join(" ") || "No recorded limitation."}</p></article>; }) : <p>No bounded source-review agent has completed.</p>}</section>
+      <section className="admin-panel" id="verified-source-inventory"><div className="admin-panel-heading"><h2>Verified source inventory</h2><span>{sources.length}</span></div>{sources.length ? sources.map((source) => <article key={String(source.source_id)}><h3>{String(source.source_system)} · {String(source.stable_accession)}</h3><p>Roles: {textList(source.source_roles).map(humanizeMachineValue).join(", ")}</p><p>Verified fields: {[...textList(source.measurement_fields), ...textList(source.identifier_fields), ...textList(source.structure_fields), ...textList(source.experimental_context_fields)].join(", ") || "None verified"}</p><p>Counts: {humanizeMachineValue(String(source.count_status ?? "not_computed"))} · Access: {humanizeMachineValue(String(source.access_status ?? "unresolved"))}</p><p>{textList(source.strengths).join(" ") || "No recorded strength."}</p><p>{textList(source.limitations).join(" ") || "No recorded limitation."}</p><p>Next: {textList(source.next_required_ingestion_actions).join(" ") || "Human source-inventory review."}</p></article>) : <p>{discoveryExecutionIncomplete ? "Source discovery did not complete. No conclusion about public-data availability can be drawn from this inventory." : "Searches completed without verified candidates. Concrete strategies remain locked."}</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Capability matrix</h2><span>{cells.length + fieldCells.length} cells</span></div>{cells.length || fieldCells.length ? <div className="admin-artifact-list">{[...cells, ...fieldCells].map((cell, index) => { const capability = String(cell.component ?? cell.field); return <article key={`${String(cell.source_id)}-${capability}-${index}`}><strong>{String(cell.source_id)}</strong><span>{humanizeMachineValue(capability)}: {humanizeMachineValue(String(cell.status))}</span></article>; })}</div> : <p>Awaiting deterministic inventory analysis.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Strategies considered</h2><span>{strategies.length}</span></div>{strategies.length ? strategies.map((strategy) => <article key={String(strategy.strategy_id)}><h3>{strategy.strategy_id === recommendedId ? "Recommended: " : ""}{String(strategy.strategy_id)}</h3><p>{textList(strategy.scientific_risks).join(" ") || "No scientific risks recorded."}</p></article>) : <p>No assembly strategy exists before verified discovery.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Recommended assembly graph</h2><span>{nodes.length} nodes</span></div>{nodes.length ? <><ul>{nodes.map((node) => <li key={String(node.node_id)}><strong>{String(node.label)}</strong> ({humanizeMachineValue(String(node.node_type))})</li>)}</ul><p>{edges.map((edge) => `${String(edge.from_node)} → ${String(edge.to_node)}`).join(" · ")}</p></> : <p>No source graph selected.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Preparation plan</h2><span>{records(plan.steps).length} steps</span></div>{records(plan.steps).length ? <ol>{records(plan.steps).map((step) => <li key={String(step.step_id)}><strong>{String(step.action)}</strong> — {humanizeMachineValue(String(step.status))}</li>)}</ol> : <p>Preparation remains deferred until a verified strategy exists.</p>}</section>
+      <section className="admin-panel"><div className="admin-panel-heading"><h2>Assembly gaps</h2><span>{gaps.length}</span></div>{gaps.length ? <ul>{gaps.map((gap) => <li key={String(gap.gap_id)}>{String(gap.description)}</li>)}</ul> : <p>No persisted gap report yet.</p>}</section>
+    </div>
+  );
+}
+
 function candidateStatus(candidate: Candidate, index: number): string {
-  const value = candidate.recommendation.toLowerCase();
+  const value = (candidate.recommendation_status ?? candidate.recommendation ?? "").toLowerCase();
   if (value.includes("reject")) return "Rejected";
   if (value.includes("review")) return index === 0 ? "Recommended" : "Needs review";
   if (value.includes("prefer") || value.includes("recommend")) return "Recommended";
@@ -49,8 +358,255 @@ function candidateStatus(candidate: Candidate, index: number): string {
   return "Needs review";
 }
 
-function fixtureId(index: number): string {
-  return `SIM-OS-${String(index + 1).padStart(3, "0")}`;
+function candidateLabel(candidate: Candidate | undefined, index = 0): string {
+  return candidate?.accession ?? (candidate?.candidate_id.startsWith("SIM-") ? candidate.candidate_id : `SIM-OS-${String(index + 1).padStart(3, "0")}`);
+}
+
+function modeLabel(mode: "live" | "cached" | "replay"): string {
+  return mode === "live" ? "Live agent mode" : mode === "cached" ? "Cached mode" : "Replay mode";
+}
+
+function usageNumber(run: AdminAgentRun, name: string): number {
+  const value = run.usage[name];
+  return typeof value === "number" ? value : 0;
+}
+
+function configuredModeLabel(mode: "live" | "cached" | "replay"): string {
+  return mode === "live" ? "Live" : mode === "cached" ? "Cached" : "Replay";
+}
+
+function runStatusLabel(
+  run: AdminAgentRun,
+  mode: "live" | "cached" | "replay",
+  hasRecommendation: boolean,
+): string {
+  if (run.status === "failed") return mode === "live" ? "Live agent run failed" : "Agent run failed";
+  if (run.status === "budget_exceeded" && mode === "live") return "Live agent run stopped at the configured cumulative token budget.";
+  if (run.status === "completed") return "Completed";
+  if (run.status === "approval_required") return hasRecommendation ? "Completed for review" : "No dataset recommendation";
+  return humanizeMachineValue(run.status);
+}
+
+function traceEventCount(run: AdminAgentRun, eventType: string): number {
+  return (run.trace?.events ?? []).filter((event) => event.event_type === eventType).length;
+}
+
+type GeoSearchSummary = {
+  renderedQuery: string;
+  resultCount: number;
+  cacheStatus: string;
+  strategyReason: string;
+};
+
+type TurnExposureSummary = {
+  turn: number;
+  substage: string;
+  tools: string[];
+};
+
+function turnExposureSummaries(run: AdminAgentRun): TurnExposureSummary[] {
+  return (run.trace?.events ?? []).flatMap((event) => {
+    if (event.event_type !== "provider.turn.started") return [];
+    const detail = event.detail;
+    if (!detail || typeof detail !== "object" || Array.isArray(detail)) return [];
+    const record = detail as Record<string, unknown>;
+    const tools = Array.isArray(record.tools_exposed)
+      ? record.tools_exposed.filter((item): item is string => typeof item === "string")
+      : [];
+    return [{
+      turn: typeof record.turn === "number" ? record.turn : 0,
+      substage: typeof record.discovery_substage === "string" ? record.discovery_substage : "unknown",
+      tools,
+    }];
+  });
+}
+
+function candidateInspectionCounts(run: AdminAgentRun): { inspected: number; failed: number } | null {
+  for (const call of run.tool_calls ?? []) {
+    if (call.tool_name !== "inspect_geo_candidates") continue;
+    const result = call.result;
+    if (!result || typeof result !== "object" || Array.isArray(result)) continue;
+    const output = (result as Record<string, unknown>).output;
+    if (!output || typeof output !== "object" || Array.isArray(output)) continue;
+    const record = output as Record<string, unknown>;
+    return {
+      inspected: typeof record.inspected_count === "number" ? record.inspected_count : 0,
+      failed: typeof record.failed_count === "number" ? record.failed_count : 0,
+    };
+  }
+  return null;
+}
+
+function geoSearchSummaries(run: AdminAgentRun): GeoSearchSummary[] {
+  return (run.tool_calls ?? []).flatMap((call) => {
+    if (call.tool_name !== "search_geo_series") return [];
+    const result = call.result as Record<string, unknown> | undefined;
+    const output = result?.output as Record<string, unknown> | undefined;
+    if (!output || typeof output.rendered_query !== "string") return [];
+    return [{
+      renderedQuery: output.rendered_query,
+      resultCount: typeof output.result_count === "number" ? output.result_count : 0,
+      cacheStatus: typeof output.cache_status === "string" ? output.cache_status : "unknown",
+      strategyReason: typeof output.strategy_reason === "string" ? output.strategy_reason : "Bounded GEO search",
+    }];
+  });
+}
+
+type ToolNormalizationSummary = {
+  toolName: string;
+  originalArguments: Record<string, unknown>;
+  normalizedArguments: Record<string, unknown>;
+  warningCodes: string[];
+  warnings: Array<{
+    code: string;
+    field: string;
+    original?: string | null;
+    normalized?: string | null;
+    policyVersion?: string | null;
+  }>;
+};
+
+function toolNormalizationSummaries(run: AdminAgentRun): ToolNormalizationSummary[] {
+  return (run.tool_calls ?? []).flatMap((call) => {
+    const result = call.result as Record<string, unknown> | undefined;
+    const originalArguments = result?.original_arguments;
+    const normalizedArguments = result?.normalized_arguments;
+    const warnings = result?.normalization_warnings;
+    if (
+      !originalArguments || typeof originalArguments !== "object" || Array.isArray(originalArguments)
+      || !normalizedArguments || typeof normalizedArguments !== "object" || Array.isArray(normalizedArguments)
+      || !Array.isArray(warnings) || warnings.length === 0
+    ) return [];
+    const parsedWarnings = warnings.flatMap((warning) => {
+      if (!warning || typeof warning !== "object" || Array.isArray(warning)) return [];
+      const record = warning as Record<string, unknown>;
+      if (typeof record.code !== "string" || typeof record.field !== "string") return [];
+      return [{
+        code: record.code,
+        field: record.field,
+        original: typeof record.original === "string" ? record.original : null,
+        normalized: typeof record.normalized === "string" ? record.normalized : null,
+        policyVersion: typeof record.policy_version === "string" ? record.policy_version : null,
+      }];
+    });
+    return [{
+      toolName: typeof call.tool_name === "string" ? call.tool_name : "tool",
+      originalArguments: originalArguments as Record<string, unknown>,
+      normalizedArguments: normalizedArguments as Record<string, unknown>,
+      warningCodes: parsedWarnings.map((warning) => warning.code),
+      warnings: parsedWarnings,
+    }];
+  });
+}
+
+function safeDeveloperDiagnostic(run: AdminAgentRun): string | null {
+  const events = run.trace?.events ?? [];
+  for (const event of [...events].reverse()) {
+    const detail = event.detail;
+    if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+      const direct = (detail as Record<string, unknown>).developer_message;
+      const structured = (detail as Record<string, unknown>).structured_output_diagnostic;
+      const nested = (detail as Record<string, unknown>).source_diagnostic;
+      const message = typeof direct === "string"
+        ? direct
+        : structured && typeof structured === "object" && !Array.isArray(structured)
+          ? (structured as Record<string, unknown>).developer_message
+        : nested && typeof nested === "object" && !Array.isArray(nested)
+          ? (nested as Record<string, unknown>).developer_message
+          : null;
+      if (typeof message === "string" && message.length > 0) return message;
+    }
+  }
+  return null;
+}
+
+function structuredOutputDiagnostic(run: AdminAgentRun): Record<string, unknown> | null {
+  for (const event of [...(run.trace?.events ?? [])].reverse()) {
+    const detail = event.detail;
+    if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
+    const diagnostic = (detail as Record<string, unknown>).structured_output_diagnostic;
+    if (diagnostic && typeof diagnostic === "object" && !Array.isArray(diagnostic)) {
+      return diagnostic as Record<string, unknown>;
+    }
+  }
+  return null;
+}
+
+function structuredOutputFingerprint(run: AdminAgentRun): Record<string, unknown> | null {
+  for (const event of [...(run.trace?.events ?? [])].reverse()) {
+    const detail = event.detail;
+    if (!detail || typeof detail !== "object" || Array.isArray(detail)) continue;
+    const direct = (detail as Record<string, unknown>).structured_output_request_fingerprint;
+    if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+      return direct as Record<string, unknown>;
+    }
+    const diagnostic = (detail as Record<string, unknown>).structured_output_diagnostic;
+    if (diagnostic && typeof diagnostic === "object" && !Array.isArray(diagnostic)) {
+      const nested = (diagnostic as Record<string, unknown>).request_fingerprint;
+      if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+        return nested as Record<string, unknown>;
+      }
+    }
+  }
+  return null;
+}
+
+function sourceDiagnostics(run: AdminAgentRun): AdminSourceToolDiagnostic[] {
+  return (run.tool_calls ?? []).flatMap((call) => {
+    const result = call.result;
+    if (!result || typeof result !== "object" || Array.isArray(result)) return [];
+    const diagnostic = (result as Record<string, unknown>).source_diagnostic;
+    const output = (result as Record<string, unknown>).output;
+    const candidateDiagnostics = output && typeof output === "object" && !Array.isArray(output)
+      && Array.isArray((output as Record<string, unknown>).results)
+      ? ((output as Record<string, unknown>).results as Array<Record<string, unknown>>).flatMap((item) => {
+        const itemDiagnostic = item?.source_diagnostic;
+        return itemDiagnostic && typeof itemDiagnostic === "object" && !Array.isArray(itemDiagnostic)
+          ? [itemDiagnostic as AdminSourceToolDiagnostic]
+          : [];
+      })
+      : [];
+    return [
+      ...(diagnostic && typeof diagnostic === "object" && !Array.isArray(diagnostic)
+        ? [diagnostic as AdminSourceToolDiagnostic]
+        : []),
+      ...candidateDiagnostics,
+    ];
+  });
+}
+
+function SourceDiagnosticDetails({ diagnostic }: { diagnostic: AdminSourceToolDiagnostic }) {
+  return <dl className="admin-source-diagnostic">
+    <div><dt>Source</dt><dd>{diagnostic.source_host}{diagnostic.safe_url_path}</dd></div>
+    <div><dt>HTTP</dt><dd>{diagnostic.http_method} · {diagnostic.http_status ?? "not received"}</dd></div>
+    <div><dt>Final host</dt><dd>{diagnostic.final_approved_host ?? "not reached"}</dd></div>
+    <div><dt>Source MIME</dt><dd>{diagnostic.content_type ?? "unknown"} · {diagnostic.response_byte_count ?? 0} bytes</dd></div>
+    <div><dt>Artifact MIME</dt><dd>{diagnostic.artifact_content_type ?? "not stored"}</dd></div>
+    <div><dt>Parser</dt><dd>{diagnostic.parser_outcome ? humanizeMachineValue(diagnostic.parser_outcome) : "not reached"}</dd></div>
+    <div><dt>Artifact</dt><dd>{diagnostic.source_artifact_id ?? "not stored"}</dd></div>
+    <div><dt>Cache</dt><dd>{diagnostic.cache_status ? humanizeMachineValue(diagnostic.cache_status) : "not available"}</dd></div>
+    <div><dt>Category</dt><dd>{humanizeMachineValue(diagnostic.source_error_category)}</dd></div>
+    <div><dt>Exception</dt><dd>{diagnostic.exception_class ?? "none"}</dd></div>
+    <div><dt>Attempt</dt><dd>{diagnostic.attempt_number} · {diagnostic.request_duration_ms} ms</dd></div>
+    <div><dt>Retry policy</dt><dd>{diagnostic.retryable ? "Retryable" : "Terminal"}</dd></div>
+    {diagnostic.developer_message && <div><dt>Developer note</dt><dd>{diagnostic.developer_message}</dd></div>}
+  </dl>;
+}
+
+function ToolInvocationFailureDetails({ diagnostic }: { diagnostic: AdminToolInvocationFailureDiagnostic }) {
+  return <dl className="admin-source-diagnostic">
+    <div><dt>Agent</dt><dd>{diagnostic.agent_role}</dd></div>
+    <div><dt>Tool</dt><dd>{diagnostic.tool_name}</dd></div>
+    <div><dt>Invocation stage</dt><dd>{humanizeMachineValue(diagnostic.invocation_stage)}</dd></div>
+    <div><dt>Validation</dt><dd>{humanizeMachineValue(diagnostic.validation_error_category)}</dd></div>
+    <div><dt>Adapter resolution</dt><dd>{humanizeMachineValue(diagnostic.adapter_resolution_status)}</dd></div>
+    <div><dt>Scientific request</dt><dd>{diagnostic.source_transport_started ? "Started" : "Not started"}</dd></div>
+    <div><dt>Dependency</dt><dd>{humanizeMachineValue(diagnostic.dependency_status)}</dd></div>
+    <div><dt>Supplied fields</dt><dd>{diagnostic.supplied_argument_field_names.join(", ") || "none"}</dd></div>
+    <div><dt>Normalized fields</dt><dd>{diagnostic.normalized_argument_field_names.join(", ") || "none"}</dd></div>
+    {diagnostic.field_errors.map((item, index) => <div key={`${item.field}-${index}`}><dt>{item.field || "Arguments"}</dt><dd>{item.message}</dd></div>)}
+    <div><dt>Next action</dt><dd>Correct the bounded tool arguments or prerequisite records before authorizing a new workflow.</dd></div>
+  </dl>;
 }
 
 export function AdminEndpointDetail() {
@@ -63,7 +619,13 @@ export function AdminEndpointDetail() {
   const [runs, setRuns] = useState<AdminAgentRun[]>([]);
   const [trace, setTrace] = useState<AdminAgentRun | null>(null);
   const [errors, setErrors] = useState<AdminWorkflowError[]>([]);
+  const [trainingWorkflow, setTrainingWorkflow] = useState<AdminTrainingDatasetWorkflow | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [recommendedCandidateId, setRecommendedCandidateId] = useState<string | null | undefined>(undefined);
+  const [runMode, setRunMode] = useState<"live" | "cached" | "replay">("replay");
+  const [simulationLabel, setSimulationLabel] = useState<string | null>(null);
+  const [decisionSummary, setDecisionSummary] = useState("");
+  const [unresolvedQuestions, setUnresolvedQuestions] = useState<string[]>([]);
   const [comment, setComment] = useState("");
   const [selected, setSelected] = useState("");
   const [activityTab, setActivityTab] = useState<"activity" | "audit">("activity");
@@ -72,10 +634,20 @@ export function AdminEndpointDetail() {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedIdentifier, setCopiedIdentifier] = useState<"build" | "run" | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [nextBuild, nextEvents, nextArtifacts, nextApprovals, nextRuns, nextErrors] =
+      const [
+        nextBuild,
+        nextEvents,
+        nextArtifacts,
+        nextApprovals,
+        nextRuns,
+        nextErrors,
+        nextTrainingWorkflow,
+        nextCapabilities,
+      ] =
         await Promise.all([
           api.adminGetBuild(buildId),
           api.adminTimeline(buildId),
@@ -83,6 +655,14 @@ export function AdminEndpointDetail() {
           api.adminApprovals(buildId),
           api.adminAgentRuns(buildId),
           api.adminErrors(buildId),
+          api.adminTrainingDatasetWorkflow(buildId).catch(() => ({
+            schema_version: "1.0.0" as const,
+            workflow_id: buildId,
+            workflow_kind: "legacy_single_source_discovery",
+            legacy: true,
+            label: "Legacy single-source discovery",
+          })),
+          api.adminCapabilities().catch(() => null),
         ]);
       setBuild(nextBuild);
       setEvents(nextEvents);
@@ -90,16 +670,28 @@ export function AdminEndpointDetail() {
       setApprovals(nextApprovals);
       setRuns(nextRuns);
       setErrors(nextErrors);
+      setTrainingWorkflow(nextTrainingWorkflow);
+      const persistedRunMode = nextRuns.at(-1)?.run_mode ?? undefined;
       const candidateArtifact = [...nextArtifacts]
         .reverse()
         .find((item) => item.artifact_type === "dataset_candidates");
       if (candidateArtifact) {
         const preview = await api.adminArtifactPreview(candidateArtifact.id);
-        const content = preview.content as { candidates?: Candidate[] };
+        const content = preview.content as CandidateArtifact;
         setCandidates(content.candidates ?? []);
+        setRecommendedCandidateId(content.recommended_candidate_id);
         setSelected((current) => current || content.candidates?.[0]?.candidate_id || "");
+        setRunMode(persistedRunMode ?? content.run_mode ?? nextCapabilities?.run_mode ?? "replay");
+        setSimulationLabel(content.simulation_label ?? null);
+        setDecisionSummary(content.decision_summary ?? "");
+        setUnresolvedQuestions(content.unresolved_questions ?? []);
       } else {
         setCandidates([]);
+        setRecommendedCandidateId(undefined);
+        setRunMode(persistedRunMode ?? nextCapabilities?.run_mode ?? "replay");
+        setSimulationLabel(null);
+        setDecisionSummary("");
+        setUnresolvedQuestions([]);
       }
       if (nextRuns.length > 0) setTrace(await api.adminAgentRun(nextRuns.at(-1)!.id));
       else setTrace(null);
@@ -113,7 +705,7 @@ export function AdminEndpointDetail() {
     void load();
   }, [load]);
 
-  async function command(action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure") {
+  async function command(action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure" | "retry-dataset-specification" | "run-dataset-specification-review" | "revise-endpoint-request") {
     if (!build) return;
     setBusy(true);
     try {
@@ -148,14 +740,250 @@ export function AdminEndpointDetail() {
     }
   }
 
-  const pending = approvals.find((item) => item.status === "pending") ?? null;
+  async function refreshSourceMetadata() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminRefreshSourceMetadata(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "Source metadata could not be refreshed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function continueTrainingDataset() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminContinueTrainingDataset(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof EndoscanApiError
+          ? reason.detail
+          : "The active training-dataset stage could not be continued.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function authorizeSourceDiscovery() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      const authorized = await api.adminAuthorizeSourceDiscovery(build.id, build.version);
+      if (trainingWorkflow?.workflow_semantics_version !== "2.0.0") {
+        await api.adminContinueTrainingDataset(build.id, authorized.version);
+      }
+      await load();
+    } catch (reason) {
+      setError(
+        reason instanceof EndoscanApiError
+          ? reason.detail
+          : "Reviewed source discovery could not be authorized.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveSemanticsV2Strategy(proposal: Record<string, unknown>) {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminApproveAssemblyStrategy(build.id, build.version, proposal);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The strategy could not be approved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function calculateSemanticsV2Coverage() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminCalculateCombinationCoverage(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "Combination coverage could not be calculated.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateSemanticsV2Strategies() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminGenerateAssemblyStrategies(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "Assembly strategies could not be generated.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function requestSemanticsV2Revision() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminRequestDiscoveryRevision(
+        build.id,
+        build.version,
+        comment || "Expanded discovery requested during assembly-strategy review.",
+      );
+      setComment("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "A new discovery round could not be requested.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rejectSemanticsV2Strategies() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminRejectAssemblyStrategies(
+        build.id,
+        build.version,
+        comment || "The current strategy set was rejected during human review.",
+      );
+      setComment("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The strategy set could not be rejected.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runApprovedAssembly() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      const fixture = build.endpoint_slug.includes("dna") ? "dna_damage" : "tr_receptor";
+      await api.adminRunApprovedAssembly(build.id, build.version, fixture);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The approved dataset could not be assembled.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveDatasetForBenchmarking() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminApproveDataset(build.id, build.version, comment || "Dataset quality and compound-level leakage review passed.");
+      setComment("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The dataset could not be approved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runEndpointBenchmark() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminRunBenchmark(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The baseline benchmark failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviseDataset(decision: "rejected" | "revision_requested") {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminReviewDatasetRevision(build.id, build.version, decision, comment || "Dataset review requires a new immutable assembly recipe.");
+      setComment("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The dataset review decision could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectAndValidateModel(candidateId: string) {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminSelectAndValidateModel(build.id, build.version, candidateId, comment || "Selected after multi-metric developer review.");
+      setComment("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The selected model could not be validated.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publishEndpoint() {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminPublishEndpoint(build.id, build.version);
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The endpoint could not be published.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviewModels(decision: "reject_all_models" | "request_new_benchmark") {
+    if (!build) return;
+    setBusy(true);
+    try {
+      await api.adminReviewModels(build.id, build.version, decision, comment || "Candidate models require a new bounded benchmark.");
+      setComment("");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof EndoscanApiError ? reason.detail : "The model review decision could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyIdentifier(kind: "build" | "run", value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedIdentifier(kind);
+    } catch {
+      setError(`Unable to copy the full ${kind} ID.`);
+    }
+  }
+
+  const pending = trainingWorkflow?.legacy_semantics_read_only
+    ? null
+    : approvals.find((item) => item.status === "pending") ?? null;
   const recommended = useMemo(
-    () => candidates.find((item, index) => candidateStatus(item, index) === "Recommended") ?? candidates[0],
-    [candidates],
+    () => recommendedCandidateId === null
+      ? undefined
+      : recommendedCandidateId
+        ? candidates.find((item) => item.candidate_id === recommendedCandidateId)
+        : candidates.find((item, index) => candidateStatus(item, index) === "Recommended") ?? candidates[0],
+    [candidates, recommendedCandidateId],
   );
   const agentTools = useMemo(
-    () => trace?.tools.length ? trace.tools : [...runs].reverse().find((run) => run.tools.length > 0)?.tools ?? [],
-    [runs, trace],
+    () => trace?.tools ?? [],
+    [trace],
   );
 
   if (!build) {
@@ -164,11 +992,92 @@ export function AdminEndpointDetail() {
 
   const progress = stageProgress(build);
   const displayEvents = fullActivity ? [...events].reverse() : [...events].reverse().slice(0, 6);
-  const canFail = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
-  const canPause = !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
-  const canCancel = !["CANCELLED", "COMPLETED"].includes(build.current_stage);
+  const legacyReadOnly = trainingWorkflow?.legacy_semantics_read_only === true;
+  const v2WorkspaceOwnsDecision = trainingWorkflow?.workflow_semantics_version === "2.0.0" && [
+    "DISCOVERY_PLANNING",
+    "REGISTERED_PROVIDER_CAPABILITY_BLOCKED",
+    "DISCOVERING_SOURCE_CANDIDATES",
+    "HYDRATING_SOURCE_CANDIDATES",
+    "COMPUTING_COMBINATION_COVERAGE",
+    "GENERATING_ASSEMBLY_STRATEGIES",
+    "AWAITING_ASSEMBLY_STRATEGY_REVIEW",
+    "ASSEMBLY_RECIPE_APPROVED",
+  ].includes(build.current_stage);
+  const canFail = !legacyReadOnly && !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING", "AWAITING_DATASET_SPECIFICATION_REVISION"].includes(build.current_stage);
+  const canPause = !legacyReadOnly && !["DRAFT", "PAUSED", "FAILED", "CANCELLED", "COMPLETED", "REGISTERING"].includes(build.current_stage);
+  const canCancel = !legacyReadOnly && !["CANCELLED", "COMPLETED"].includes(build.current_stage);
+  const canRetry = build.current_stage === "FAILED" && errors.at(-1)?.retryable === true;
+  const sourceDiscoveryReady = record(trainingWorkflow?.source_discovery_readiness).ready === true;
+  const requirementsReady = artifacts.some((item) => item.artifact_type === "component_requirements");
   const selectedIndex = Math.max(0, candidates.findIndex((candidate) => candidate.candidate_id === selected));
   const selectedCandidate = candidates[selectedIndex];
+  const developerDiagnostic = trace ? safeDeveloperDiagnostic(trace) : null;
+  const outputDiagnostic = trace ? structuredOutputDiagnostic(trace) : null;
+  const outputFingerprint = trace ? structuredOutputFingerprint(trace) : null;
+  const scientificSourceDiagnostics = trace ? sourceDiagnostics(trace) : [];
+  const providerRetries = trace ? traceEventCount(trace, "provider.retry") : 0;
+  const geoSearches = trace ? geoSearchSummaries(trace) : [];
+  const turnExposures = trace ? turnExposureSummaries(trace) : [];
+  const inspectionCounts = trace ? candidateInspectionCounts(trace) : null;
+  const normalizationSummaries = trace ? toolNormalizationSummaries(trace) : [];
+  const normalizationWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.length,
+    0,
+  );
+  const emptyOptionalFilterWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.filter(
+      (code) => code === "empty_optional_search_term_removed",
+    ).length,
+    0,
+  );
+  const controlledVocabularyWarningCount = normalizationSummaries.reduce(
+    (count, summary) => count + summary.warningCodes.filter(
+      (code) => code === "controlled_vocabulary_alias_canonicalized",
+    ).length,
+    0,
+  );
+  const hasCompletedOutput = trace?.status === "completed" || trace?.status === "approval_required";
+  const hasCandidateRecommendation = Boolean(pending && recommended && candidates.length > 0);
+  const isAssemblyApproval = pending?.approval_type === "training_dataset_assembly_strategy";
+  const isSpecificationApproval = pending?.approval_type === "dataset_specification";
+  const activeDiscoveryScope = record(
+    trainingWorkflow?.endpoint_discovery_scope
+      ?? record(trainingWorkflow?.specification_draft).endpoint_discovery_scope,
+  );
+  const isBroadDiscoveryScope = activeDiscoveryScope.mode === "broad_modality_exploration";
+  const isSpecificationRevision = build.current_stage === "AWAITING_DATASET_SPECIFICATION_REVISION";
+  const specificationOutcome = record(trainingWorkflow?.specification_agent_outcome);
+  const specificationSemanticValidation = record(
+    trainingWorkflow?.specification_semantic_validation,
+  );
+  const specificationOutcomeStatus = typeof specificationOutcome.status === "string"
+    ? specificationOutcome.status
+    : "unknown_model_behavior";
+  const specificationFailureCategory = typeof specificationOutcome?.failure_category === "string"
+    ? specificationOutcome.failure_category
+    : "unknown_model_behavior";
+  const hasSpecificationSemanticViolation =
+    specificationSemanticValidation.status === "semantic_contract_violation";
+  const specificationRevisionTitle = hasSpecificationSemanticViolation
+    ? "Dataset specification policy needs revision"
+    : specificationOutcomeStatus === "insufficient_endpoint_definition"
+      ? "Endpoint definition needs clarification"
+      : specificationOutcomeStatus === "model_refused"
+        ? "Dataset specification request was refused"
+        : "Dataset specification needs revision";
+  const specificationRevisionExplanation = hasSpecificationSemanticViolation
+    ? "The endpoint already contains an explicit target and modality, but the agent treated non-blocking dataset-policy choices as blocking."
+    : specificationOutcomeStatus === "insufficient_endpoint_definition"
+      ? "The agent produced a valid structured response but could not create a dataset-specification draft from the endpoint definition."
+      : specificationOutcomeStatus === "model_refused"
+        ? "The provider returned a valid refusal outcome. No source discovery was started."
+        : "The agent response did not match the required structured contract. No source discovery was started.";
+  const specificationQuestions = [
+    ...textList(specificationOutcome.blocking_questions),
+    ...textList(specificationOutcome.approval_questions),
+    ...textList(specificationOutcome.unresolved_questions),
+  ].filter((item, index, all) => all.indexOf(item) === index);
+  const specificationLimitations = textList(specificationOutcome.limitations);
 
   function requestConfirmation(kind: Confirmation["kind"], approval?: AdminApproval, trigger?: HTMLElement) {
     confirmationTrigger.current = trigger ?? null;
@@ -193,7 +1102,15 @@ export function AdminEndpointDetail() {
       <header className="admin-heading admin-detail-heading">
         <div>
           <div className="admin-title-meta">
-            <span>Build {shortBuildId(build.id)}</span>
+            <span className="admin-identifier">
+              <span>Build {shortBuildId(build.id)}</span>
+              <button
+                type="button"
+                className="admin-copy-button"
+                aria-label={`Copy full build ID ${build.id}`}
+                onClick={() => void copyIdentifier("build", build.id)}
+              >{copiedIdentifier === "build" ? "Copied" : "Copy"}</button>
+            </span>
             <span>Updated {relativeTime(build.updated_at)}</span>
           </div>
           <h1 id="admin-build-title">{build.endpoint_name}</h1>
@@ -203,7 +1120,7 @@ export function AdminEndpointDetail() {
           <span className="admin-status admin-status-detail">{buildStatusLabel(build)}</span>
           <strong>{stageLabel(build.current_stage)}</strong>
           <span>Local administrator</span>
-          <span className="admin-mode-badge">Simulation mode</span>
+          <span className="admin-mode-badge">{modeLabel(runMode)}</span>
         </div>
       </header>
 
@@ -235,31 +1152,86 @@ export function AdminEndpointDetail() {
 
       <div className="admin-detail-grid">
         <main className="admin-primary-column">
-          <section className="admin-panel admin-decision-panel" aria-labelledby="decision-title">
+          {trainingWorkflow && !isSpecificationRevision && (
+            trainingWorkflow.workflow_semantics_version === "2.0.0" ? <>
+              <CompiledSpecificationWorkspace data={trainingWorkflow} />
+              <SemanticsV2ReviewWorkspace
+                data={trainingWorkflow}
+                stage={build.current_stage}
+                busy={busy}
+                onApprove={(proposal) => void approveSemanticsV2Strategy(proposal)}
+                onCalculateCoverage={() => void calculateSemanticsV2Coverage()}
+                onGenerateStrategies={() => void generateSemanticsV2Strategies()}
+                onRequestRevision={() => void requestSemanticsV2Revision()}
+                onReject={() => void rejectSemanticsV2Strategies()}
+              />
+              <EndpointCompletionWorkspace
+                data={trainingWorkflow}
+                stage={build.current_stage}
+                busy={busy}
+                onRunAssembly={() => void runApprovedAssembly()}
+                onApproveDataset={() => void approveDatasetForBenchmarking()}
+                onReviseDataset={(decision) => void reviseDataset(decision)}
+                onRunBenchmark={() => void runEndpointBenchmark()}
+                onSelectModel={(candidateId) => void selectAndValidateModel(candidateId)}
+                onReviewModels={(decision) => void reviewModels(decision)}
+                onPublish={() => void publishEndpoint()}
+              />
+            </> : <TrainingDatasetWorkspace data={trainingWorkflow} artifacts={artifacts} />
+          )}
+          {!v2WorkspaceOwnsDecision && <section className="admin-panel admin-decision-panel" aria-labelledby="decision-title">
             <div className="admin-decision-heading">
               <div>
                 <span className="admin-section-kicker">Human decision</span>
-                <h2 id="decision-title">{pending ? "Dataset review required" : "No review required"}</h2>
-                <p>{pending ? "Choose whether this prepared candidate should advance to data curation." : "This workflow is not currently waiting for a reviewer."}</p>
+                <h2 id="decision-title">{isSpecificationRevision ? specificationRevisionTitle : isAssemblyApproval ? "Assembly strategy review required" : isSpecificationApproval ? (isBroadDiscoveryScope ? "Review endpoint discovery scope" : "Review target training dataset") : pending ? (hasCandidateRecommendation ? "Dataset review required" : "Search review required") : "No review required"}</h2>
+                <p>{isSpecificationRevision ? specificationRevisionExplanation : isAssemblyApproval ? "Approve only the immutable verified source graph and deterministic preparation plan; training remains deferred." : isSpecificationApproval ? (isBroadDiscoveryScope ? "The system is not choosing a final endpoint yet. It will first compare the public evidence available for each candidate modality." : "The draft was produced deterministically from the request and approved platform contract; no source discovery has started.") : pending ? (hasCandidateRecommendation ? "Review the bounded recommendation before any data curation can begin." : "No dataset was recommended; review the bounded search limitations before requesting a revision.") : "This workflow is not currently waiting for a reviewer."}</p>
               </div>
               {pending && <span className="admin-review-flag">Action required</span>}
             </div>
-            {pending ? (
+            {isSpecificationRevision ? (
+              <div className="admin-approval-card admin-no-candidate-review">
+                <div className="admin-recommendation">
+                  <span>Dataset specification review gate</span>
+                  <h3>{String(specificationOutcome.decision_summary ?? "No valid dataset specification was produced")}</h3>
+                  <p>Outcome status: {humanizeMachineValue(specificationOutcomeStatus)}</p>
+                  {specificationOutcomeStatus === "invalid_model_output" && (
+                    <p>Failure category: {humanizeMachineValue(specificationFailureCategory)}</p>
+                  )}
+                  {specificationQuestions.length > 0 && <><h4>Questions</h4><ul>{specificationQuestions.map((item) => <li key={item}>{item}</li>)}</ul></>}
+                  {specificationLimitations.length > 0 && <><h4>Limitations</h4><ul>{specificationLimitations.map((item) => <li key={item}>{item}</li>)}</ul></>}
+                </div>
+                <div className="admin-approval-actions">
+                  <button className="admin-secondary" disabled={busy} onClick={() => void command("revise-endpoint-request")}>Revise endpoint request</button>
+                  <button className="admin-primary" disabled={busy} onClick={() => void command("retry-dataset-specification")}>Retry specification</button>
+                  <button className="admin-secondary" disabled title="Configure an alternate planner model before retrying">Use another planner model</button>
+                  <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel build</button>
+                </div>
+              </div>
+            ) : pending && (isAssemblyApproval || isSpecificationApproval) ? (
+              <div className="admin-approval-card">
+                <div className="admin-recommendation"><span>{isAssemblyApproval ? "Verified assembly proposal" : "Target contract"}</span><h3>{pending.request.proposed_decision}</h3><p>{pending.request.evidence_summary}</p></div>
+                <div className="admin-decision-evidence"><div><h3>Approval scope</h3><p>{pending.request.requested_action}</p></div><div><h3>Limitations</h3><ul>{pending.request.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div></div>
+                <label className="admin-comment-field">Reviewer comment<textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Required for rejection or revision" /></label>
+                <div className="admin-approval-actions">
+                  <button className="admin-primary" disabled={busy} onClick={(event) => requestConfirmation("approve", pending, event.currentTarget)}>{isAssemblyApproval ? "Approve assembly strategy" : "Approve target specification"}</button>
+                  {isSpecificationApproval && <button className="admin-secondary" disabled={busy} onClick={() => void command("run-dataset-specification-review")}>Run optional AI review</button>}
+                  {isSpecificationApproval && <button className="admin-secondary" disabled={busy} title="Record the requested policy-choice edits in the revision comment" onClick={(event) => requestConfirmation("request_revision", pending, event.currentTarget)}>Edit approval choices</button>}
+                  <button className="admin-secondary" disabled={busy || !comment} onClick={(event) => requestConfirmation("request_revision", pending, event.currentTarget)}>{isSpecificationApproval ? "Request revision" : "Request revised strategy"}</button>
+                  <button className="admin-danger-outline" disabled={busy || !comment} onClick={(event) => requestConfirmation("reject", pending, event.currentTarget)}>Reject</button>
+                </div>
+              </div>
+            ) : pending && hasCandidateRecommendation ? (
               <div className="admin-approval-card">
                 <div className="admin-recommendation">
                   <span>Recommended candidate</span>
-                  <strong>{recommended ? fixtureId(Math.max(0, candidates.indexOf(recommended))) : "Prepared candidate"}</strong>
+                  <strong>{recommended ? candidateLabel(recommended, Math.max(0, candidates.indexOf(recommended))) : "No candidate"}</strong>
                   <h3>{recommended?.title ?? pending.request.proposed_decision}</h3>
-                  <p>{recommended?.description ?? pending.request.evidence_summary}</p>
+                  <p>{recommended?.description ?? recommended?.biological_context ?? pending.request.evidence_summary}</p>
                 </div>
                 <div className="admin-decision-evidence">
                   <div>
                     <h3>Why it is recommended</h3>
-                    <ul>
-                      <li>Structured for deterministic review and replay.</li>
-                      <li>Bound to the current immutable candidate artifact.</li>
-                      <li>{pending.request.agent_recommendation}</li>
-                    </ul>
+                    <ul>{[...(recommended?.strengths ?? []), pending.request.agent_recommendation].map((item) => <li key={item}>{item}</li>)}</ul>
                   </div>
                   <div>
                     <h3>Limitations</h3>
@@ -277,13 +1249,38 @@ export function AdminEndpointDetail() {
                   {candidates.length > 1 && <button className="admin-link-button" disabled={busy || !selected || !comment} onClick={(event) => requestConfirmation("choose_alternative", pending, event.currentTarget)}>Select another candidate</button>}
                 </div>
               </div>
+            ) : pending ? (
+              <div className="admin-approval-card admin-no-candidate-review">
+                <div className="admin-recommendation">
+                  <span>No dataset recommendation</span>
+                  <h3>Bounded GEO searches found no suitable candidate</h3>
+                  <p>{pending.request.evidence_summary}</p>
+                </div>
+                <div className="admin-decision-evidence">
+                  <div><h3>Limitations</h3><ul>{pending.request.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                  <div><h3>Proposed next search</h3><p>{pending.request.agent_recommendation}</p></div>
+                </div>
+                <label className="admin-comment-field">Reviewer comment<textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Required to request a revised search" /></label>
+                <div className="admin-approval-actions">
+                  <button className="admin-secondary" disabled={busy || !comment} onClick={(event) => requestConfirmation("request_revision", pending, event.currentTarget)}>Request revised search</button>
+                  <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>
+                </div>
+              </div>
+            ) : !isSpecificationRevision && hasCompletedOutput && candidates.length === 0 ? (
+              <div className="admin-approval-card admin-no-candidate-review">
+                <div className="admin-recommendation">
+                  <span>No dataset recommendation</span>
+                  <h3>Bounded GEO searches found no suitable candidate</h3>
+                  <p>{decisionSummary || "The bounded discovery completed without a public_valid recommendation."}</p>
+                </div>
+              </div>
             ) : <div className="admin-empty">The next workflow action is shown below.</div>}
-          </section>
+          </section>}
 
           {candidates.length > 0 && (
             <section className="admin-panel" aria-labelledby="candidate-comparison-title">
               <div className="admin-panel-heading">
-                <div><h2 id="candidate-comparison-title">Candidate comparison</h2><p>Prepared simulation fixtures, not live public datasets.</p></div>
+                <div><h2 id="candidate-comparison-title">Candidate comparison</h2><p>{runMode === "replay" ? simulationLabel ?? "Prepared replay fixture; not live scientific discovery." : "Official-source metadata prepared for human scientific review."}</p></div>
                 <span>{candidates.length} candidates</span>
               </div>
               <div className="admin-candidate-grid">
@@ -293,22 +1290,24 @@ export function AdminEndpointDetail() {
                     <article className={`admin-candidate-card ${selected === candidate.candidate_id ? "candidate-selected" : ""}`} key={candidate.candidate_id}>
                       <div className="admin-card-title-row">
                         <span className={`admin-candidate-status admin-candidate-${status.toLowerCase().replace(/ /g, "-")}`}>{status}</span>
-                        <span className="admin-fixture-label">Prepared simulation fixture</span>
+                        <span className="admin-fixture-label">{runMode === "replay" ? "Prepared replay fixture" : candidate.accession_verified ? "Official accession verified" : "Verification required"}</span>
                       </div>
-                      <h3>{fixtureId(index)}</h3>
+                      <h3>{candidateLabel(candidate, index)}</h3>
                       <p>{candidate.title}</p>
                       <dl className="admin-candidate-facts">
-                        <div><dt>Source</dt><dd>Prepared Phase 0 fixture</dd></div>
+                        <div><dt>Source</dt><dd>{candidate.source.startsWith("https://") ? <a href={candidate.source} target="_blank" rel="noreferrer">NCBI GEO</a> : candidate.source}</dd></div>
+                        <div><dt>Organism</dt><dd>{candidate.organism?.join(", ") || "Not specified"}</dd></div>
                         <div><dt>Samples</dt><dd>{candidate.sample_count ?? "Not supplied"}</dd></div>
-                        <div><dt>Controls</dt><dd>{candidate.controls_available == null ? "Not verified" : candidate.controls_available ? "Available" : "Unavailable"}</dd></div>
+                        <div><dt>Controls</dt><dd>{candidate.treatment_control_evidence ?? (candidate.controls_available == null ? "Not verified" : candidate.controls_available ? "Available" : "Unavailable")}</dd></div>
                         <div><dt>Data type</dt><dd>{candidate.data_type ?? "Not specified"}</dd></div>
-                        <div><dt>Context</dt><dd>{candidate.context ?? "Not specified"}</dd></div>
+                        <div><dt>Context</dt><dd>{candidate.biological_context ?? candidate.context ?? "Not specified"}</dd></div>
+                        <div><dt>Dose / time</dt><dd>{candidate.dose_time_evidence ?? "Not verified"}</dd></div>
                       </dl>
                       <h4>Cautions</h4>
                       <ul>{candidate.limitations.map((item) => <li key={item}>{item}</li>)}</ul>
                       <label className="admin-candidate-choice">
                         <input type="radio" name="candidate" checked={selected === candidate.candidate_id} onChange={() => setSelected(candidate.candidate_id)} />
-                        Select {fixtureId(index)}
+                        Select {candidateLabel(candidate, index)}
                       </label>
                     </article>
                   );
@@ -321,13 +1320,56 @@ export function AdminEndpointDetail() {
             <div className="admin-panel-heading"><h2 id="workflow-actions-title">Workflow actions</h2><span>Only valid actions are shown</span></div>
             <div className="admin-actions" aria-label="Workflow controls">
               {build.current_stage === "DRAFT" && <button disabled={busy} onClick={() => void command("start")}>Start workflow</button>}
+              {build.workflow_kind === "training_dataset_discovery" &&
+                !legacyReadOnly &&
+                build.current_stage === "APPROVED_SPECIFICATION" && (
+                  <button disabled={busy} onClick={() => void continueTrainingDataset()}>Compile discovery plan</button>
+                )}
+              {build.workflow_kind === "training_dataset_discovery" &&
+                !legacyReadOnly &&
+                build.current_stage === "DISCOVERY_PLANNING" && (
+                  <button
+                    disabled={busy}
+                    title={sourceDiscoveryReady ? "Record the reviewed pre-approval discovery boundary." : "Persist the registered-provider capability blocker without running providers."}
+                    onClick={() => void authorizeSourceDiscovery()}
+                  >{sourceDiscoveryReady ? "Authorize candidate discovery" : "Apply capability blocker"}</button>
+                )}
+              {build.workflow_kind === "training_dataset_discovery" &&
+                !legacyReadOnly &&
+                ["COMPILING_TARGET_DATASET_SPECIFICATION", "SPECIFYING_TARGET_DATASET", "DERIVING_COMPONENT_REQUIREMENTS"].includes(
+                  build.current_stage,
+                ) && (
+                  <button
+                    disabled={busy || (build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && requirementsReady && !sourceDiscoveryReady)}
+                    title={build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && requirementsReady && !sourceDiscoveryReady ? "Provider, approved adapters, specification, requirements, and stage must all be ready." : undefined}
+                    onClick={() => void (build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && requirementsReady ? authorizeSourceDiscovery() : continueTrainingDataset())}
+                  >
+                    {build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" && requirementsReady ? "Authorize reviewed source discovery" : build.current_stage === "DERIVING_COMPONENT_REQUIREMENTS" ? "Derive component requirements" : "Continue active stage"}
+                  </button>
+                )}
+              {build.workflow_kind === "training_dataset_discovery" && ["DISCOVERING_ACTIVITY_EVIDENCE", "DISCOVERING_TRANSCRIPTOMIC_EVIDENCE", "DISCOVERING_IDENTITY_AND_STRUCTURE_SOURCES", "DISCOVERING_SUPPORTING_METADATA", "VALIDATING_DISCOVERED_SOURCES"].includes(build.current_stage) && <button disabled={busy} onClick={() => void continueTrainingDataset()}>Resume authorized source discovery</button>}
+              {build.current_stage === "AWAITING_SOURCE_INVENTORY_REVIEW" && <button disabled={busy} onClick={() => document.getElementById("verified-source-inventory")?.scrollIntoView({ behavior: "smooth" })}>Review source inventory</button>}
+              {build.current_stage === "AWAITING_SOURCE_INVENTORY_REVIEW" && <button className="admin-secondary" disabled title="Gap-directed discovery is intentionally deferred in this phase">Request later targeted discovery</button>}
               {canPause && <button disabled={busy} onClick={() => void command("pause")}>Pause</button>}
               {build.current_stage === "PAUSED" && <button disabled={busy} onClick={() => void command("resume")}>Resume</button>}
-              {build.current_stage === "FAILED" && <button disabled={busy} onClick={() => void command("retry")}>Retry failed step</button>}
+              {isSpecificationRevision && <>
+                <button disabled={busy} onClick={() => void command("revise-endpoint-request")}>Revise endpoint request</button>
+                <button disabled={busy} onClick={() => void command("retry-dataset-specification")}>Compile revised specification</button>
+              </>}
+              {canRetry && <button disabled={busy} onClick={() => void command("retry")}>Retry failed step</button>}
               {canCancel && <button className="admin-danger-outline" disabled={busy} onClick={(event) => requestConfirmation("cancel", undefined, event.currentTarget)}>Cancel workflow</button>}
               <button className="admin-secondary" disabled={busy} onClick={() => void load()}>Refresh</button>
+              {import.meta.env.DEV && runMode !== "replay" && !isSpecificationRevision && <button className="admin-secondary" disabled={busy} onClick={() => void refreshSourceMetadata()}>Refresh source metadata</button>}
             </div>
           </section>
+
+          {(decisionSummary || unresolvedQuestions.length > 0) && (
+            <section className="admin-panel" aria-labelledby="decision-summary-title">
+              <div className="admin-panel-heading"><h2 id="decision-summary-title">Decision summary</h2><span>Human review required</span></div>
+              {decisionSummary && <p>{decisionSummary}</p>}
+              {unresolvedQuestions.length > 0 && <><h3>Unresolved questions</h3><ul>{unresolvedQuestions.map((item) => <li key={item}>{item}</li>)}</ul></>}
+            </section>
+          )}
         </main>
 
         <aside className="admin-secondary-column">
@@ -335,21 +1377,71 @@ export function AdminEndpointDetail() {
             <div className="admin-panel-heading"><h2 id="agent-summary-title">Agent activity</h2><span>{runs.length} run{runs.length === 1 ? "" : "s"}</span></div>
             {trace ? (
               <div className="admin-agent-summary">
+                <div className="admin-run-identifier">
+                  <span>Run {shortRunId(trace.id)}</span>
+                  <button
+                    type="button"
+                    className="admin-copy-button"
+                    aria-label={`Copy full run ID ${trace.id}`}
+                    onClick={() => void copyIdentifier("run", trace.id)}
+                  >{copiedIdentifier === "run" ? "Copied" : "Copy"}</button>
+                </div>
                 <h3>{trace.agent_name}</h3>
-                <span className="admin-status">{trace.status === "completed" ? "Completed" : "Completed for review"}</span>
+                <span className="admin-status">{runStatusLabel(trace, runMode, hasCandidateRecommendation)}</span>
                 <dl>
-                  <div><dt>Output</dt><dd>{candidates.length} candidates prepared</dd></div>
-                  <div><dt>Tools used</dt><dd>{agentTools.length}{trace.tools.length === 0 && agentTools.length > 0 ? " (replayed)" : ""}</dd></div>
+                  <div><dt>Mode</dt><dd>{configuredModeLabel(runMode)}</dd></div>
+                  <div><dt>Final run status</dt><dd>{humanizeMachineValue(trace.status)}</dd></div>
+                  <div><dt>Output</dt><dd>{hasCompletedOutput ? `${candidates.length} candidates prepared` : "No recommendation available"}</dd></div>
+                  <div><dt>Agent runs</dt><dd>{runs.length}</dd></div>
+                  <div><dt>Model turns</dt><dd>{trace.turns}</dd></div>
+                  <div><dt>Provider retries</dt><dd>{providerRetries}</dd></div>
+                  <div><dt>Tool calls</dt><dd>{agentTools.length}</dd></div>
+                  <div><dt>Candidate inspection</dt><dd>{inspectionCounts ? `${inspectionCounts.inspected} inspected / ${inspectionCounts.failed} unresolved` : "Not reached"}</dd></div>
                   <div><dt>Duration</dt><dd>{(trace.duration_ms / 1000).toFixed(2)} s</dd></div>
-                  <div><dt>Provider</dt><dd>Deterministic simulation</dd></div>
+                  <div><dt>Provider</dt><dd>{trace.provider}</dd></div>
+                  <div><dt>Model</dt><dd>{trace.model_identifier}</dd></div>
+                  <div><dt>Input tokens</dt><dd>{usageNumber(trace, "input_tokens")}</dd></div>
+                  <div><dt>Output tokens</dt><dd>{usageNumber(trace, "output_tokens")}</dd></div>
+                  <div><dt>Cached input tokens</dt><dd>{usageNumber(trace, "cached_tokens")}</dd></div>
+                  <div><dt>Estimated cost</dt><dd>{trace.usage.usage_status === "usage_unavailable" ? "Usage unavailable after structured-output failure" : `$${(usageNumber(trace, "cost_cents") / 100).toFixed(4)}`}</dd></div>
                 </dl>
-                <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{trace.tools.length === 0 ? "replayed" : tool.status}</small></li>)}</ol>
+                {geoSearches.length > 0 && <div className="admin-trace-summary"><h4>Rendered GEO queries</h4><ol>{geoSearches.map((search, index) => <li key={`${search.renderedQuery}-${index}`}><strong>{search.strategyReason}</strong><code>{search.renderedQuery}</code><span>{search.resultCount} results / {search.cacheStatus}</span></li>)}</ol></div>}
+                {turnExposures.length > 0 && <div className="admin-trace-summary"><h4>Tools exposed per turn</h4><ol>{turnExposures.map((turn) => <li key={`${turn.turn}-${turn.substage}`}><strong>Turn {turn.turn}: {humanizeMachineValue(turn.substage)}</strong><span>{turn.tools.length > 0 ? turn.tools.map(toolLabel).join(", ") : "Final structured output only"}</span></li>)}</ol></div>}
+                {normalizationWarningCount > 0 && <p className="admin-secondary-note">{controlledVocabularyWarningCount > 0 ? `${controlledVocabularyWarningCount} controlled-vocabulary ${controlledVocabularyWarningCount === 1 ? "value was" : "values were"} normalized before execution.` : emptyOptionalFilterWarningCount === normalizationWarningCount ? `${emptyOptionalFilterWarningCount} empty optional ${emptyOptionalFilterWarningCount === 1 ? "filter was" : "filters were"} removed before execution.` : `${normalizationWarningCount} optional filter ${normalizationWarningCount === 1 ? "value was" : "values were"} safely normalized before execution.`}</p>}
+                {developerDiagnostic && <div className="admin-trace-summary"><h4>Safe diagnostic</h4><p>{developerDiagnostic}</p></div>}
+                {(outputDiagnostic || outputFingerprint || isSpecificationRevision) && (
+                  <details className="admin-trace-summary">
+                    <summary>Technical audit</summary>
+                    <dl>
+                      {outputDiagnostic && <>
+                        <div><dt>Failure category</dt><dd>{humanizeMachineValue(String(outputDiagnostic.failure_classification ?? "unknown_model_behavior"))}</dd></div>
+                        <div><dt>Schema</dt><dd>{String(outputDiagnostic.output_schema_name ?? "unknown")} · {String(outputDiagnostic.output_schema_version ?? "unknown")}</dd></div>
+                      </>}
+                      {outputFingerprint && <>
+                        <div><dt>Output type</dt><dd>{String(outputFingerprint.output_type_name ?? "unknown")} · {outputFingerprint.output_type_present === true ? "present" : "missing"}</dd></div>
+                        <div><dt>Structured API</dt><dd>{humanizeMachineValue(String(outputFingerprint.api_surface ?? "unknown"))} · {outputFingerprint.strict_json_schema === true ? "strict schema" : "non-strict schema"}</dd></div>
+                        <div><dt>Schema hash</dt><dd><code>{String(outputFingerprint.schema_hash ?? "unknown")}</code></dd></div>
+                        <div><dt>Boundary/runtime</dt><dd>{outputFingerprint.boundary_runtime_contracts_match === true ? "Matched" : "Mismatch — execution blocked"}</dd></div>
+                      </>}
+                      {outputDiagnostic && <>
+                        <div><dt>Response shape</dt><dd>{String(outputDiagnostic.output_item_count ?? 0)} items · {textList(outputDiagnostic.output_item_types).join(", ") || "no output items"}</dd></div>
+                        <div><dt>Text / JSON</dt><dd>{outputDiagnostic.text_output_present === true ? `${String(outputDiagnostic.bounded_text_length ?? 0)} text characters` : "no text"} · {outputDiagnostic.json_object_present === true ? "JSON object present" : "no JSON object"}</dd></div>
+                      </>}
+                      <div><dt>Request IDs</dt><dd>{Array.isArray(outputDiagnostic?.provider_request_ids) && outputDiagnostic.provider_request_ids.length ? outputDiagnostic.provider_request_ids.join(", ") : textList(trace.usage.provider_request_ids).join(", ") || "not available"}</dd></div>
+                      <div><dt>Response IDs</dt><dd>{Array.isArray(outputDiagnostic?.provider_response_ids) && outputDiagnostic.provider_response_ids.length ? outputDiagnostic.provider_response_ids.join(", ") : textList(trace.usage.provider_response_ids).join(", ") || "not available"}</dd></div>
+                      <div><dt>Usage status</dt><dd>{humanizeMachineValue(String((outputDiagnostic?.usage as Record<string, unknown> | undefined)?.usage_status ?? trace.usage.usage_status ?? "usage_unavailable"))}</dd></div>
+                      {outputDiagnostic && <div><dt>Handler</dt><dd>{humanizeMachineValue(String(outputDiagnostic.error_handler ?? "none"))}</dd></div>}
+                    </dl>
+                  </details>
+                )}
+                {scientificSourceDiagnostics.length > 0 && <div className="admin-trace-summary"><h4>Scientific-source diagnostics</h4>{scientificSourceDiagnostics.map((diagnostic, index) => <SourceDiagnosticDetails diagnostic={diagnostic} key={`${diagnostic.tool_name}-${index}`} />)}</div>}
+                <ol id="agent-tools" className="admin-tool-list">{agentTools.map((tool) => <li key={tool.id}><span>{toolLabel(tool.tool_name)}</span><small>{tool.status}</small></li>)}</ol>
                 <div className="admin-inline-actions">
                   <button className="admin-link-button" onClick={() => setShowTrace((value) => !value)}>{showTrace ? "Hide trace" : "View trace"}</button>
                   <a href="#agent-tools">View tools used</a>
                   <a href="#artifacts">View generated artifact</a>
                 </div>
-                {showTrace && <div className="admin-trace-summary" id="agent-trace"><h4>Trace events</h4><ol>{(trace.trace?.events ?? []).map((event, index) => <li key={index}>{typeof event.event_type === "string" ? humanizeMachineValue(event.event_type.replace(/\./g, "_")) : `Trace event ${index + 1}`}</li>)}</ol></div>}
+                {showTrace && <div className="admin-trace-summary" id="agent-trace"><h4>Trace events</h4><ol>{(trace.trace?.events ?? []).map((event, index) => <li key={index}>{typeof event.event_type === "string" ? humanizeMachineValue(event.event_type.replace(/\./g, "_")) : `Trace event ${index + 1}`}</li>)}</ol>{normalizationSummaries.map((summary, index) => <section key={`${summary.toolName}-${index}`}><h5>{toolLabel(summary.toolName)} input normalization</h5><p>{summary.warningCodes.length} warning{summary.warningCodes.length === 1 ? "" : "s"}: {summary.warningCodes.join(", ")}</p><dl><div><dt>Model-supplied arguments</dt><dd><code>{JSON.stringify(summary.originalArguments)}</code></dd></div><div><dt>Executed arguments</dt><dd><code>{JSON.stringify(summary.normalizedArguments)}</code></dd></div></dl><ul className="admin-normalization-list">{summary.warnings.map((warning, warningIndex) => <li key={`${warning.code}-${warning.field}-${warningIndex}`}><strong>{warning.field}</strong><span>{warning.original ?? "not recorded"} → {warning.normalized ?? "not executed"}</span><small>{warning.code}{warning.policyVersion ? ` · ${warning.policyVersion}` : ""}</small></li>)}</ul></section>)}</div>}
               </div>
             ) : <div className="admin-empty">No agent run yet.</div>}
           </section>
@@ -374,6 +1466,10 @@ export function AdminEndpointDetail() {
               </div>
             ) : (
               <div id="audit-panel" role="tabpanel" aria-labelledby="audit-tab">
+                <dl className="admin-audit-identifiers">
+                  <div><dt>Build ID</dt><dd>{build.id}</dd></div>
+                  {trace && <div><dt>Current run ID</dt><dd>{trace.id}</dd></div>}
+                </dl>
                 <ol className="admin-audit-list">
                   {[...events].reverse().map((event) => <li key={event.id}><div><strong>{event.event_type}</strong><time>{new Date(event.created_at).toLocaleString()}</time></div><dl><div><dt>Transition</dt><dd>{event.from_state ?? "none"} to {event.to_state ?? "none"}</dd></div><div><dt>Actor</dt><dd>{event.actor_type} / {event.actor_id}</dd></div><div><dt>Event ID</dt><dd>{event.id}</dd></div><div><dt>Event hash</dt><dd>{event.event_hash}</dd></div></dl></li>)}
                 </ol>
@@ -387,11 +1483,12 @@ export function AdminEndpointDetail() {
               <div><dt>Machine state</dt><dd>{build.current_stage}</dd></div>
               <div><dt>Workflow version</dt><dd>{build.version}</dd></div>
               <div><dt>Build ID</dt><dd>{build.id}</dd></div>
+              {trace && <div><dt>Current run ID</dt><dd>{trace.id}</dd></div>}
               {pending && <div><dt>Proposal binding</dt><dd>{pending.proposal_hash}</dd></div>}
             </dl>
           </details>
 
-          {errors.length > 0 && <section className="admin-panel admin-errors-panel"><div className="admin-panel-heading"><h2>Workflow errors</h2><span>{errors.length}</span></div>{errors.map((item) => <article className="admin-error-row" key={item.id}><strong>{humanizeMachineValue(item.code)}</strong><p>{item.safe_message}</p><span>{item.retryable ? "Retryable" : "Terminal"}</span></article>)}</section>}
+          {errors.length > 0 && <section className="admin-panel admin-errors-panel"><div className="admin-panel-heading"><h2>Workflow errors</h2><span>{errors.length}</span></div>{errors.map((item) => <article className="admin-error-row" key={item.id}><strong>{humanizeMachineValue(item.code)}</strong><p>{item.safe_message}</p><span>{item.retryable ? "Retryable" : "Terminal"}</span>{item.detail?.source_diagnostic && <SourceDiagnosticDetails diagnostic={item.detail.source_diagnostic} />}{item.detail?.tool_diagnostic && <ToolInvocationFailureDetails diagnostic={item.detail.tool_diagnostic} />}</article>)}</section>}
 
           {import.meta.env.DEV && (
             <details className="admin-panel admin-developer-tools">
@@ -405,8 +1502,8 @@ export function AdminEndpointDetail() {
 
       {confirmation && (
         <AdminModal
-          title={confirmation.kind === "approve" ? "Confirm dataset approval" : confirmation.kind === "cancel" ? "Cancel this workflow?" : `Confirm ${humanizeMachineValue(confirmation.kind).toLowerCase()}`}
-          description={confirmation.kind === "approve" ? "Review the selected fixture and the scope of this decision before continuing." : "This decision will be recorded in the immutable audit history."}
+          title={confirmation.kind === "approve" ? (isAssemblyApproval ? "Confirm assembly strategy approval" : isSpecificationApproval ? "Confirm target specification approval" : "Confirm dataset approval") : confirmation.kind === "cancel" ? "Cancel this workflow?" : `Confirm ${humanizeMachineValue(confirmation.kind).toLowerCase()}`}
+          description={confirmation.kind === "approve" ? (isAssemblyApproval ? "This approves only the verified source graph and preparation strategy; it does not authorize training." : "Review the selected proposal and approval scope before continuing.") : "This decision will be recorded in the immutable audit history."}
           onClose={() => setConfirmation(null)}
           returnFocus={confirmationTrigger.current}
         >
@@ -418,10 +1515,10 @@ export function AdminEndpointDetail() {
           ) : (
             <div className="admin-confirmation">
               <dl>
-                <div><dt>Selected candidate</dt><dd>{selectedCandidate ? `${fixtureId(selectedIndex)} · ${selectedCandidate.title}` : "Prepared candidate"}</dd></div>
+                <div><dt>Selected candidate</dt><dd>{selectedCandidate ? `${candidateLabel(selectedCandidate, selectedIndex)} · ${selectedCandidate.title}` : "No candidate"}</dd></div>
                 <div><dt>Evidence binding</dt><dd>Current immutable candidate artifact</dd></div>
-                <div><dt>Approval scope</dt><dd>Dataset selection for this build only</dd></div>
-                <div><dt>Next stage</dt><dd>{confirmation.kind === "approve" ? "Prepare the selected dataset" : confirmation.kind === "request_revision" ? "Revise the prepared comparison" : confirmation.kind === "choose_alternative" ? "Record the alternative selection" : "Stop this dataset proposal"}</dd></div>
+                <div><dt>Approval scope</dt><dd>{isAssemblyApproval ? "Verified source graph and deterministic preparation strategy only" : isSpecificationApproval ? "Target training-data contract only" : "Dataset selection for this build only"}</dd></div>
+                <div><dt>Next stage</dt><dd>{confirmation.kind === "approve" ? (isAssemblyApproval ? "Complete assembly review; construction and training remain deferred" : isSpecificationApproval ? "Derive component requirements" : "Prepare the selected dataset") : confirmation.kind === "request_revision" ? "Revise the prepared comparison" : confirmation.kind === "choose_alternative" ? "Record the alternative selection" : "Stop this proposal"}</dd></div>
               </dl>
               {comment && <p><strong>Reviewer comment:</strong> {comment}</p>}
               <div className="admin-modal-actions"><button className="admin-secondary" onClick={() => setConfirmation(null)}>Go back</button><button className={confirmation.kind === "reject" ? "admin-danger" : "admin-primary"} disabled={busy} onClick={() => confirmation.approval && void decide(confirmation.approval, confirmation.kind as Decision)}>Confirm decision</button></div>

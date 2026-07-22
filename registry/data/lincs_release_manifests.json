@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0.0",
+  "registry_version": "1.0.0",
+  "releases": [
+    {
+      "release_id": "lincs-gse92742-phase1-2017",
+      "source_registry_id": "lincs",
+      "accession": "GSE92742",
+      "source_release": "phase1_2017",
+      "source_locator": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE92742",
+      "licence_and_provenance": [
+        "Broad LINCS / Connectivity Map Phase I metadata distributed through NCBI GEO GSE92742.",
+        "Source files remain governed by their official GEO and LINCS distribution terms."
+      ],
+      "chemical_perturbation_types": ["trt_cp"],
+      "resources": [
+        {
+          "resource_id": "gse92742-pert-info",
+          "logical_role": "pert_info",
+          "source_registry_locator_name": "gse92742_pert_info",
+          "public_locator": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_pert_info.txt.gz",
+          "expected_filename_pattern": "GSE92742_Broad_LINCS_pert_info.txt.gz",
+          "compression": "gzip",
+          "expected_columns": ["pert_id", "pert_iname", "pert_type", "inchi_key"],
+          "column_mapping": {"pert_id":"pert_id", "perturbation_type":"pert_type", "canonical_name":"pert_iname", "inchikey":"inchi_key", "pubchem_cid":"pubchem_cid", "canonical_smiles":"canonical_smiles"},
+          "expected_sha256": null,
+          "maximum_response_bytes": 100000000,
+          "required": true,
+          "access_phase": "pre_approval_metadata",
+          "licence_and_provenance": ["Official GSE92742 perturbagen metadata resource."]
+        },
+        {
+          "resource_id": "gse92742-sig-info",
+          "logical_role": "sig_info",
+          "source_registry_locator_name": "gse92742_sig_info",
+          "public_locator": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_sig_info.txt.gz",
+          "expected_filename_pattern": "GSE92742_Broad_LINCS_sig_info.txt.gz",
+          "compression": "gzip",
+          "expected_columns": ["sig_id", "pert_id", "pert_type", "cell_id", "pert_dose", "pert_time"],
+          "column_mapping": {"sig_id":"sig_id", "pert_id":"pert_id", "perturbation_type":"pert_type", "cell_id":"cell_id", "dose":"pert_dose", "dose_unit":"pert_dose_unit", "exposure_time":"pert_time", "time_unit":"pert_time_unit", "quality_status":"distil_ss", "processing_metadata":"distil_id"},
+          "expected_sha256": null,
+          "maximum_response_bytes": 450000000,
+          "required": true,
+          "access_phase": "pre_approval_metadata",
+          "licence_and_provenance": ["Official GSE92742 signature metadata resource; contains no expression values."]
+        },
+        {
+          "resource_id": "gse92742-cell-info",
+          "logical_role": "cell_info",
+          "source_registry_locator_name": "gse92742_cell_info",
+          "public_locator": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_cell_info.txt.gz",
+          "expected_filename_pattern": "GSE92742_Broad_LINCS_cell_info.txt.gz",
+          "compression": "gzip",
+          "expected_columns": ["cell_id"],
+          "column_mapping": {"cell_id":"cell_id", "organism":"organism", "tissue_or_lineage":"cell_lineage", "disease_or_context":"primary_disease"},
+          "expected_sha256": null,
+          "maximum_response_bytes": 10000000,
+          "required": true,
+          "access_phase": "pre_approval_metadata",
+          "licence_and_provenance": ["Official GSE92742 cell metadata resource."]
+        },
+        {
+          "resource_id": "gse92742-gene-info",
+          "logical_role": "gene_info",
+          "source_registry_locator_name": "gse92742_gene_info",
+          "public_locator": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_gene_info.txt.gz",
+          "expected_filename_pattern": "GSE92742_Broad_LINCS_gene_info.txt.gz",
+          "compression": "gzip",
+          "expected_columns": ["pr_gene_id", "pr_gene_symbol", "pr_is_lm"],
+          "column_mapping": {"gene_identifier":"pr_gene_id", "gene_symbol":"pr_gene_symbol", "landmark_gene_status":"pr_is_lm"},
+          "expected_sha256": null,
+          "maximum_response_bytes": 25000000,
+          "required": true,
+          "access_phase": "pre_approval_metadata",
+          "licence_and_provenance": ["Official GSE92742 gene and landmark-status metadata resource."]
+        },
+        {
+          "resource_id": "gse92742-level5-modz-gctx",
+          "logical_role": "level5_gctx",
+          "source_registry_locator_name": "gse92742_level5_modz_gctx",
+          "public_locator": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92742/suppl/GSE92742_Broad_LINCS_Level5_COMPZ.MODZ_n473647x12328.gctx.gz",
+          "expected_filename_pattern": "GSE92742_Broad_LINCS_Level5_COMPZ.MODZ_n473647x12328.gctx.gz",
+          "compression": "gzip",
+          "expected_columns": [],
+          "column_mapping": {},
+          "expected_sha256": null,
+          "maximum_response_bytes": 25000000000,
+          "required": false,
+          "access_phase": "post_approval_extraction",
+          "licence_and_provenance": ["Future post-approval Level-5 matrix locator; retrieval is forbidden in Phase 2A."]
+        }
+      ],
+      "manifest_fingerprint": "ad1e072b77a78ca9c3ec5b0a7363b85de32da138957ec4f0a8a2d47c5ddeb44b"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "fixture_id": "emergency-stage2-tr-receptor",
+  "endpoint_name": "Thyroid hormone receptor activity",
+  "endpoint_slug": "offline-tr-activity",
+  "biological_goal": "Build separate binding, agonism and antagonism endpoint evidence linked to compound-induced transcriptomic profiles.",
+  "modalities": ["binding", "agonism", "antagonism"],
+  "approved_modality": "binding",
+  "activity_source": "OFFLINE_ACTIVITY_TR",
+  "transcriptomic_source": "OFFLINE_TRANSCRIPTOMICS_TR",
+  "target": "Thyroid hormone receptor"
+}

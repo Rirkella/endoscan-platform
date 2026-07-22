@@ -1,0 +1,8 @@
+sig_id	pert_id	pert_type	cell_id	pert_dose	pert_dose_unit	pert_time	pert_time_unit	distil_ss	distil_id
+SIG-A-A549-24	BRD-A00000001	trt_cp	A549	10	uM	24	h	0.95	DISTIL-A1
+SIG-A-MCF7-6	BRD-A00000001	trt_cp	MCF7	1	uM	6	h	0.80	DISTIL-A2
+SIG-B-A549-24	BRD-B00000002	trt_cp	A549	5	uM	24	h	0.70	DISTIL-B1
+SIG-C-HEPG2-24	BRD-C00000003	trt_cp	HEPG2	10	uM	24	h	0.60	DISTIL-C1
+SIG-E-A549-48	BRD-E00000005	trt_cp	A549	2	uM	48	h	0.50	DISTIL-E1
+SIG-CTL-A549	CTL-VEHICLE	ctl_vehicle	A549	0	uM	24	h	1.00	DISTIL-C0
+	BRD-A00000001	trt_cp	A549	10	uM	24	h	0.10	DISTIL-MISSING

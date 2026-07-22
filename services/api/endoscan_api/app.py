@@ -18,12 +18,37 @@ from fastapi.middleware.cors import CORSMiddleware
 from endoscan_core.inference import ModelArtifactUnavailableError
 from endoscan_core.registry import find_repo_root, list_endpoints
 from endoscan_workflows.artifacts import LocalArtifactStore
+from endoscan_workflows.boundary_probe import AdapterBoundaryProbe
+from endoscan_workflows.config import AgentConfiguration
 from endoscan_workflows.database import WorkflowDatabase
+from endoscan_workflows.discovery_tools import DiscoveryToolService
 from endoscan_workflows.harness import AgentHarness
+from endoscan_workflows.lincs_metadata import (
+    load_lincs_release_registry,
+)
+from endoscan_workflows.lincs_streaming import StreamingLincsMetadataProvider
+from endoscan_workflows.openai_provider import OpenAIAgentProvider
+from endoscan_workflows.preapproval_providers import (
+    PreapprovalMetadataProvider,
+    PreapprovalProviderLayer,
+    load_preapproval_provider_registry,
+)
+from endoscan_workflows.preflight import ProviderAccessPreflight
+from endoscan_workflows.provider_execution import (
+    ProviderCredentialBoundary,
+    ProviderTaskExecutor,
+)
 from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
+from endoscan_workflows.reviewed_source_adapters import (
+    production_reviewed_source_registry,
+)
+from endoscan_workflows.semantics_v2_executor import SemanticsV2DiscoveryExecutor
 from endoscan_workflows.service import WorkflowService
+from endoscan_workflows.source_cache import SourceResponseCache
+from endoscan_workflows.source_probe import GeoValidationProbe
+from endoscan_workflows.source_security import ScientificSourceClient
 from endoscan_workflows.state_machine import WorkflowGraph
-from endoscan_workflows.tools import phase0_tool_registry
+from endoscan_workflows.tools import phase1_tool_registry
 
 from .admin.auth import AdminMutationLimiter
 from .admin.routes import router as admin_router
@@ -162,36 +187,161 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     )
     workflow_database = WorkflowDatabase(workflow_db_path)
     workflow_database.migrate()
-    artifact_store = LocalArtifactStore(workflow_database, artifact_root)
+    agent_configuration = AgentConfiguration.from_env()
+    artifact_store = LocalArtifactStore(
+        workflow_database,
+        artifact_root,
+        maximum_bytes=agent_configuration.source_response_maximum_bytes,
+    )
+    source_cache = SourceResponseCache(
+        workflow_database, ttl_seconds=agent_configuration.source_cache_ttl_seconds
+    )
+    source_client = ScientificSourceClient(
+        timeout_seconds=min(agent_configuration.source_request_timeout_seconds, 180.0),
+        maximum_bytes=agent_configuration.source_response_maximum_bytes,
+        requests_per_second=min(agent_configuration.source_requests_per_second, 2.0),
+        maximum_attempts=2,
+        maximum_redirects=2,
+    )
+    discovery_tools = DiscoveryToolService(
+        source_cache,
+        artifact_store,
+        source_client,
+        ncbi_email=agent_configuration.ncbi_email,
+        ncbi_api_key=(
+            agent_configuration.ncbi_api_key.get_secret_value()
+            if agent_configuration.ncbi_api_key
+            else None
+        ),
+    )
+    geo_validation_probe = GeoValidationProbe(
+        artifact_root=artifact_root,
+        source_client=source_client,
+        ttl_seconds=agent_configuration.source_cache_ttl_seconds,
+        ncbi_email=agent_configuration.ncbi_email,
+        ncbi_api_key=(
+            agent_configuration.ncbi_api_key.get_secret_value()
+            if agent_configuration.ncbi_api_key
+            else None
+        ),
+    )
+    reviewed_source_adapters = production_reviewed_source_registry(
+        client=source_client,
+        cache=source_cache,
+        artifacts=artifact_store,
+        epa_comptox_api_key=(
+            agent_configuration.epa_comptox_api_key.get_secret_value()
+            if agent_configuration.epa_comptox_api_key
+            else None
+        ),
+    )
+    lincs_manifest_path = root / "registry" / "data" / "lincs_release_manifests.json"
+    lincs_metadata_provider = (
+        StreamingLincsMetadataProvider(
+            load_lincs_release_registry(root),
+            ProviderTaskExecutor(
+                transport=source_client,
+                cache=source_cache,
+                artifacts=artifact_store,
+            ),
+        )
+        if lincs_manifest_path.is_file()
+        else None
+    )
+    preapproval_manifest_path = root / "registry" / "data" / "preapproval_provider_releases.json"
+    preapproval_provider_layer = (
+        PreapprovalProviderLayer(
+            PreapprovalMetadataProvider(
+                load_preapproval_provider_registry(root),
+                ProviderTaskExecutor(
+                    transport=source_client,
+                    cache=source_cache,
+                    artifacts=artifact_store,
+                    credential_boundary=ProviderCredentialBoundary(
+                        epa_comptox_api_key=(
+                            agent_configuration.epa_comptox_api_key.get_secret_value()
+                            if agent_configuration.epa_comptox_api_key
+                            else None
+                        )
+                    ),
+                ),
+                public_provider_cache_root=(
+                    Path(
+                        os.environ.get(
+                            "ENDOSCAN_PROVIDER_CACHE_ROOT",
+                            str(root / ".endoscan" / "provider-cache"),
+                        )
+                    )
+                ),
+            )
+        )
+        if preapproval_manifest_path.is_file()
+        else None
+    )
+    tool_registry = phase1_tool_registry(
+        root,
+        discovery_tools,
+        reviewed_source_adapters,
+        lincs_metadata_provider=lincs_metadata_provider,
+        preapproval_provider_layer=preapproval_provider_layer,
+    )
+    semantics_v2_discovery_executor = SemanticsV2DiscoveryExecutor(
+        workflow_database,
+        artifact_store,
+        tool_registry,
+    )
     provider_registry = ProviderRegistry()
     provider_registry.register("fake", FakeAgentProvider)
-    harness = AgentHarness(workflow_database, provider_registry, phase0_tool_registry(root))
+    provider_registry.register(
+        "openai", lambda: OpenAIAgentProvider(agent_configuration, tool_registry)
+    )
+    harness = AgentHarness(workflow_database, provider_registry, tool_registry)
     workflow_service = WorkflowService(
         workflow_database,
         artifact_store,
         WorkflowGraph(_workflow_state_machine_path(root)),
         repo_root=root,
         harness=harness,
+        agent_configuration=agent_configuration,
+        reviewed_source_adapters=reviewed_source_adapters,
+        semantics_v2_discovery_executor=semantics_v2_discovery_executor,
     )
+    recovered_discovery_tasks = semantics_v2_discovery_executor.recover_interrupted()
     recovered = workflow_service.recover_interrupted()
     app.state.workflow_database = workflow_database
     app.state.artifact_store = artifact_store
     app.state.provider_registry = provider_registry
+    app.state.agent_configuration = agent_configuration
+    app.state.provider_preflight = ProviderAccessPreflight(agent_configuration)
+    app.state.adapter_boundary_probe = AdapterBoundaryProbe(agent_configuration, tool_registry)
+    app.state.source_cache = source_cache
+    app.state.source_client = source_client
+    app.state.reviewed_source_adapters = reviewed_source_adapters
+    app.state.preapproval_provider_layer = preapproval_provider_layer
+    app.state.semantics_v2_discovery_executor = semantics_v2_discovery_executor
+    app.state.geo_validation_probe = geo_validation_probe
     app.state.workflow_service = workflow_service
     app.state.admin_development_mode = (
         os.environ.get("ENDOSCAN_ADMIN_MODE", "disabled").strip().lower() == "development"
     )
     app.state.admin_mutation_limiter = AdminMutationLimiter()
     app.state.agent_capabilities = {
-        "schema_version": "1.0.0",
-        "provider": "fake",
-        "label": "Prepared deterministic agent simulation",
-        "live_llm_calls": False,
-        "live_dataset_discovery": False,
+        **agent_configuration.public_status(),
+        "reviewed_source_adapters": reviewed_source_adapters.readiness(),
+        "reviewed_source_adapter_inventory": reviewed_source_adapters.public_inventory(),
+        "available_modes": ["live", "cached", "replay"],
+        "label": f"{agent_configuration.run_mode.value.title()} agent mode",
+        "live_llm_calls": (
+            agent_configuration.live_enabled
+            and agent_configuration.run_mode.value in {"live", "cached"}
+        ),
+        "live_dataset_discovery": agent_configuration.run_mode.value == "live",
         "rag": False,
         "registry_publication": False,
         "recovered_interrupted_steps": recovered,
+        "recovered_semantics_v2_discovery_tasks": recovered_discovery_tasks,
     }
+    app.router.add_event_handler("shutdown", source_client.close)
     app.router.add_event_handler("shutdown", workflow_database.dispose)
 
     # CORS: explicit allow-list only (browser cross-origin fetch fix for the local demo /

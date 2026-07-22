@@ -1,0 +1,204 @@
+{
+  "release_datasets": [
+    {"id": "687e3940e4b02565bc3e291e", "name": "MySQL_Data", "description": "invitrodb v4.3 database package"},
+    {"id": "687e392ae4b02565bc3e2914", "name": "Summary_Files", "description": "invitrodb v4.3 summaries"},
+    {"id": "6894f2dae4b025654d12b716", "name": "Assay Description Documents", "description": "assay documentation"},
+    {"id": "fixture-plots", "name": "Plots", "description": "release plots"},
+    {"id": "fixture-notes", "name": "Release_Note", "description": "release notes"}
+  ],
+  "dataset_files": {
+    "687e3940e4b02565bc3e291e": [
+      {"id": "68c3365ce4b02565fc7cd3f3", "filename": "invitrodb_v4_3.sql.gz", "contentType": "application/gzip", "size": 99999999, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+    ],
+    "687e392ae4b02565bc3e2914": [
+      {"id": "68af6b70e4b02565fc7c3a98", "filename": "INVITRODB_SUMMARY.zip", "contentType": "application/zip", "size": 88888888, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+    ],
+    "6894f2dae4b025654d12b716": [
+      {"id": "fixture-assay-document", "filename": "assay_descriptions.xlsx", "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "size": 12345}
+    ]
+  },
+  "assays": [
+    {
+      "aeid": 1001,
+      "assayComponentEndpointName": "Example receptor ligand binding endpoint",
+      "assayComponentEndpointDesc": "Competitive binding to example receptor",
+      "assayFunctionType": "binding",
+      "normalizedDataType": "percent activity",
+      "signalDirection": "decrease",
+      "intendedTargetType": "protein",
+      "intendedTargetFamily": "nuclear receptor",
+      "acid": 501,
+      "assayComponentName": "Example receptor binding component",
+      "assayComponentTargetDesc": "Example receptor",
+      "biologicalProcessTarget": "receptor ligand binding",
+      "assayDesignType": "binding",
+      "assayFormatType": "cell-free",
+      "aid": 90001,
+      "assayName": "EPA example receptor binding assay",
+      "assayDesc": "Source-backed assay annotation",
+      "organism": "Homo sapiens",
+      "tissue": "not applicable",
+      "cellShortName": "cell free",
+      "timepointHr": 1,
+      "cellViabilityAssay": false,
+      "asid": 301,
+      "assaySourceName": "ToxCast",
+      "assaySourceDesc": "EPA ToxCast programme",
+      "gene": [{"officialSymbol": "EXR1", "entrezGeneId": 10001}],
+      "citations": [{"doi": "10.1000/example-1", "title": "Example assay"}]
+    },
+    {
+      "aeid": 1002,
+      "assayComponentEndpointName": "Example receptor binding confirmation",
+      "assayFunctionType": "binding",
+      "intendedTargetType": "protein",
+      "intendedTargetFamily": "nuclear receptor",
+      "acid": 502,
+      "assayComponentName": "Binding confirmation component",
+      "assayComponentTargetDesc": "Example receptor",
+      "assayDesignType": "binding",
+      "assayFormatType": "biochemical",
+      "assayName": "Confirmation binding assay",
+      "organism": "Homo sapiens",
+      "cellViabilityAssay": false,
+      "asid": 302,
+      "assaySourceName": "NovaScreen",
+      "gene": [{"geneSymbol": "EXR2", "uniprotAccessionNumber": "P00002"}]
+    },
+    {
+      "aeid": 1003,
+      "assayComponentEndpointName": "Example receptor agonist endpoint",
+      "assayFunctionType": "agonist",
+      "intendedTargetFamily": "nuclear receptor",
+      "assayDesignType": "reporter gene",
+      "assayFormatType": "cell-based",
+      "assayName": "Agonism assay",
+      "organism": "Homo sapiens",
+      "cellShortName": "HEK293",
+      "timepointHr": 24,
+      "cellViabilityAssay": false,
+      "asid": 303,
+      "assaySourceName": "Tox21",
+      "gene": [{"officialSymbol": "EXR1"}]
+    },
+    {
+      "aeid": 1004,
+      "assayComponentEndpointName": "Example receptor antagonist endpoint",
+      "assayFunctionType": "antagonist",
+      "intendedTargetFamily": "nuclear receptor",
+      "assayDesignType": "reporter gene",
+      "assayFormatType": "cell-based",
+      "signalDirection": "decrease",
+      "assayName": "Antagonism assay",
+      "organism": "Homo sapiens",
+      "cellShortName": "HepG2",
+      "timepointHr": 24,
+      "cellViabilityAssay": false,
+      "asid": 304,
+      "assaySourceName": "ToxCast",
+      "gene": [{"officialSymbol": "EXR1"}]
+    },
+    {
+      "aeid": 1005,
+      "assayComponentEndpointName": "Cell viability counter-screen",
+      "assayFunctionType": "viability",
+      "assayDesignType": "viability",
+      "assayFormatType": "cell-based",
+      "assayName": "Viability assay",
+      "organism": "Homo sapiens",
+      "cellViabilityAssay": true,
+      "asid": 305,
+      "assaySourceName": "ToxCast"
+    },
+    {
+      "aeid": 1006,
+      "assayComponentEndpointName": "Unrelated enzyme inhibition",
+      "assayFunctionType": "inhibition",
+      "intendedTargetFamily": "enzyme",
+      "assayName": "Unrelated assay",
+      "organism": "Homo sapiens",
+      "cellViabilityAssay": false,
+      "asid": 306,
+      "assaySourceName": "ToxCast"
+    },
+    {
+      "aeid": 1007,
+      "assayComponentEndpointName": "Unclassified source assay",
+      "assayFunctionType": "binding",
+      "assayName": "Missing source metadata",
+      "organism": "Rattus norvegicus",
+      "cellViabilityAssay": false
+    }
+  ],
+  "summaries": {
+    "1001": [{"aeid": 1001, "activeMc": 12, "totalMc": 120, "activeSc": 2, "totalSc": 20}],
+    "1002": [{"aeid": 1002, "activeMc": 7, "totalMc": 80, "activeSc": 1, "totalSc": 10}]
+  },
+  "details": {
+    "1001": [
+      {
+        "aeid": 1001,
+        "dtxsid": "DTXSID00000001",
+        "spid": "SPID-1",
+        "chid": 11,
+        "chnm": "Example active compound",
+        "casn": "50-00-0",
+        "hitc": 1,
+        "actp": 0.42,
+        "fitc": 1,
+        "coff": 0,
+        "nrep": 3,
+        "nconc": 8,
+        "npts": 24,
+        "concMin": -3.0,
+        "concMax": 1.0,
+        "testedConcUnit": "uM",
+        "modelType": "hill",
+        "m4id": 4,
+        "respMax": 88.0
+      },
+      {
+        "aeid": 1001,
+        "dtxsid": "DTXSID00000002",
+        "spid": "SPID-2",
+        "chid": 12,
+        "chnm": "Example inactive compound",
+        "hitc": 0,
+        "actp": null,
+        "fitc": 0,
+        "coff": 1,
+        "nrep": 2,
+        "nconc": 8,
+        "testedConcUnit": "uM",
+        "modelType": "constant"
+      },
+      {
+        "aeid": 1001,
+        "dtxsid": null,
+        "spid": null,
+        "chid": null,
+        "chnm": "Record with missing stable identifier",
+        "hitc": 0,
+        "fitc": 1,
+        "nrep": 1,
+        "nconc": 1,
+        "testedConcUnit": "uM"
+      }
+    ],
+    "1002": [
+      {
+        "aeid": 1002,
+        "dtxsid": "DTXSID00000003",
+        "spid": "SPID-3",
+        "chid": 13,
+        "chnm": "Confirmation assay compound",
+        "hitc": 0,
+        "fitc": 0,
+        "nrep": 2,
+        "nconc": 6,
+        "testedConcUnit": "uM",
+        "modelType": "constant"
+      }
+    ]
+  }
+}
