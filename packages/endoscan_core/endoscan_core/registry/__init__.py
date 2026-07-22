@@ -1,7 +1,7 @@
 """EndoScan model/dataset registry — the contract between dataset construction,
 training, and serving (see ``docs/DATA_MODEL_AND_ARTIFACTS.md``).
 
-At M1 this package provides:
+This package provides:
 - a typed schema for endpoint entries (`schema.py`),
 - a thin JSON-backed read/write store (`store.py`),
 - markdown/YAML card templates + a tiny renderer (`templates.py`).

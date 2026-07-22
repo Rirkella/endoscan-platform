@@ -17,24 +17,24 @@ def _write_valid_zip(dest: Path) -> None:
 def test_html_saved_as_zip_is_rejected_and_deleted(tmp_path) -> None:
     dest = tmp_path / "TrainingSet.zip"
 
-    def fake_http(url, target):  # writes an HTML landing page, not a zip
+    def transport_double(url, target):  # writes an HTML landing page, not a zip
         Path(target).write_bytes(b"<!DOCTYPE html><html><body>figshare</body></html>")
         return "https://figshare.example/articles/6062563", "text/html; charset=utf-8"
 
     with pytest.raises(ValueError, match="HTML"):
-        fetch.download_cerapp_file("https://x/TrainingSet.zip", dest, http=fake_http)
+        fetch.download_cerapp_file("https://x/TrainingSet.zip", dest, http=transport_double)
     assert not dest.exists(), "the bad HTML file must be deleted, not left on disk"
 
 
 def test_non_zip_payload_rejected_as_invalid_zip(tmp_path) -> None:
     dest = tmp_path / "EvaluationSet.zip"
 
-    def fake_http(url, target):  # not HTML, but not a ZIP either
+    def transport_double(url, target):  # not HTML, but not a ZIP either
         Path(target).write_bytes(b"just,some,bytes\n1,2,3\n")
         return url, "application/octet-stream"
 
     with pytest.raises(ValueError, match="not a valid ZIP"):
-        fetch.download_cerapp_file("https://x/EvaluationSet.zip", dest, http=fake_http)
+        fetch.download_cerapp_file("https://x/EvaluationSet.zip", dest, http=transport_double)
     assert not dest.exists()
 
 
@@ -43,12 +43,12 @@ def test_stale_invalid_cached_zip_is_refetched(tmp_path) -> None:
     dest.write_bytes(b"<!DOCTYPE html><html>stale landing page from a prior run</html>")
     calls = {"n": 0}
 
-    def fake_http(url, target):
+    def transport_double(url, target):
         calls["n"] += 1
         _write_valid_zip(Path(target))
         return url, "application/zip"
 
-    out = fetch.download_cerapp_file("https://x/TrainingSet.zip", dest, http=fake_http)
+    out = fetch.download_cerapp_file("https://x/TrainingSet.zip", dest, http=transport_double)
     assert calls["n"] == 1, "the invalid cached .zip must be re-downloaded"
     assert fetch.is_valid_zip(out)
 
@@ -75,32 +75,35 @@ def test_pick_figshare_data_file_over_pdf_and_readme() -> None:
 
 
 def test_resolver_uses_figshare_when_no_gaftp(tmp_path) -> None:
-    def fake_figshare(article_id):
+    def figshare_double(article_id):
         return [
             {"name": "paper.pdf", "download_url": "https://f/pdf"},
             {"name": f"{article_id}.zip", "download_url": f"https://f/{article_id}"},
         ]
 
-    def fake_http(url, target):
+    def transport_double(url, target):
         _write_valid_zip(Path(target))
         return url, "application/zip"
 
     out = fetch.fetch_cerapp_experimental(
-        tmp_path / "cerapp_src", ["6062563"], http=fake_http, figshare_lister=fake_figshare
+        tmp_path / "cerapp_src", ["6062563"], http=transport_double, figshare_lister=figshare_double
     )
     assert [p.name for p in out] == ["6062563.zip"]
     assert all(fetch.is_valid_zip(p) for p in out)
 
 
 def test_resolver_raises_clear_error_when_all_html(tmp_path) -> None:
-    def fake_figshare(article_id):
+    def figshare_double(article_id):
         return [{"name": f"{article_id}.zip", "download_url": "https://f/x"}]
 
-    def fake_http(url, target):  # every resolver hit returns HTML
+    def transport_double(url, target):  # every resolver hit returns HTML
         Path(target).write_bytes(b"<!DOCTYPE html><html></html>")
         return url, "text/html"
 
     with pytest.raises(RuntimeError, match="HTML/not-a-valid-ZIP or download failure"):
         fetch.fetch_cerapp_experimental(
-            tmp_path / "cerapp_src", ["6062563"], http=fake_http, figshare_lister=fake_figshare
+            tmp_path / "cerapp_src",
+            ["6062563"],
+            http=transport_double,
+            figshare_lister=figshare_double,
         )

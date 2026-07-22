@@ -4,14 +4,14 @@ Run from the repo root:
     uv run python tests/fixtures/training/staged/er_fused/make_fused_fixture.py
 
 Unlike ``staged/er`` (which is SIGNATURE-level: sig_id/pert_id + genes), this fixture
-mirrors the REAL Phase-2 staged shape: ``lincs.parquet`` is a COMPOUND-LEVEL fused
+mirrors the REAL post-approval staged shape: ``lincs.parquet`` is a COMPOUND-LEVEL fused
 matrix — one row per compound, an ``compound_id`` column holding the full InChIKey plus
 numeric landmark-gene columns (MCF7/A549 already mean-fused). The CERAPP-style labels
 (``cerapp.csv``) are keyed by CASRN and resolved to the SAME InChIKey via the mapping
 table (``pubchem.csv``: CASRN -> InChIKey), so labels and signatures join on InChIKey.
 
 10 compounds: 6 active / 4 inactive. The gene values carry no class signal — this
-fixture exists to exercise the M2 fused-matrix CONTRACT (overlap > 0, per-class counts,
+fixture exists to exercise the dataset layer fused-matrix CONTRACT (overlap > 0, per-class counts,
 ID excluded from features), not to train a meaningful model.
 """
 

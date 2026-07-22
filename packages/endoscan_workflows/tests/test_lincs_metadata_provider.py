@@ -49,7 +49,7 @@ from endoscan_workflows.source_security import ScientificResponse, SourceTimeout
 from endoscan_workflows.tools import ToolRegistry, extend_training_dataset_tool_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-FIXTURES = Path(__file__).with_name("fixtures") / "lincs_phase2a"
+FIXTURES = Path(__file__).with_name("fixtures") / "lincs_metadata"
 RELEASE_ID = "lincs-gse92742-phase1-2017"
 
 
@@ -107,8 +107,8 @@ def _workflow_id(service) -> str:
                 "Compute reviewed metadata-only compound and signature coverage without "
                 "reading expression values."
             ),
-            created_by="phase2a-test",
-            idempotency_key="phase2a-lincs-fixture-build",
+            created_by="lincs-metadata-test",
+            idempotency_key="lincs-metadata-fixture-build",
             workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
         )
     ).id
@@ -116,7 +116,7 @@ def _workflow_id(service) -> str:
 
 def _record() -> DiscoveryExecutionRecord:
     return DiscoveryExecutionRecord(
-        task_id="task-lincs-phase2a",
+        task_id="task-lincs-metadata",
         provider="lincs-l1000",
         evidence_role=EvidenceRole.TRANSCRIPTOMIC,
         status=DiscoveryTaskStatus.PENDING,
@@ -187,9 +187,9 @@ def test_provider_executor_resumes_partial_manifest_and_replays_without_network(
     provider = LincsMetadataProvider(load_lincs_release_registry(REPO_ROOT), executor)
     task = provider.retrieval_task(
         workflow_id=workflow_id,
-        task_id="task-lincs-phase2a",
+        task_id="task-lincs-metadata",
         release_id=RELEASE_ID,
-        idempotency_key="phase2a-retrieval",
+        idempotency_key="lincs-metadata-retrieval",
     )
 
     partial_output = provider.retrieve(
@@ -202,7 +202,7 @@ def test_provider_executor_resumes_partial_manifest_and_replays_without_network(
             arguments={},
             workflow_id=workflow_id,
             workflow_stage=WorkflowState.HYDRATING_SOURCE_CANDIDATES,
-            idempotency_key="phase2a-retrieval",
+            idempotency_key="lincs-metadata-retrieval",
         ),
     )
     partial = partial_output.execution
@@ -272,9 +272,9 @@ def test_exact_indexes_all_compounds_and_context_coverage(workflow_runtime) -> N
     provider = LincsMetadataProvider(registry, executor)
     task = provider.retrieval_task(
         workflow_id=workflow_id,
-        task_id="task-lincs-phase2a",
+        task_id="task-lincs-metadata",
         release_id=RELEASE_ID,
-        idempotency_key="phase2a-coverage",
+        idempotency_key="lincs-metadata-coverage",
     )
     outcome = executor.execute(task, _record(), parser=parse_lincs_metadata_resource)
     metadata = normalize_lincs_metadata(registry.release(RELEASE_ID), outcome)

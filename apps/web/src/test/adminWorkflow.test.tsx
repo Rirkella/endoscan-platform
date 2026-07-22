@@ -56,9 +56,9 @@ const artifact: AdminArtifact = {
   size_bytes: 1024,
   mime_type: "application/json",
   artifact_type: "dataset_candidates",
-  logical_name: "phase-0-dataset-candidates.json",
+  logical_name: "offline-dataset-candidates.json",
   producer: "dataset-discovery-agent",
-  original_source: "prepared-phase-0-fixtures",
+  original_source: "prepared-offline-fixtures",
   created_at: now,
 };
 
@@ -71,9 +71,9 @@ const approval: AdminApproval = {
   status: "pending",
   proposal_hash: "b".repeat(64),
   request: {
-    proposed_decision: "Select one prepared candidate for the Phase-0 demonstration.",
+    proposed_decision: "Select one prepared candidate for the offline demonstration.",
     evidence_summary: "Two deterministic candidate fixtures were compared.",
-    source_references: ["prepared://phase-0/candidate-a"],
+    source_references: ["prepared://offline-fixture/candidate-a"],
     limitations: ["Prepared fixture; not a live scientific discovery."],
     artifact_hashes: [artifact.sha256],
     agent_recommendation: "Candidate A is the deterministic default.",
@@ -99,7 +99,7 @@ const events: AdminTimelineEvent[] = [
 
 const run: AdminAgentRun = {
   schema_version: "1.0.0", id: runId, workflow_id: buildId, step_id: "step-discovery",
-  agent_name: "Dataset Discovery Agent", provider: "fake", model_identifier: "fake-phase0-v1",
+  agent_name: "Dataset Discovery Agent", provider: "offline_fixture", model_identifier: "offline-fixture-v1",
   run_mode: "replay", status: "approval_required", turns: 2, duration_ms: 18,
   usage: { input_tokens: 120, output_tokens: 80, estimated_cost_usd: 0 },
   tools: [
@@ -111,27 +111,27 @@ const run: AdminAgentRun = {
 
 const workflowErrors: AdminWorkflowError[] = [{
   schema_version: "1.0.0", id: "error-1", step_id: "step-curation",
-  code: "phase0_controlled_failure", category: "controlled_demo", retryable: true,
-  safe_message: "A controlled retryable Phase-0 failure was recorded.", created_at: now,
+  code: "offline_fixture_controlled_failure", category: "controlled_demo", retryable: true,
+  safe_message: "A controlled retryable offline-provider failure was recorded.", created_at: now,
 }];
 
 const candidates = [
   {
     candidate_id: "candidate-a", title: "Prepared oxidative-stress fixture A",
-    source: "Prepared Phase-0 fixture", recommendation: "preferred",
+    source: "Prepared offline fixture", recommendation: "preferred",
     limitations: ["Not retrieved live"], sample_count: 168, controls_available: true,
     data_type: "Transcriptomic", context: "One prepared cell model",
   },
   {
     candidate_id: "candidate-b", title: "Prepared oxidative-stress fixture B",
-    source: "Prepared Phase-0 fixture", recommendation: "alternative",
+    source: "Prepared offline fixture", recommendation: "alternative",
     limitations: ["Not retrieved live"], controls_available: false,
   },
 ];
 
 const replayCapabilities = {
   schema_version: "1.0.0",
-  provider: "fake",
+  provider: "offline_fixture",
   model: "prepared-fixture",
   run_mode: "replay",
   api_key_present: false,
@@ -186,7 +186,7 @@ beforeEach(() => {
   });
 });
 
-describe("Phase-0 endpoint-build list and creation", () => {
+describe("endpoint-build list and creation", () => {
   it("puts sorted persisted builds first and keeps duplicate names distinguishable", async () => {
     const older = build("AWAITING_DATASET_APPROVAL", 3, { id: `${buildId}-old`, updated_at: "2026-07-16T10:00:00Z" });
     const newer = build("FUTURE_SCIENCE_REVIEW", 4, { id: `${buildId}-new`, updated_at: "2026-07-18T10:00:00Z", pending_approval_id: null });
@@ -250,7 +250,7 @@ describe("Phase-0 endpoint-build list and creation", () => {
   });
 });
 
-describe("Phase-0 build detail information architecture", () => {
+describe("build detail information architecture", () => {
   it("renders a deterministic specification draft and pending human review gate", async () => {
     const specificationApproval: AdminApproval = {
       ...approval,
@@ -926,7 +926,7 @@ describe("Phase-0 build detail information architecture", () => {
   });
 });
 
-describe("Phase-1 live discovery presentation", () => {
+describe("bounded-discovery live discovery presentation", () => {
   it("runs provider preflight only after an explicit administrator action", async () => {
     let preflightCalls = 0;
     const result: AdminProviderPreflight = {
@@ -1260,7 +1260,7 @@ describe("Phase-1 live discovery presentation", () => {
               original_index: 0,
               original: "expression profiling by array",
               normalized: "Expression profiling by array",
-              policy_version: "phase1-controlled-vocabulary-v1",
+              policy_version: "controlled-vocabulary-v1",
             },
             {
               code: "controlled_vocabulary_alias_canonicalized",
@@ -1268,7 +1268,7 @@ describe("Phase-1 live discovery presentation", () => {
               original_index: 1,
               original: "high throughput sequencing",
               normalized: "Expression profiling by high throughput sequencing",
-              policy_version: "phase1-controlled-vocabulary-v1",
+              policy_version: "controlled-vocabulary-v1",
             },
           ],
         },
@@ -1285,7 +1285,7 @@ describe("Phase-1 live discovery presentation", () => {
     expect(await screen.findByText("2 controlled-vocabulary values were normalized before execution.")).toBeInTheDocument();
     expect(screen.queryByText(/tool input invalid/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View trace" }));
-    expect(screen.getAllByText(/phase1-controlled-vocabulary-v1/)).toHaveLength(2);
+    expect(screen.getAllByText(/controlled-vocabulary-v1/)).toHaveLength(2);
     expect(screen.getByText(/high throughput sequencing → Expression profiling by high throughput sequencing/)).toBeInTheDocument();
   });
 
@@ -1406,7 +1406,7 @@ describe("Phase-1 live discovery presentation", () => {
     expect(within(activity).getByText("Model turns").parentElement).toHaveTextContent("1");
   });
 
-  it("shows the specification revision gate without fake usage or source claims", async () => {
+  it("shows the specification revision gate without fabricated usage or source claims", async () => {
     const revisionRun: AdminAgentRun = {
       ...run,
       agent_name: "Dataset Specification Agent",

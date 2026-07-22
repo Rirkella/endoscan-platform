@@ -24,7 +24,7 @@ It runs Ruff lint and format checks, bounded production mypy, TypeScript, all Py
 
 ## Provider tests
 
-Provider tests use immutable fixtures and fake transports. Required cases include successful parsing; empty and partial results; missing identifiers; typed batching; pagination/completion; redirects and allowlists; MIME and response-size enforcement; timeout; zero retries where configured; raw artifact persistence; provenance; cache hit with zero second transport; sanitized errors; and unsupported or unavailable provider capability.
+Provider tests use immutable fixtures and transport test doubles. Required cases include successful parsing; empty and partial results; missing identifiers; typed batching; pagination/completion; redirects and allowlists; MIME and response-size enforcement; timeout; zero retries where configured; raw artifact persistence; provenance; cache hit with zero second transport; sanitized errors; and unsupported or unavailable provider capability.
 
 Live smokes are not CI tests. They require explicit authorization, fixed reviewed operations, minimal bounded transport, safe diagnostics, and a separate report. A live smoke must never become a hidden prerequisite for an offline suite.
 
@@ -38,7 +38,7 @@ Scientific fixtures test invariants: modalities remain distinguishable; PubChem 
 
 ## Browser acceptance
 
-Before a release, exercise saved-analysis refresh, project rename/delete isolation, navigate-away/back restoration, InChIKey-only reference-profile restoration, and every Admin Console gate. Observe console and network logs for errors, HTTP 500s, silent redirects, and automatic OpenAI/scientific-source calls. Stage 4 owns the final current-browser evidence.
+Before a release, exercise saved-analysis refresh, project rename/delete isolation, navigate-away/back restoration, InChIKey-only reference-profile restoration, and every Admin Console gate. Observe console and network logs for errors, HTTP 500s, silent redirects, and automatic OpenAI/scientific-source calls. The final repository audit verified routes, startup, API boundaries and the offline UI suite; current interactive browser evidence remains a separate release artifact.
 
 ## Adding tests
 

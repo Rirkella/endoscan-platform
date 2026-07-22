@@ -1,4 +1,7 @@
-"""Add the persistent Phase-1 scientific source-response cache."""
+"""Add the persistent scientific source-response cache.
+
+The historical revision identifier remains unchanged for Alembic compatibility.
+"""
 
 from alembic import op
 
@@ -10,7 +13,7 @@ depends_on = None
 
 def upgrade() -> None:
     # 0001 intentionally creates current metadata for fresh databases. IF NOT EXISTS
-    # keeps upgrades correct for both a fresh database and an existing Phase-0 database.
+    # keeps upgrades correct for both a fresh database and an existing foundation database.
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS source_response_cache (

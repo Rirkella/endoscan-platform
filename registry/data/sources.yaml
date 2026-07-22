@@ -12,7 +12,7 @@
 #   id            unique short identifier (used to resolve adapters/fixtures)
 #   name          human-readable name
 #   type          one of: labels | signatures | mapping
-#   access_method describes the REAL access method (fixtures stand in for it at M2)
+#   access_method describes the reviewed access method (offline tests use fixtures)
 #   provenance    origin / citation
 #   version       dataset/release version
 #   targets       optional list of endpoint ids the source is specific to;

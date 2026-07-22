@@ -1,8 +1,8 @@
 """Compound-level FUSED staged-matrix contract (the bug staged/er never caught).
 
-The real Phase-2 ``lincs.parquet`` is a COMPOUND-LEVEL fused matrix (one row per
+The real post-approval ``lincs.parquet`` is a COMPOUND-LEVEL fused matrix (one row per
 compound: an ``compound_id`` InChIKey column + numeric landmark genes), not the
-SIGNATURE-level shape the M2 fixtures use. These tests prove the fused path:
+SIGNATURE-level shape the dataset layer fixtures use. These tests prove the fused path:
 non-zero overlap, correct per-class counts, the ID column excluded from features,
 labels<->signatures joining on InChIKey, fused metadata-coverage that can both pass
 AND fail the gate, and back-compat with an existing ``compound_key``-named parquet.
@@ -47,7 +47,7 @@ RELAXED = GateThresholds(
 
 
 def _build(allow_list: SourcesAllowList, staged_dir: Path):
-    """Run the M2 chain over a STAGED fused fixture and return every intermediate."""
+    """Run the dataset layer chain over a STAGED fused fixture and return every intermediate."""
     adapter = StagedSourceAdapter(staged_dir)
     target = "ER"
     labels = label_retriever(

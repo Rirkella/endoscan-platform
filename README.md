@@ -92,6 +92,21 @@ Read the exact states and contracts in [Endpoint Building Workflow](docs/ENDPOIN
 
 The durable control plane uses SQLite in the local demonstrator. Scientific payloads and raw provider responses are content-addressed artifacts rather than opaque database blobs. See [Architecture](docs/ARCHITECTURE.md), [Data Model and Artifacts](docs/DATA_MODEL_AND_ARTIFACTS.md), and [Provider Architecture](docs/PROVIDER_ARCHITECTURE.md).
 
+## Where the agentic pipeline lives
+
+| Component | Location | Responsibility |
+|---|---|---|
+| Workflow orchestrator | [`service.py`](packages/endoscan_workflows/endoscan_workflows/service.py) | Coordinates lifecycle, approvals, and publication |
+| Agent runtime | [`harness.py`](packages/endoscan_workflows/endoscan_workflows/harness.py) | Executes bounded model turns and reviewed tools |
+| Discovery agent | [`discovery.py`](packages/endoscan_workflows/endoscan_workflows/discovery.py) | Plans and evaluates bounded source discovery |
+| Dataset/review agents | [`training_dataset.py`](packages/endoscan_workflows/endoscan_workflows/training_dataset.py) | Produces typed proposals and review artifacts |
+| Strategy agent | [`endpoint_lifecycle.py`](packages/endoscan_workflows/endoscan_workflows/endpoint_lifecycle.py) | Proposes source-bound assembly strategies |
+| OpenAI adapter | [`openai_provider.py`](packages/endoscan_workflows/endoscan_workflows/openai_provider.py) | Connects the OpenAI Agents SDK |
+| Tool registry | [`tools.py`](packages/endoscan_workflows/endoscan_workflows/tools.py) | Exposes allowlisted deterministic tools |
+| State machine | [`state_machine.py`](packages/endoscan_workflows/endoscan_workflows/state_machine.py) | Enforces lifecycle transitions |
+
+Agents propose structured work; deterministic code executes scientific operations; human reviewers authorize scientific decisions.
+
 ## Quick start
 
 Prerequisites: Python 3.12, [uv](https://docs.astral.sh/uv/), Node.js 24, and npm. No API key or scientific network access is needed for setup, tests, or offline demos.
@@ -195,11 +210,11 @@ and storage details.
 
 ## Screenshots
 
-The repository currently contains a production hero asset but no reviewed, current screenshots covering the complete application and Admin Console. Rather than publish stale or fabricated images, screenshot capture is explicitly deferred to the final audit stage. The required views and acceptance criteria are listed in [Admin Console Guide](docs/ADMIN_CONSOLE_GUIDE.md#screenshot-gap).
+The repository contains a production hero asset but no reviewed screenshot package covering the complete application and Admin Console. The final audit could not attach a reliable browser capture surface, so it deliberately published no stale or synthetic images. The required views and acceptance criteria remain listed in the [Admin Console Guide](docs/ADMIN_CONSOLE_GUIDE.md#screenshot-gap).
 
 ## Roadmap
 
-The next gates are the consolidated Stage 4 browser/documentation audit, complete bounded provider acceptance, one evidence-backed joinability demonstration, endpoint-by-endpoint scientific validation, and production security/deployment hardening. The detailed sequence and status ownership are in [Status and Roadmap](docs/STATUS_AND_ROADMAP.md).
+The consolidated repository, documentation and offline verification audit is complete. Remaining gates are current interactive browser evidence, complete bounded provider acceptance, one evidence-backed joinability demonstration, endpoint-by-endpoint scientific validation, and production security/deployment hardening. The detailed sequence and status ownership are in [Status and Roadmap](docs/STATUS_AND_ROADMAP.md).
 
 ## Contributing and governance
 
@@ -207,6 +222,6 @@ Start with [Contributing](CONTRIBUTING.md). Changes to scientific semantics requ
 
 ## License
 
-Copyright © 2026 Irina Andriushchenko. This repository is proprietary and confidential; copying, modification, distribution, or use requires express written permission. Outputs are research signals subject to the limitations above. See [LICENSE](LICENSE).
+Copyright © 2026 Irina Andriushchenko. This repository is proprietary and confidential; copying, modification, distribution, or use requires express written permission. Outputs are research signals subject to the limitations above. See [LICENSE](LICENSE). Accurate repository-level citation metadata is available in [CITATION.cff](CITATION.cff); it intentionally declares no DOI, publication, affiliation, or release version.
 
 `main` is the authoritative development branch. Historical phase branches, reports, backups, and legacy prototypes are preservation evidence, not alternate current implementations.

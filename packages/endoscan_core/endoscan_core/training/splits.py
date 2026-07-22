@@ -1,7 +1,7 @@
 """Compound-level cross-validation splits.
 
 Endpoint models MUST be cross-validated with the compound-level groups produced
-by the M2 ``candidate_table_builder`` (never random/stratified row CV), so M2's
+by the ``candidate_table_builder`` (never random/stratified row CV), so its
 no-leakage guarantee carries into model selection. This module wraps
 ``GroupKFold`` and guards that no group spans train/test.
 """

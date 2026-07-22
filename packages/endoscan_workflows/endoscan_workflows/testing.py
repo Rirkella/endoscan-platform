@@ -13,7 +13,7 @@ from .contracts import (
 from .tools import EchoInput, EchoOutput, RegisteredTool, ToolRegistry
 
 
-def phase0_test_tool_registry() -> ToolRegistry:
+def offline_test_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
 
     def add(name, implementation, *, stage=WorkflowState.DISCOVERING_DATA, timeout=0.1):

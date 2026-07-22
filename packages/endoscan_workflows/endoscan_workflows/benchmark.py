@@ -1,4 +1,4 @@
-"""Deterministic Phase-1 agent benchmark definitions and aggregate scoring."""
+"""Deterministic bounded-discovery agent benchmark definitions and aggregate scoring."""
 
 from __future__ import annotations
 

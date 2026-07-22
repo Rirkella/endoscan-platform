@@ -116,4 +116,4 @@ SQLite holds the state machine, steps, approvals, agent runs, events, errors, bu
 
 ## Offline demonstration
 
-The `tr_receptor` and `dna_damage` fixtures exercise every governed stage, including approvals, assembly, benchmark, and registration, with fake providers and prepared source observations. They prove workflow wiring and reproducibility, not live-source completeness or biological validity. See [Offline Demo](OFFLINE_DEMO.md).
+The `tr_receptor` and `dna_damage` fixtures exercise every governed stage, including approvals, assembly, benchmark, and registration, with the deterministic offline provider and prepared source observations. They prove workflow wiring and reproducibility, not live-source completeness or biological validity. See [Offline Demo](OFFLINE_DEMO.md).

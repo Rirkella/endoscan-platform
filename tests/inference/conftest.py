@@ -1,4 +1,4 @@
-"""Shared fixtures for M4 inference tests."""
+"""Shared fixtures for inference tests."""
 
 from __future__ import annotations
 

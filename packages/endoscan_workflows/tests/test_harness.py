@@ -27,11 +27,15 @@ from endoscan_workflows.discovery import DiscoveryOutput, discovery_request
 from endoscan_workflows.discovery_tools import DiscoveryToolService
 from endoscan_workflows.errors import GuardNotSatisfied
 from endoscan_workflows.harness import AgentHarness
-from endoscan_workflows.providers import FakeAgentProvider, ProviderFailure, ProviderRegistry
+from endoscan_workflows.providers import (
+    DeterministicOfflineProvider,
+    ProviderFailure,
+    ProviderRegistry,
+)
 from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_security import ScientificSourceClient
-from endoscan_workflows.testing import phase0_test_tool_registry
-from endoscan_workflows.tools import EchoOutput, phase1_tool_registry
+from endoscan_workflows.testing import offline_test_tool_registry
+from endoscan_workflows.tools import EchoOutput, production_tool_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -75,7 +79,7 @@ def harness_context(workflow_runtime):
 
 
 def with_mode(request, mode: str):
-    return request.model_copy(update={"context": {**request.context, "fake_mode": mode}})
+    return request.model_copy(update={"context": {**request.context, "offline_fixture_mode": mode}})
 
 
 def test_structured_output_usage_and_trace_are_recorded(workflow_runtime) -> None:
@@ -111,8 +115,8 @@ def test_prohibited_tool_is_rejected_and_recorded(workflow_runtime) -> None:
     _build, _discovering, _step, request, _default, _service = harness_context(workflow_runtime)
     registry = ProviderRegistry()
     registry.register(
-        "fake",
-        lambda: FakeAgentProvider(
+        "offline_fixture",
+        lambda: DeterministicOfflineProvider(
             [
                 ProviderTurn(
                     kind="tool",
@@ -123,7 +127,7 @@ def test_prohibited_tool_is_rejected_and_recorded(workflow_runtime) -> None:
             ]
         ),
     )
-    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    harness = AgentHarness(database, registry, offline_test_tool_registry())
     bad = request.model_copy(
         update={
             "available_tools": ["test_success"],
@@ -156,7 +160,7 @@ def test_discovery_tool_cannot_run_outside_its_substage(workflow_runtime) -> Non
     providers = ProviderRegistry()
     providers.register(
         "openai",
-        lambda: FakeAgentProvider(
+        lambda: DeterministicOfflineProvider(
             [
                 ProviderTurn(
                     kind="tool",
@@ -172,7 +176,7 @@ def test_discovery_tool_cannot_run_outside_its_substage(workflow_runtime) -> Non
     def external_request_forbidden(_request: httpx.Request) -> httpx.Response:
         raise AssertionError("Out-of-stage tool policy attempted an external request")
 
-    tools = phase1_tool_registry(
+    tools = production_tool_registry(
         REPO_ROOT,
         DiscoveryToolService(
             SourceResponseCache(database),
@@ -203,8 +207,8 @@ def test_tool_input_validation_failure(workflow_runtime) -> None:
     _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
     registry = ProviderRegistry()
     registry.register(
-        "fake",
-        lambda: FakeAgentProvider(
+        "offline_fixture",
+        lambda: DeterministicOfflineProvider(
             [
                 ProviderTurn(
                     kind="tool",
@@ -215,7 +219,7 @@ def test_tool_input_validation_failure(workflow_runtime) -> None:
             ]
         ),
     )
-    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    harness = AgentHarness(database, registry, offline_test_tool_registry())
     bad = request.model_copy(
         update={
             "available_tools": ["test_success"],
@@ -231,8 +235,8 @@ def test_tool_output_validation_failure(workflow_runtime) -> None:
     _build, _discovering, _step, request, _default, _service2 = harness_context(workflow_runtime)
     registry = ProviderRegistry()
     registry.register(
-        "fake",
-        lambda: FakeAgentProvider(
+        "offline_fixture",
+        lambda: DeterministicOfflineProvider(
             [
                 ProviderTurn(
                     kind="tool",
@@ -243,7 +247,7 @@ def test_tool_output_validation_failure(workflow_runtime) -> None:
             ]
         ),
     )
-    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    harness = AgentHarness(database, registry, offline_test_tool_registry())
     bad = request.model_copy(
         update={
             "available_tools": ["test_output_validation_failure"],
@@ -309,7 +313,7 @@ def test_safe_provider_failure_diagnostics_are_persisted_and_logged(
 
     registry = ProviderRegistry()
     registry.register("diagnostic", DiagnosticFailureProvider)
-    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    harness = AgentHarness(database, registry, offline_test_tool_registry())
     diagnostic_request = request.model_copy(
         update={
             "model": request.model.model_copy(update={"provider": "diagnostic"}),
@@ -382,7 +386,7 @@ def test_local_sdk_diagnostic_is_internal_and_does_not_store_request_prompt(
 
     registry = ProviderRegistry()
     registry.register("diagnostic", LocalSdkFailureProvider)
-    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    harness = AgentHarness(database, registry, offline_test_tool_registry())
     raw_prompt = "RAW-PROMPT-MUST-NOT-APPEAR-IN-DIAGNOSTICS"
     diagnostic_request = request.model_copy(
         update={
@@ -427,7 +431,7 @@ def test_live_provider_failure_is_never_automatically_retried(
     database, _store, _providers, _harness, service = workflow_runtime
 
     class ClassifiedFailureProvider:
-        name = "fake"
+        name = "offline_fixture"
         calls = 0
 
         def run_turn(self, *_args, **_kwargs):
@@ -442,7 +446,7 @@ def test_live_provider_failure_is_never_automatically_retried(
     provider = ClassifiedFailureProvider()
     registry = ProviderRegistry()
     registry.register("openai", lambda: provider)
-    service.harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    service.harness = AgentHarness(database, registry, offline_test_tool_registry())
     service.agent_configuration = AgentConfiguration(
         provider="openai",
         run_mode=AgentRunMode.LIVE,
@@ -517,7 +521,7 @@ def test_source_http_retries_do_not_create_extra_provider_invocations(workflow_r
         maximum_attempts=2,
         sleep=lambda _seconds: None,
     )
-    tools = phase0_test_tool_registry()
+    tools = offline_test_tool_registry()
 
     def source_backed_tool(_request) -> EchoOutput:
         client.get(
@@ -601,7 +605,7 @@ def test_two_normal_model_turns_accept_3880_tokens_without_counting_a_retry(
     provider = TwoTurnProvider()
     registry = ProviderRegistry()
     registry.register("counting", lambda: provider)
-    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    harness = AgentHarness(database, registry, offline_test_tool_registry())
     bounded = request.model_copy(
         update={
             "model": request.model.model_copy(update={"provider": "counting"}),
@@ -651,7 +655,7 @@ def test_next_turn_budget_precheck_stops_before_an_unsafe_provider_call(
     provider = ExpensiveProvider()
     registry = ProviderRegistry()
     registry.register("counting", lambda: provider)
-    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    harness = AgentHarness(database, registry, offline_test_tool_registry())
     bounded = request.model_copy(
         update={
             "model": request.model.model_copy(update={"provider": "counting"}),
@@ -686,7 +690,7 @@ def test_cost_cap_is_enforced_after_each_model_turn(workflow_runtime) -> None:
 
     registry = ProviderRegistry()
     registry.register("costly", CostlyProvider)
-    harness = AgentHarness(database, registry, phase0_test_tool_registry())
+    harness = AgentHarness(database, registry, offline_test_tool_registry())
     costly = request.model_copy(
         update={
             "model": request.model.model_copy(update={"provider": "costly"}),
@@ -759,7 +763,7 @@ def test_zero_first_geo_result_triggers_one_bounded_alternative_and_structured_o
                     "endpoint_name": "Oxidative stress",
                     "endpoint_definition_summary": "Transcriptomic oxidative-stress response.",
                     "run_mode": "live",
-                    "simulation_label": None,
+                    "offline_fixture_label": None,
                     "live_discovery": True,
                     "search_strategy": "Two focused searches returned zero GEO Series.",
                     "queries_executed": ["human sequencing", "human array"],
@@ -780,7 +784,7 @@ def test_zero_first_geo_result_triggers_one_bounded_alternative_and_structured_o
     provider = ZeroResultProvider()
     registry = ProviderRegistry()
     registry.register("scripted", lambda: provider)
-    harness = AgentHarness(database, registry, phase1_tool_registry(REPO_ROOT, discovery_tools))
+    harness = AgentHarness(database, registry, production_tool_registry(REPO_ROOT, discovery_tools))
     bounded = request.model_copy(
         update={
             "model": request.model.model_copy(update={"provider": "scripted"}),
@@ -863,7 +867,7 @@ def test_one_geo_parser_failure_does_not_terminally_fail_discovery(
                     "endpoint_name": "Oxidative stress",
                     "endpoint_definition_summary": "Transcriptomic oxidative-stress response.",
                     "run_mode": "live",
-                    "simulation_label": None,
+                    "offline_fixture_label": None,
                     "live_discovery": True,
                     "search_strategy": "Validate the bounded candidate set.",
                     "queries_executed": ["prior official GEO search"],
@@ -913,7 +917,7 @@ def test_one_geo_parser_failure_does_not_terminally_fail_discovery(
     harness = AgentHarness(
         database,
         providers,
-        phase1_tool_registry(REPO_ROOT, discovery_tools),
+        production_tool_registry(REPO_ROOT, discovery_tools),
     )
     bounded = request.model_copy(
         update={
@@ -1012,7 +1016,7 @@ def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
                     "endpoint_name": "Oxidative stress",
                     "endpoint_definition_summary": "Transcriptomic oxidative-stress response.",
                     "run_mode": "live",
-                    "simulation_label": None,
+                    "offline_fixture_label": None,
                     "live_discovery": True,
                     "search_strategy": "One safely normalized bounded search.",
                     "queries_executed": ["mocked bounded GEO query"],
@@ -1036,7 +1040,7 @@ def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
     harness = AgentHarness(
         database,
         providers,
-        phase1_tool_registry(REPO_ROOT, BoundaryDiscoveryService()),
+        production_tool_registry(REPO_ROOT, BoundaryDiscoveryService()),
     )
     bounded = request.model_copy(
         update={
@@ -1092,7 +1096,7 @@ def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
             "original_index": 0,
             "original": "expression profiling by array",
             "normalized": "Expression profiling by array",
-            "policy_version": "phase1-controlled-vocabulary-v1",
+            "policy_version": "controlled-vocabulary-v1",
         },
         {
             "schema_version": "1.0.0",
@@ -1101,7 +1105,7 @@ def test_optional_geo_term_normalization_executes_in_same_run_without_retry(
             "original_index": 1,
             "original": "high throughput sequencing",
             "normalized": "Expression profiling by high throughput sequencing",
-            "policy_version": "phase1-controlled-vocabulary-v1",
+            "policy_version": "controlled-vocabulary-v1",
         },
     ]
 
@@ -1146,7 +1150,7 @@ def test_terminal_source_failure_persists_safe_diagnostic_and_failed_trace(
     real_harness = AgentHarness(
         database,
         providers,
-        phase1_tool_registry(REPO_ROOT, discovery_tools),
+        production_tool_registry(REPO_ROOT, discovery_tools),
     )
 
     class RequestOverrideHarness:
@@ -1233,7 +1237,7 @@ def test_approval_interruption_is_typed(workflow_runtime) -> None:
             "instruction_version": "approval-interruption-test",
             "context": {
                 **request.context,
-                "fake_mode": "approval",
+                "offline_fixture_mode": "approval",
                 "approval": approval.model_dump(mode="json"),
             },
         }
@@ -1530,7 +1534,7 @@ def test_latest_live_trace_regression_completes_offline_with_stage_specific_tool
     service.harness = AgentHarness(
         database,
         providers,
-        phase1_tool_registry(REPO_ROOT, OfflineDiscoveryTools()),
+        production_tool_registry(REPO_ROOT, OfflineDiscoveryTools()),
     )
     service.agent_configuration = AgentConfiguration(
         provider="openai",

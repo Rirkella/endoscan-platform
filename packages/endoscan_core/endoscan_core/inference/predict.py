@@ -1,6 +1,6 @@
 """Load a registered endpoint and predict ER functional modulation from a signature.
 
-Read-only: the endpoint is loaded via the M1 registry store and never fitted. The
+Read-only: the endpoint is loaded via the registry store and never fitted. The
 input is a transcriptomic signature (validated + aligned to the endpoint's feature
 schema); the output carries an uncalibrated model score, the thresholded call, and the
 endpoint's limitations block — no bare score is ever returned.

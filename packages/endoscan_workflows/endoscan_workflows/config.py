@@ -1,4 +1,4 @@
-"""Environment-backed Phase-1 agent configuration without secret disclosure."""
+"""Environment-backed agent configuration without secret disclosure."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ class AgentRunMode(str, Enum):
 class AgentConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    provider: str = "fake"
+    provider: str = "offline_fixture"
     model: str = "gpt-5.4-mini"
-    planner_provider: str = "fake"
+    planner_provider: str = "offline_fixture"
     planner_model: str = "gpt-5.4-mini"
-    worker_provider: str = "fake"
+    worker_provider: str = "offline_fixture"
     worker_model: str = "gpt-5.4-mini"
     run_mode: AgentRunMode = AgentRunMode.REPLAY
     benchmark_mode: str = "standard_training_dataset_discovery"
@@ -56,13 +56,13 @@ class AgentConfiguration(BaseModel):
     @classmethod
     def supported_provider(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"fake", "openai"}:
-            raise ValueError("ENDOSCAN_AGENT_PROVIDER must be fake or openai")
+        if normalized not in {"offline_fixture", "openai"}:
+            raise ValueError("ENDOSCAN_AGENT_PROVIDER must be offline_fixture or openai")
         return normalized
 
     @classmethod
     def from_env(cls) -> AgentConfiguration:
-        provider = os.environ.get("ENDOSCAN_AGENT_PROVIDER", "fake").strip().lower()
+        provider = os.environ.get("ENDOSCAN_AGENT_PROVIDER", "offline_fixture").strip().lower()
         key = os.environ.get("OPENAI_API_KEY") or None
         model = os.environ.get("ENDOSCAN_AGENT_MODEL", "gpt-5.4-mini").strip()
         planner_provider = os.environ.get("ENDOSCAN_PLANNER_PROVIDER", provider).strip().lower()

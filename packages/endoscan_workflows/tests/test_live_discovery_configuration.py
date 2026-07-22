@@ -162,7 +162,7 @@ def test_controlled_source_discovery_uses_completeness_capacity_without_retries(
 def test_configuration_separates_planner_worker_and_global_budgets(monkeypatch) -> None:
     monkeypatch.setenv("ENDOSCAN_PLANNER_PROVIDER", "openai")
     monkeypatch.setenv("ENDOSCAN_PLANNER_MODEL", "planner-test-model")
-    monkeypatch.setenv("ENDOSCAN_WORKER_PROVIDER", "fake")
+    monkeypatch.setenv("ENDOSCAN_WORKER_PROVIDER", "offline_fixture")
     monkeypatch.setenv("ENDOSCAN_WORKER_MODEL", "worker-test-model")
     monkeypatch.setenv("ENDOSCAN_BENCHMARK_MODE", "blind_training_dataset_discovery")
     monkeypatch.setenv("ENDOSCAN_WORKFLOW_MAX_TOOL_CALLS", "31")
@@ -171,7 +171,7 @@ def test_configuration_separates_planner_worker_and_global_budgets(monkeypatch) 
     public = configuration.public_status()
     assert configuration.planner_provider == "openai"
     assert configuration.planner_model == "planner-test-model"
-    assert configuration.worker_provider == "fake"
+    assert configuration.worker_provider == "offline_fixture"
     assert configuration.worker_model == "worker-test-model"
     assert public["benchmark_mode"] == "blind_training_dataset_discovery"
     assert public["global_workflow_budget"]["maximum_tool_calls"] == 31
@@ -326,7 +326,7 @@ def test_no_candidate_output_enters_search_review_without_dataset_approval(
         endpoint_name="Oxidative stress",
         endpoint_definition_summary="Transcriptomic oxidative-stress response.",
         run_mode="replay",
-        simulation_label="Offline no-candidate test fixture",
+        offline_fixture_label="Offline no-candidate test fixture",
         live_discovery=False,
         search_strategy="All bounded searches returned zero GEO Series.",
         queries_executed=["query-one", "query-two"],
@@ -426,7 +426,7 @@ def test_only_public_valid_geo_candidate_may_be_recommended() -> None:
         )
 
 
-def test_replay_workflow_stops_at_dataset_approval_with_phase1_artifacts(
+def test_replay_workflow_stops_at_dataset_approval_with_discovery_artifacts(
     workflow_runtime,
 ) -> None:
     _database, store, _providers, _harness, service = workflow_runtime
@@ -435,17 +435,17 @@ def test_replay_workflow_stops_at_dataset_approval_with_phase1_artifacts(
     created = service.create_build(
         EndpointBuildCreate(
             endpoint_name="Oxidative stress",
-            endpoint_slug="phase1-replay",
+            endpoint_slug="offline-replay",
             biological_goal="Prepare a bounded replay recommendation.",
             created_by="test",
-            idempotency_key="phase1-replay-build",
+            idempotency_key="offline-replay-build",
         )
     )
     started = service.start_build(
         created.id,
         expected_version=created.version,
         actor="test",
-        idempotency_key="phase1-replay-start",
+        idempotency_key="offline-replay-start",
     )
     assert started.current_stage is WorkflowState.AWAITING_DATASET_APPROVAL
     assert started.pending_approval_id
@@ -456,7 +456,7 @@ def test_replay_workflow_stops_at_dataset_approval_with_phase1_artifacts(
     content = json.loads(raw)
     assert content["run_mode"] == "replay"
     assert content["live_discovery"] is False
-    assert content["simulation_label"] == "Prepared validated replay fixture"
+    assert content["offline_fixture_label"] == "Prepared validated replay fixture"
     approval = next(
         item
         for item in service.list_approvals(started.id)
@@ -466,7 +466,7 @@ def test_replay_workflow_stops_at_dataset_approval_with_phase1_artifacts(
     assert hashlib.sha256(registry.read_bytes()).hexdigest() == registry_before
 
 
-def test_phase1_benchmark_has_all_twelve_cases_and_required_metrics() -> None:
+def test_discovery_benchmark_has_all_twelve_cases_and_required_metrics() -> None:
     assert len(BENCHMARK_CASES) == 12
     assert len({item.case_id for item in BENCHMARK_CASES}) == 12
     metrics = score_benchmark(deterministic_fixture_observations())
@@ -483,7 +483,7 @@ def test_committed_replay_fixture_is_labeled_and_schema_valid() -> None:
         Path(__file__).resolve().parents[1]
         / "endoscan_workflows"
         / "fixtures"
-        / "phase1_oxidative_stress_replay.json"
+        / "oxidative_stress_offline_replay.json"
     )
     fixture = json.loads(path.read_text(encoding="utf-8"))
     parsed = DiscoveryOutput.model_validate(fixture["output"])

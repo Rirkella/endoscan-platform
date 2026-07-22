@@ -58,12 +58,15 @@ def test_download_gctx_refetches_invalid_cache(tmp_path) -> None:
     _make_gctx(real)
     gz_blob = gzip.compress(real.read_bytes())
 
-    def fake_http(url, target):
+    def transport_double(url, target):
         Path(target).write_bytes(gz_blob)
         return url, "application/gzip"
 
     out = fetch.download_gctx(
-        "https://x/level5.gctx.gz", gctx_path, gz_path=tmp_path / "dl.gctx.gz", http=fake_http
+        "https://x/level5.gctx.gz",
+        gctx_path,
+        gz_path=tmp_path / "dl.gctx.gz",
+        http=transport_double,
     )
     assert fetch.is_valid_gctx(out)
 
@@ -71,12 +74,15 @@ def test_download_gctx_refetches_invalid_cache(tmp_path) -> None:
 def test_download_gctx_rejects_html_payload(tmp_path) -> None:
     gctx_path = tmp_path / "level5_modz.gctx"
 
-    def fake_http(url, target):  # server returns an HTML page, gzipped or not
+    def transport_double(url, target):  # server returns an HTML page, gzipped or not
         Path(target).write_bytes(b"<!DOCTYPE html><html></html>")
         return url, "text/html"
 
     with pytest.raises(ValueError, match="HTML"):
         fetch.download_gctx(
-            "https://x/level5.gctx.gz", gctx_path, gz_path=tmp_path / "dl.gctx.gz", http=fake_http
+            "https://x/level5.gctx.gz",
+            gctx_path,
+            gz_path=tmp_path / "dl.gctx.gz",
+            http=transport_double,
         )
     assert not gctx_path.exists()

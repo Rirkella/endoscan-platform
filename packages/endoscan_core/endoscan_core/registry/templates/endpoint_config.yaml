@@ -8,6 +8,6 @@ biological_target: "{{ biological_target }}"
 input_type: "transcriptomics"   # EndoScan is transcriptomics-first; do not change.
 version: "{{ version }}"
 
-# Opaque provenance tags at M1; a typed source contract arrives with the M2
-# sources.yaml allow-list. Fill with strings like "ToxCast:<assay>" later.
+# Opaque serving-registry provenance tags. Typed source contracts are validated
+# against the sources.yaml allow-list before publication.
 source_refs: []

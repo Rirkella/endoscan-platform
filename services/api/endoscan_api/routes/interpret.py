@@ -4,7 +4,7 @@ Thin: reuse the tested ``explain`` (pinned depth), select the toward-signal cont
 STANDARD ORA (scipy hypergeometric tail + local BH) against the committed Reactome gene sets on
 the model's OWN 978-landmark universe. No science added to ``endoscan_core``; no pathway is ever
 fabricated. Honest states:
-  * no Reactome artifact         -> 200 status="unavailable"  (graceful empty; never fake cards)
+  * no Reactome artifact         -> 200 status="unavailable" (empty; never fabricate cards)
   * toward-set below the minimum -> 200 status="too_few_genes" (no q-values on a handful of genes)
   * ran but nothing cleared q<0.10 -> 200 status="ok" with an empty pathway list (a real result)
 Errors reuse the /explain contract: unsupported model -> 501, missing shap -> 503, bad signature

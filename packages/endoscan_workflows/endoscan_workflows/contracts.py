@@ -1,4 +1,4 @@
-"""Strict, versioned contracts crossing the Phase-0 workflow boundary."""
+"""Strict, versioned contracts crossing the workflow boundary."""
 
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 The strongest status badge must be EVIDENCED, not asserted on a single pooled point
 estimate. This module is the SINGLE SOURCE OF TRUTH for "does the evidence clear the
 floors?" — used identically by the trainer (``run.py::_status_for`` / ``missed_floors``)
-and the M4 inference layer (``inference.limitations::missed_criteria``), so the two
+and the inference layer (``inference.limitations::missed_criteria``), so the two
 surfaces of the same claim can never diverge (the PR #24 agreement invariant, now
 strengthened to the CI + min-evidence rule).
 
@@ -226,7 +226,7 @@ def unmet_validated_mvp_reasons(
 ) -> list[str]:
     """The reasons ``validated_mvp`` is NOT earned — empty list iff it IS earned.
 
-    THE single source of truth shared by the trainer status decision and the M4
+    THE single source of truth shared by the trainer status decision and the
     inference limitations, so they can never diverge. Applies, in order: the
     min-evidence gate, the require-a-CI rule, then the CI-lower-bound floor check and
     CI-upper-bound ceiling check (same floor/ceiling VALUES, stronger evidence). The

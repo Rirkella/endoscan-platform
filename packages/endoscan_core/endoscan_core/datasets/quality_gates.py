@@ -3,7 +3,7 @@
 Compares a `DatasetQualityReport` against thresholds from
 ``registry/data/quality_gates.yaml`` and returns ONLY a pass/fail verdict. It
 never triggers training (see ``docs/ENDPOINT_BUILDING_WORKFLOW.md``) — it is a hard boundary that
-later milestones consult before any gated training step.
+the governed workflow consults before any gated training step.
 """
 
 from __future__ import annotations

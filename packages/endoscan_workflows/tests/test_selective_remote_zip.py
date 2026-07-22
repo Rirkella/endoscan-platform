@@ -111,7 +111,7 @@ def _workflow(service, suffix: str) -> str:
             endpoint_name=f"Selective remote ZIP {suffix}",
             endpoint_slug=f"selective-remote-zip-{suffix}",
             biological_goal="Validate technical reviewed range access only.",
-            created_by="phase2b-test",
+            created_by="preapproval-test",
             idempotency_key=f"selective-remote-zip-{suffix}",
             workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
         )

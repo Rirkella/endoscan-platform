@@ -1,4 +1,4 @@
-"""Trivial smoke test (M0): the core package imports and exposes a version."""
+"""Trivial smoke test (initial scaffold): the core package imports and exposes a version."""
 
 import endoscan_core
 

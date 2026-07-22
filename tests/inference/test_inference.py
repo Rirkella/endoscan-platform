@@ -1,4 +1,4 @@
-"""M4 inference + explainability: schema validation, predict, TreeSHAP, limitations.
+"""Inference + explainability: schema validation, predict, TreeSHAP, limitations.
 
 Runs against the self-contained FIXTURE_ER fixture endpoint (tiny git-tracked RF) plus
 a schema-only check against the committed real ER feature_schema.json (978 genes, no

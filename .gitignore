@@ -89,7 +89,7 @@ apps/web/dist/
 apps/web/.vite/
 
 # Never ignore small committed test fixtures, even if they match the binary
-# patterns above (M1/M2 commit dummy .pkl and data fixtures under here).
+# patterns above (registry and dataset tests commit small .pkl and data fixtures here).
 !tests/fixtures/
 !tests/fixtures/**
 

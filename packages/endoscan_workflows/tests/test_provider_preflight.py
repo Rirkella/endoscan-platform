@@ -20,7 +20,7 @@ from endoscan_workflows.config import AgentConfiguration, AgentRunMode
 from endoscan_workflows.preflight import ProviderAccessPreflight
 
 
-class FakeRawResponse:
+class PreparedRawResponse:
     def __init__(self, model: str, *, status: int = 200, request_id: str = "req_preflight"):
         self.model = model
         self.http_response = SimpleNamespace(
@@ -32,7 +32,7 @@ class FakeRawResponse:
         return SimpleNamespace(id=self.model)
 
 
-class FakeClient:
+class RecordingClient:
     def __init__(self, *, model: str = "gpt-5.4-mini", error: Exception | None = None):
         self.model = model
         self.error = error
@@ -48,7 +48,7 @@ class FakeClient:
         self.retrieve_calls.append(model)
         if self.error:
             raise self.error
-        return FakeRawResponse(self.model)
+        return PreparedRawResponse(self.model)
 
     def close(self) -> None:
         self.closed = True
@@ -85,7 +85,7 @@ def api_error(error_class, status: int, code: str, error_type: str):
 
 
 def preflight(error: Exception | None = None):
-    client = FakeClient(error=error)
+    client = RecordingClient(error=error)
     factory_calls: list[dict] = []
 
     def factory(**kwargs):

@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--slice-batch", type=int, default=None, help="sig_ids per hyperslab read")
     run.add_argument("--rdcc-bytes", type=int, default=None, help="HDF5 chunk-cache bound (bytes)")
     # build_explore_map job: a SEEDED UMAP over curated/<TARGET>/signatures.parquet. All params
-    # are recorded in the manifest; labels are OPTIONAL (uncoloured map if absent, never faked).
+    # are recorded in the manifest; labels are OPTIONAL (uncoloured if absent, never fabricated).
     run.add_argument("--labels-csv", default=None, help="optional compound_id->label CSV to colour")
     run.add_argument(
         "--labels-id-col", default=None, help="labels CSV id column (default compound_id)"

@@ -63,12 +63,17 @@ TASK_HELP = {
 
 
 def _tool(name: str) -> str:
-    executable = shutil.which(name)
-    if executable is None:
-        raise SystemExit(
-            f"Required tool '{name}' is not on PATH. See docs/DEVELOPMENT.md for setup."
-        )
-    return executable
+    candidates = [name]
+    if sys.platform == "win32" and Path(name).suffix == "":
+        # Node's Windows installer places extensionless POSIX shims beside the
+        # executable .cmd launchers. ``shutil.which('npm')`` can select the shim,
+        # which CreateProcess cannot execute (WinError 193).
+        candidates = [f"{name}.cmd", f"{name}.exe", name]
+    for candidate in candidates:
+        executable = shutil.which(candidate)
+        if executable is not None:
+            return executable
+    raise SystemExit(f"Required tool '{name}' is not on PATH. See docs/DEVELOPMENT.md for setup.")
 
 
 def _npm(*arguments: str) -> list[str]:

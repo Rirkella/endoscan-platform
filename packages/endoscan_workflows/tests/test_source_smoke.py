@@ -286,7 +286,7 @@ def test_cache_rejects_missing_or_hash_mismatched_artifact_and_fk_stays_enabled(
                     cache_key="f" * 64,
                     tool_name="invalid-direct-row",
                     normalized_arguments_json="{}",
-                    policy_version="phase1-source-policy-v2-geo-text",
+                    policy_version="source-policy-v2-geo-text",
                     source_version=None,
                     source_url="https://eutils.ncbi.nlm.nih.gov/",
                     http_metadata_json="{}",

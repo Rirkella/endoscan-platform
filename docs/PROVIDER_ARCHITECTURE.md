@@ -4,7 +4,7 @@
 
 EndoScan has two provider boundaries:
 
-1. A provider-neutral model interface accepts a typed prompt/context, allowed tools, structured-output schema, and budget. `FakeAgentProvider` supports deterministic tests; `OpenAIAgentProvider` is the optional live adapter.
+1. A provider-neutral model interface accepts a typed prompt/context, allowed tools, structured-output schema, and budget. `DeterministicOfflineProvider` supports deterministic tests; `OpenAIAgentProvider` is the optional live adapter.
 2. Reviewed scientific-source providers expose typed operations over fixed source families. Models select an operation and arguments; they do not supply arbitrary URLs, credentials, parsers, or transport policy.
 
 Provider results are untrusted input. Strict schemas, allowlists, MIME and size checks, completion proof, artifact hashes, cache fingerprints, and safe diagnostics apply before a result enters workflow state.

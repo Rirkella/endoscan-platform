@@ -34,7 +34,7 @@ export interface CompletedAnalyzeState {
   summary: AnalyzeResponse["summary"];
 }
 
-// Phase 2: one POST /analyze call returns the per-endpoint array (server-side fan-out with
+// One POST /analyze call returns the per-endpoint array (server-side fan-out with
 // per-endpoint isolation). Falls back to a client-side /predict fan-out if /analyze is absent
 // (404) — graceful during rollout. Never hardcodes the endpoint set.
 export function useAnalyze(endpoints: EndpointSummary[]) {

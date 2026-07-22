@@ -3,7 +3,7 @@
 Canonical id = the FULL InChIKey (27 characters). Rationale: it is structure-
 derived and database-independent, and — unlike the 14-character first block — it
 never merges distinct structures (salts/stereoisomers stay separate). This is the
-M2 default policy (flagged for review); the first block is recorded in
+current default policy (flagged for review); the first block is recorded in
 ``inchikey_block1`` so a collapse policy can be revisited later without re-mapping.
 
 SMILES is carried here only as an identifier/provenance field. It is NEVER used to

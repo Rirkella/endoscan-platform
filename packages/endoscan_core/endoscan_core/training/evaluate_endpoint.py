@@ -2,7 +2,7 @@
 
 Computed from pooled out-of-fold predictions (the honest cross-validated
 estimate). Calibration is reported as the Brier score — a proper scoring rule —
-with no separate calibrated-model fit at M3.
+with no separate calibrated-model fit in the current training path.
 """
 
 from __future__ import annotations

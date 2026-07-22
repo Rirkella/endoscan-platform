@@ -34,10 +34,10 @@ export function Landing() {
         </header>
 
         <div className="landing-hero-content">
-          <p className="landing-overline">Mechanistic toxicology, powered by transcriptomics</p>
-          <h1>Understand toxicological effects — and the biology behind them.</h1>
+          <p className="landing-overline">Mechanistic research, grounded in transcriptomics</p>
+          <h1>Explore measured cellular responses — and the biology behind them.</h1>
           <p className="landing-hero-copy">
-            Explore public toxicology data or analyze a measured gene-expression response across a
+            Explore reviewed public reference data or analyze a measured gene-expression response across a
             growing library of endpoint models. See the genes, pathways, reference compounds and
             evidence behind every signal.
           </p>
@@ -276,11 +276,12 @@ export function Landing() {
               </p>
             </article>
             <article>
-              <p className="endpoints-tag endpoints-tag-planned">Future scaling</p>
-              <h3>Agent-assisted dataset &amp; model pipeline</h3>
+              <p className="endpoints-tag endpoints-tag-planned">Implemented foundation</p>
+              <h3>Governed endpoint-building workflow</h3>
               <p>
-                A future workflow to help discover datasets, build training sets and register new
-                endpoint models with recorded provenance.
+                An offline-validated workflow can discover candidate metadata, build reviewed
+                training sets and prepare endpoint registration with provenance and human gates.
+                Live and scientific validation remain pending.
               </p>
             </article>
           </div>

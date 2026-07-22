@@ -38,7 +38,7 @@ from endoscan_workflows.provider_execution import (
     ProviderCredentialBoundary,
     ProviderTaskExecutor,
 )
-from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
+from endoscan_workflows.providers import DeterministicOfflineProvider, ProviderRegistry
 from endoscan_workflows.reviewed_source_adapters import (
     production_reviewed_source_registry,
 )
@@ -48,7 +48,7 @@ from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_probe import GeoValidationProbe
 from endoscan_workflows.source_security import ScientificSourceClient
 from endoscan_workflows.state_machine import WorkflowGraph, canonical_workflow_graph_path
-from endoscan_workflows.tools import phase1_tool_registry
+from endoscan_workflows.tools import production_tool_registry
 
 from .admin.auth import AdminMutationLimiter
 from .admin.routes import router as admin_router
@@ -283,7 +283,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         if preapproval_manifest_path.is_file()
         else None
     )
-    tool_registry = phase1_tool_registry(
+    tool_registry = production_tool_registry(
         root,
         discovery_tools,
         reviewed_source_adapters,
@@ -296,7 +296,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         tool_registry,
     )
     provider_registry = ProviderRegistry()
-    provider_registry.register("fake", FakeAgentProvider)
+    provider_registry.register("offline_fixture", DeterministicOfflineProvider)
     provider_registry.register(
         "openai", lambda: OpenAIAgentProvider(agent_configuration, tool_registry)
     )

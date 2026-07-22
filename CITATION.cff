@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+message: "If you use EndoScan in authorized research, cite the software repository."
+title: EndoScan
+type: software
+authors:
+  - family-names: Andriushchenko
+    given-names: Irina
+repository-code: "https://github.com/Rirkella/endoscan-platform"

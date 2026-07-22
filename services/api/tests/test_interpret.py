@@ -64,7 +64,7 @@ def client(repo_with_reactome: Path) -> TestClient:
 
 
 def _stub_explain(method: str, toward: list[str], away: list[str] | None = None):
-    """A fake explain() returning a list[stub] with controlled toward/away contributors."""
+    """Return controlled toward/away contributors from an explain() test double."""
     contribs = [SimpleNamespace(gene=g, shap_value=0.5, direction="toward") for g in toward]
     contribs += [SimpleNamespace(gene=g, shap_value=-0.5, direction="away") for g in (away or [])]
     stub = SimpleNamespace(endpoint_id="ER", method=method, top_contributors=contribs)

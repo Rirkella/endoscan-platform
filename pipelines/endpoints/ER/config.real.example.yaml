@@ -1,4 +1,4 @@
-# ER endpoint pipeline config — REAL run TEMPLATE (Phase 2). Copy this, do NOT
+# ER endpoint pipeline config — reviewed real-data run template. Copy this; do not
 # commit a filled-in real config with approved: true until the run is reviewed.
 #
 # An authorized reproduction is run by a maintainer with separately reviewed source
@@ -44,7 +44,7 @@ training:
     - random_forest
     - gradient_boosting
   selection_tolerance: 0.02
-  # Starting values — FINALIZE against real positive prevalence in Phase 2.
+  # Starting values — finalize against positive prevalence before real-data execution.
   # AUPRC floor should be sized to prevalence (random-baseline AUPRC = prevalence).
   validated_mvp_floors:
     auroc: 0.75

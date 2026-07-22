@@ -23,7 +23,7 @@ dev = [
     # Staging-layer / CI helper only (NOT an endoscan_core runtime dependency):
     # the gctx slicer + its synthetic-gctx test use h5py (NumPy-2 compatible).
     "h5py>=3.11",
-    # TreeSHAP for the M4 inference/explainability tests; installed in CI so the explain
+    # TreeSHAP for inference and explainability tests; installed in CI so the explain
     # tests run. NOT an endoscan_core runtime dependency (shap import is lazy in
     # inference/explain.py and explain tests importorskip it).
     "shap>=0.44",
@@ -33,7 +33,7 @@ dev = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-# Notebooks are cloud-run artifacts (Colab), not linted production code.
+# Local exploratory notebooks are not part of the committed production path.
 extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]

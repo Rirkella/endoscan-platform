@@ -22,7 +22,7 @@ from endoscan_workflows.discovery import (
     discovery_request,
 )
 from endoscan_workflows.openai_provider import TOOL_ENVELOPE, OpenAIAgentProvider
-from endoscan_workflows.tools import phase1_tool_registry
+from endoscan_workflows.tools import production_tool_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -33,7 +33,7 @@ class OfflineDiscoveryService:
 
 
 def registry():
-    return phase1_tool_registry(REPO_ROOT, OfflineDiscoveryService())
+    return production_tool_registry(REPO_ROOT, OfflineDiscoveryService())
 
 
 class ToolCallModel(Model):

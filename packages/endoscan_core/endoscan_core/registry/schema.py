@@ -10,8 +10,8 @@ Design notes
   enforce EndoScan's documented transcriptomics-first contract.
 - Artifact paths are stored **relative to the repository root** (see `store.py`
   for why and how they are resolved).
-- `source_refs` are **opaque strings** at M1; the allow-list (`sources.yaml`)
-  does not exist until M2, so no structure or lookup is imposed here.
+- `source_refs` are **opaque strings** at the serving-registry boundary. Source
+  allow-list validation is owned by the dataset and workflow layers.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: An endpoint id is an uppercase symbolic token (e.g. "ER", "TR", "DEMO_ER").
-#: It is NOT a compound identifier (CID/InChIKey/SMILES) — those appear in M2
+#: It is NOT a compound identifier (CID/InChIKey/SMILES) — those appear in
 #: dataset fixtures, not in the registry index.
 ENDPOINT_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 

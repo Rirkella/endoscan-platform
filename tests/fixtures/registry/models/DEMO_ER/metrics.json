@@ -2,5 +2,5 @@
   "auroc": null,
   "auprc": null,
   "balanced_accuracy": null,
-  "note": "placeholder — no real metrics at M1; real metrics arrive with M3 training"
+  "note": "placeholder — this registry fixture has no real metrics; reviewed metrics are produced by training"
 }

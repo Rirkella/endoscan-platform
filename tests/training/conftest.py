@@ -1,4 +1,4 @@
-"""Shared fixtures for M3 training/pipeline tests (offline, deterministic)."""
+"""Shared fixtures for training/pipeline tests (offline, deterministic)."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def allow_list() -> SourcesAllowList:
 
 @pytest.fixture
 def candidate_table(allow_list: SourcesAllowList) -> CandidateTable:
-    """Build the ER candidate table from the M2 fixtures (separable signal)."""
+    """Build the ER candidate table from the dataset layer fixtures (separable signal)."""
     adapter = FixtureSourceAdapter(DATASET_FIXTURES)
     target = "ER"
     labels = label_retriever(
@@ -72,7 +72,7 @@ def candidate_table(allow_list: SourcesAllowList) -> CandidateTable:
 
 @pytest.fixture
 def tmp_output_root(tmp_path: Path) -> Path:
-    """A throwaway repo-root for artifacts + an empty registry index (like M1)."""
+    """A throwaway repo-root for artifacts plus an empty registry index."""
     index = tmp_path / "registry" / "models" / "endpoints.json"
     index.parent.mkdir(parents=True, exist_ok=True)
     index.write_text('{\n  "endpoints": []\n}\n', encoding="utf-8")

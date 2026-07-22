@@ -53,7 +53,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = json.loads(
     (
         Path(__file__).with_name("fixtures")
-        / "provider_phase2b"
+        / "preapproval_providers"
         / "toxcast_authoritative_shapes.json"
     ).read_text(encoding="utf-8")
 )
@@ -361,7 +361,7 @@ def _workflow(service, suffix: str) -> str:
             endpoint_name=f"ToxCast provider contract {suffix}",
             endpoint_slug=f"toxcast-provider-contract-{suffix}",
             biological_goal="Validate authoritative provider metadata contracts only.",
-            created_by="phase2b-test",
+            created_by="preapproval-test",
             idempotency_key=f"toxcast-provider-contract-{suffix}",
             workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
         )
@@ -830,7 +830,7 @@ def test_release_space_listing_cannot_satisfy_scientific_role(workflow_runtime) 
         item_kind=ProviderItemKind.FILE,
         accepted_mime_types=["application/json"],
         maximum_response_bytes=100_000,
-        operation_id="fake_assay_catalogue",
+        operation_id="unregistered_assay_catalogue",
         output_schema="AssayAnnotation[]",
         resource_scope=ProviderResourceScope.SCIENTIFIC_DATA,
     )

@@ -5,7 +5,7 @@ Run from the repo root:
 
 Produces a self-contained "registry repo root" under tests/fixtures/inference/ with a
 TINY ``Pipeline(StandardScaler, RandomForestClassifier)`` model.pkl (5 genes), a
-``feature_schema.json``, and a ``metrics.json`` that ALREADY carries the M4 structured
+``feature_schema.json``, and a ``metrics.json`` that ALREADY carries the inference layer structured
 fields (``validated_mvp_floors``/``_ceilings``, ``claim_scope``) with values chosen so
 balanced_accuracy is BELOW its floor — i.e. status ``experimental`` with exactly one
 missed criterion. The model is for exercising predict + TreeSHAP offline; its metric

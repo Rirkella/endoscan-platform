@@ -153,19 +153,19 @@ def test_parse_ten_heterogeneous_endpoint_schemas(client, monkeypatch) -> None:
         for i in range(10)
     ]
 
-    def fake_schema(path):
+    def schema_double(path):
         index = int(path.stem[1:])
         return SimpleNamespace(features=("A", "B") if index % 2 == 0 else ("A", "C"))
 
-    def fake_align(mapping, schema, *, allow_extra=False):
+    def alignment_double(mapping, schema, *, allow_extra=False):
         missing = set(schema.features) - set(mapping)
         if missing:
             raise SignatureValidationError(f"missing {len(missing)} genes")
         return [[mapping[gene] for gene in schema.features]], True
 
     monkeypatch.setattr(route, "list_endpoints", lambda **_: entries)
-    monkeypatch.setattr(route, "load_feature_schema", fake_schema)
-    monkeypatch.setattr(route, "align_signature", fake_align)
+    monkeypatch.setattr(route, "load_feature_schema", schema_double)
+    monkeypatch.setattr(route, "align_signature", alignment_double)
     response = client.post(
         "/signatures/parse", data={"format": "json", "content": '{"A": 1, "B": 2}'}
     )

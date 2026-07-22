@@ -1369,7 +1369,7 @@ class DiscoveryToolService:
         return parsed, artifact.id, "live", response.url, diagnostic, response.sha256
 
     def _eutils_params(self) -> dict[str, str]:
-        values = {"tool": "endoscan_phase1"}
+        values = {"tool": "endoscan_discovery"}
         if self.ncbi_email:
             values["email"] = self.ncbi_email
         if self.ncbi_api_key:

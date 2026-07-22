@@ -16,8 +16,8 @@ Repo-root-relative also matches how DVC tracks ``models/``.
 Callers may pass an explicit ``repo_root`` to every function (tests do this to
 operate on a throwaway ``tmp_path`` copy and never touch the real index).
 
-Scope (M1)
-----------
+Scope
+-----
 This is the entire contract surface: list/get/register/update_status plus a
 minimal `load_model` that only deserializes a trusted, git-tracked stub. No
 training, inference, or real model logic.
@@ -211,15 +211,13 @@ def update_status(
 def load_model(endpoint_id: str, repo_root: Path | None = None) -> Any:
     """Deserialize and return the model artifact referenced by an endpoint.
 
-    M1 scope: locate the entry's ``model_path`` (resolved relative to repo root)
+    Locate the entry's ``model_path`` (resolved relative to repo root)
     and ``pickle.load`` it. The fixture artifact is a trusted, git-tracked stub,
     so unpickling it is safe here — this performs no inference or model logic.
 
-    SECURITY NOTE FOR LATER MILESTONES: later milestones MUST NOT unpickle
-    untrusted or user-supplied artifacts. ``pickle.load`` executes arbitrary
-    code on load; real serving (M4+) must use a safe format (e.g. joblib over a
-    vetted artifact, or a non-pickle serialization) and never load arbitrary
-    uploads.
+    SECURITY NOTE: never unpickle untrusted or user-supplied artifacts.
+    ``pickle.load`` executes arbitrary code on load. This loader is deliberately
+    limited to reviewed repository-owned artifacts and never accepts uploads.
     """
     root = repo_root or find_repo_root()
     entry = get_endpoint(endpoint_id, repo_root=root)

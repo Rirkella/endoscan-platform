@@ -93,7 +93,7 @@ class HttpxBoundedRangeTransport:
         self,
         *,
         timeout_seconds: float = 30,
-        user_agent: str = "EndoScan/phase2b-reviewed-range-access",
+        user_agent: str = "EndoScan/reviewed-range-access",
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.client = httpx.Client(

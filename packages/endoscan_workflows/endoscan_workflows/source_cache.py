@@ -14,7 +14,7 @@ from .database import WorkflowDatabase
 from .models import ArtifactRow, SourceCacheRow
 from .repository import canonical_json, parse_utc
 
-CACHE_POLICY_VERSION = "phase1-source-policy-v2-geo-text"
+CACHE_POLICY_VERSION = "source-policy-v2-geo-text"
 
 
 class SourceCacheIntegrityError(RuntimeError):
