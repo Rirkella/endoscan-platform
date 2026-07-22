@@ -8,14 +8,21 @@ dist/
 
 # Virtual environments
 .venv/
+.venv*/
 venv/
 
 # Secrets / local env
 .env
 .env.local
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
 
 # Tool caches
 .pytest_cache/
+.pytest-tmp-*/
 .ruff_cache/
 .mypy_cache/
 
@@ -48,6 +55,16 @@ venv/
 # signatures. This is application reference data, not a raw transcriptomics dump.
 !/data/catalogue/
 !/data/catalogue/**
+!/data/identities/
+!/data/identities/**
+!/data/literature/
+!/data/literature/**
+# Small reviewed ER activity and identity tables used by the serving catalogue and
+# reproduction path. The expression matrix remains represented only by its DVC pointer.
+!/data/staged/er/
+!/data/staged/er/cerapp.csv
+!/data/staged/er/pubchem.csv
+!/data/staged/er/lincs.parquet.dvc
 *.h5
 *.h5ad
 *.parquet
@@ -66,19 +83,40 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Node (frontend, wired up in a later milestone)
+# Node frontend
 node_modules/
+apps/web/dist/
+apps/web/.vite/
 
 # Never ignore small committed test fixtures, even if they match the binary
 # patterns above (M1/M2 commit dummy .pkl and data fixtures under here).
 !tests/fixtures/
 !tests/fixtures/**
 
-# Builder-agent build workspaces (scratch; auditable but not committed)
+# Endpoint-build workspaces and generated reports (auditable runtime state, not source)
 /.builds/
+/reports/
+/logs/
+*.log
 
 # Job-runner local storage root (LocalStorage default; persistent disk on the server)
 /.endoscan-data/
 
-# Phase-0 durable workflow database and content-addressed local artifacts.
+# Durable workflow database and content-addressed local artifacts.
 /.endoscan/
+
+# Local provider transport/cache and downloaded scientific-source material.
+/.provider-cache/
+/data/raw/
+/data/downloads/
+
+# Editor and local workspace state.
+.idea/
+.vscode/
+*.code-workspace
+
+# Emergency/review transfer files belong outside the public repository.
+*.patch
+*.bundle
+*.bak
+*.backup

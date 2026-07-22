@@ -1,10 +1,8 @@
 # ER endpoint pipeline config — the concrete REAL-run config for the re-baseline rebuild.
 #
-# Derived from config.real.example.yaml. Committed with approval.approved: FALSE (BLOCKED)
-# so it can never train/register on its own — the M5 agent injects approval ONLY at
-# promote() time via a valid, human-issued token (builder_agent.promote). Committing this
-# with approved: false is safe; the runbook's "do NOT commit a filled real config" warning
-# is specifically about approved: true.
+# Derived from config.real.example.yaml. Committed with approval.approved: FALSE (BLOCKED),
+# so it can never train/register on its own. An authorized reproduction uses a reviewed,
+# untracked working config and an explicit human approval; see pipelines/README.md.
 #
 # CONTEXT (documented, NOT a config field — DataConfig forbids extras): ER's signature
 # matrix (data/staged/er/lincs.parquet) is re-extracted from the real LINCS gctx over the
@@ -37,7 +35,7 @@ gate:
   thresholds_path: registry/data/quality_gates.yaml   # the SAME strict thresholds — UNCHANGED
 
 approval:
-  approved: false                  # BLOCKED here; the agent injects approval via a token at promote
+  approved: false                  # BLOCKED in the committed reproduction configuration
   approved_by: ""
   note: ""
 

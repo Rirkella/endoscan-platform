@@ -1,8 +1,8 @@
-"""Real-download source adapter — STUB.
+"""Legacy direct-download seam — deliberately disabled.
 
-Intentionally not implemented at M2 (the milestone is fixtures-only). Real source
-download/extraction adapters are wired up in a later dedicated issue. This class
-exists to document the seam; it is never used by tests.
+Reviewed source access now lives in ``endoscan_workflows`` behind typed provider,
+approval, provenance, and artifact boundaries. Core dataset construction must not
+bypass those controls, so this compatibility class always raises.
 """
 
 from __future__ import annotations
@@ -12,17 +12,16 @@ from .base import RawTable
 
 
 class RealDownloadAdapter:
-    """Placeholder for real source downloads. Every call raises."""
+    """Disabled compatibility seam for ungoverned direct downloads."""
 
     def has_source(self, source: SourceEntry) -> bool:
         raise NotImplementedError(
-            f"Real source download for {source.id!r} is not implemented yet "
-            "(M2 is fixtures-only)."
+            f"Direct source download for {source.id!r} is disabled; "
+            "use the reviewed endoscan_workflows provider boundary."
         )
 
     def read_records(self, source: SourceEntry) -> RawTable:
         raise NotImplementedError(
-            f"Real source download for {source.id!r} is not implemented yet "
-            "(M2 is fixtures-only). TODO: implement real source-download adapters "
-            "in a later dedicated issue."
+            f"Direct source download for {source.id!r} is disabled; "
+            "use the reviewed endoscan_workflows provider and artifact boundary."
         )

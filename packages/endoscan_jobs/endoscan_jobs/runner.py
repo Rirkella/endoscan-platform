@@ -1,6 +1,6 @@
 """Job dispatch, structured logging, and the exit-code contract.
 
-Exit codes (mirroring the M5 agent's "failed_qc is a valid outcome, not a failure"):
+Exit codes preserve the rule that ``failed_qc`` is a valid outcome, not a runner failure:
 - ``0`` the job RAN and wrote its report — INCLUDING a ``failed_qc`` coverage verdict
   (a valid data outcome with a report, not a runner error);
 - ``2`` job error (fetch/parse failed, no data, unexpected exception);
@@ -43,7 +43,7 @@ class JobOutcome(BaseModel):
 
 
 class JobResult(BaseModel):
-    """The machine-readable record Claude Code reads to triage a run."""
+    """The machine-readable record used by maintainers and automation to triage a run."""
 
     model_config = ConfigDict(extra="forbid")
 

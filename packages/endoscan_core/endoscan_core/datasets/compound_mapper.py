@@ -7,7 +7,7 @@ M2 default policy (flagged for review); the first block is recorded in
 ``inchikey_block1`` so a collapse policy can be revisited later without re-mapping.
 
 SMILES is carried here only as an identifier/provenance field. It is NEVER used to
-predict a signature or risk (PROJECT_RULES.md §1.4/§1.5).
+predict a signature or risk (see ``docs/SCIENTIFIC_LIMITATIONS.md``).
 """
 
 from __future__ import annotations

@@ -47,7 +47,7 @@ from endoscan_workflows.service import WorkflowService
 from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_probe import GeoValidationProbe
 from endoscan_workflows.source_security import ScientificSourceClient
-from endoscan_workflows.state_machine import WorkflowGraph
+from endoscan_workflows.state_machine import WorkflowGraph, canonical_workflow_graph_path
 from endoscan_workflows.tools import phase1_tool_registry
 
 from .admin.auth import AdminMutationLimiter
@@ -94,12 +94,17 @@ def _cors_origins() -> list[str]:
 
 
 def _workflow_state_machine_path(data_root: Path) -> Path:
-    """Resolve canonical workflow policy independently of synthetic data roots."""
-    supplied = data_root / "docs" / "agents" / "workflow-state-machine.json"
+    """Resolve the workflow-owned state-machine contract for a checkout or installed wheel."""
+    supplied = (
+        data_root
+        / "packages"
+        / "endoscan_workflows"
+        / "endoscan_workflows"
+        / "workflow-state-machine.json"
+    )
     if supplied.is_file():
         return supplied
-    repository = Path(__file__).resolve().parents[3]
-    canonical = repository / "docs" / "agents" / "workflow-state-machine.json"
+    canonical = canonical_workflow_graph_path()
     if canonical.is_file():
         return canonical
     raise RuntimeError("The canonical workflow state-machine document is unavailable.")

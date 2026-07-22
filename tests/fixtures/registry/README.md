@@ -78,7 +78,7 @@ Regenerate with `tests/fixtures/registry/make_model_stub.py`.
 
 ### `models/DEMO_ER/metrics.json`
 Placeholder metrics — all numeric values are `null` (no fabricated performance,
-per PROJECT_RULES.md §6.1). Real metrics arrive with M3 training.
+by the repository integrity policy). Real metrics arrive only from reviewed training.
 
 ### `models/DEMO_ER/model_card.md`, `dataset_card.md`
 Minimal placeholder cards (stub content), present so the `validated_mvp`

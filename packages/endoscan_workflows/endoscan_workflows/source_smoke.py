@@ -19,7 +19,7 @@ from .reviewed_source_adapters import (
 from .service import WorkflowService
 from .source_cache import SourceResponseCache
 from .source_security import ScientificSourceClient
-from .state_machine import WorkflowGraph
+from .state_machine import WorkflowGraph, canonical_workflow_graph_path
 
 SMOKE_BUILD_KEY = "isolated-reviewed-source-smoke-build-v1"
 SMOKE_STEP_KEY = "isolated-reviewed-source-smoke-step-v1"
@@ -78,7 +78,7 @@ class IsolatedReviewedSourceSmokeRuntime:
         service = WorkflowService(
             database,
             artifacts,
-            WorkflowGraph(repository_root / "docs" / "agents" / "workflow-state-machine.json"),
+            WorkflowGraph(canonical_workflow_graph_path()),
             repo_root=repository_root,
             reviewed_source_adapters=registry,
         )

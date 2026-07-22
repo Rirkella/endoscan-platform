@@ -2,7 +2,7 @@
 
 Compares a `DatasetQualityReport` against thresholds from
 ``registry/data/quality_gates.yaml`` and returns ONLY a pass/fail verdict. It
-never triggers training (PROJECT_RULES.md §3.2/§3.3) — it is a hard boundary that
+never triggers training (see ``docs/ENDPOINT_BUILDING_WORKFLOW.md``) — it is a hard boundary that
 later milestones consult before any gated training step.
 """
 

@@ -1,9 +1,8 @@
-"""Assemble the Phase-2b review bundle (text artifacts + .dvc pointers) for handoff.
+"""Assemble a review bundle (text artifacts + .dvc pointers) for handoff.
 
-Cloud/offline plumbing run from the operator notebook's Stop 4: copies a fixed list
-of repo-relative artifact paths into a bundle directory (e.g. on Google Drive) so the
-operator can hand them to Claude Code, which opens the review PR. Pure file IO — no
-network, no git, no science. Unit-tested on fixtures.
+Copies a fixed list of repo-relative artifact paths into a bundle directory so a
+maintainer can prepare a normal reviewed change. Pure file IO — no network, no git,
+no science. Unit-tested on fixtures.
 """
 
 from __future__ import annotations

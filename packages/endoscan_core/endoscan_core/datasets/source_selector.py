@@ -17,7 +17,7 @@ def source_selector(
     A source is returned when it is broad (no ``targets``) or explicitly covers
     ``target``, optionally filtered to the given ``types``. Because it only
     iterates the allow-list, it can never return a source outside it
-    (PROJECT_RULES.md §3.1).
+    (see ``registry/data/sources.yaml`` and ``docs/PROVIDER_ARCHITECTURE.md``).
     """
     wanted = set(types) if types is not None else None
     selected: list[SourceEntry] = []

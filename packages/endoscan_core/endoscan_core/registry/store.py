@@ -192,7 +192,7 @@ def update_status(
 
     ``status`` may be an `EndpointStatus` or its string value; an invalid value
     raises ``ValueError``. Promotion to ``validated_mvp`` enforces the
-    artifact-existence gate and never bypasses it (PROJECT_RULES.md §3.3).
+    artifact-existence gate and never bypasses the documented publication boundary.
     """
     root = repo_root or find_repo_root()
     status = EndpointStatus(status)  # ValueError on an invalid status string

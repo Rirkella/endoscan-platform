@@ -3,7 +3,7 @@
 Produces ``X`` (transcriptomic features), ``y`` (labels), ``metadata``, and a
 compound-level ``SplitPlan``. Each *signature* is a row; a "compound" is keyed by
 canonical InChIKey. Conflicted-label compounds are excluded from ``y`` (recorded,
-never voted — PROJECT_RULES.md §4.2).
+never voted, as required by the documented label policy).
 
 The split plan is a GROUP ASSIGNMENT (compound -> group), not a trained split:
 every row inherits its compound's group, so no compound can span groups. M3 feeds

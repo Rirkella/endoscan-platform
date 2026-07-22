@@ -1,21 +1,15 @@
-# EndoScan — docker-compose (PLACEHOLDER / STUB).
-#
-# This file is intentionally a stub at M0. It defines NO working services yet.
-# The `api` and `web` service blocks below are commented out and will be wired
-# up in later milestones (FastAPI service: ~M7; web frontend: ~M8). Do not
-# uncomment until those milestones implement the corresponding services.
-
-# services:
-#   api:
-#     # TODO(M7): FastAPI service — thin; imports endoscan_core.
-#     build: ./services/api
-#     ports:
-#       - "8000:8000"
-#     env_file:
-#       - .env
-#
-#   web:
-#     # TODO(M8): React / Vite / Tailwind / TypeScript frontend.
-#     build: ./apps/web
-#     ports:
-#       - "5173:5173"
+# EndoScan heavy-job runner image. The API and Vite application are run with
+# the cross-platform commands documented in docs/DEVELOPMENT.md; this Compose
+# file intentionally does not pretend that deployment images for those
+# services exist yet.
+services:
+  jobs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["--help"]
+    volumes:
+      - ./.endoscan-data:/data
+    environment:
+      ENDOSCAN_DATA_ROOT: /data
+    profiles: ["jobs"]

@@ -2,7 +2,7 @@
 
 Normalizes each source's native call into a binary ``label`` plus an assay source
 and a confidence, and records — but never silently resolves — conflicting labels
-(PROJECT_RULES.md §4.2). Final exclusion of conflicted compounds happens in
+by the documented label policy. Final exclusion of conflicted compounds happens in
 `candidate_table_builder` once compounds are harmonized to a canonical id.
 
 Each label source has its own native columns, so parsing is dispatched by

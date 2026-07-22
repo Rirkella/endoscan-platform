@@ -36,7 +36,7 @@ from .discovery_strategy import (
 )
 from .endpoint_lifecycle import OfflineAssemblyInput
 from .service import WorkflowService
-from .state_machine import WorkflowGraph
+from .state_machine import WorkflowGraph, canonical_workflow_graph_path
 from .training_dataset import (
     EndpointDiscoveryMode,
     EndpointDiscoveryScope,
@@ -325,7 +325,7 @@ def execute_offline_demo(source_repo_root: Path, output_root: Path, name: str) -
     service = WorkflowService(
         database,
         artifacts,
-        WorkflowGraph(source_repo_root / "docs" / "agents" / "workflow-state-machine.json"),
+        WorkflowGraph(canonical_workflow_graph_path()),
         repo_root=output_root,
     )
 

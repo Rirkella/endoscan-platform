@@ -32,7 +32,7 @@ def resolve_canonical_labels(
     Returns ``(labels_by_key, conflicted_keys)`` where ``labels_by_key`` maps each
     canonical InChIKey with a single agreed label to that label, and
     ``conflicted_keys`` is the set of InChIKeys whose labels disagree across
-    records (these are recorded and excluded, never voted on — PROJECT_RULES §4.2).
+    records (these are recorded and excluded, never voted on by aggregation).
     Records that cannot be mapped to a canonical id are skipped here (they are
     counted as unmapped by the mapper).
     """

@@ -2,8 +2,8 @@
 #
 # INERT until a self-hosted runner with the `endoscan` label is registered (the
 # server-wiring follow-up). It builds the job image and runs a named job inside the
-# container against the persistent data disk, then uploads logs/reports/artifacts so
-# Claude Code can inspect failures via the GitHub API WITHOUT the operator.
+# container against the persistent data disk, then uploads logs/reports/artifacts for
+# maintainers to inspect through the normal GitHub workflow interface.
 #
 # It is manual-only (`workflow_dispatch`) and runs on `[self-hosted, endoscan]`, so it
 # never executes on GitHub-hosted CI and cannot run until the runner exists.
