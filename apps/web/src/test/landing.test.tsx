@@ -1,5 +1,5 @@
 // Landing page (production, "/"). Locks the broad-toxicology positioning, the honest research-use
-// framing, and that every call-to-action points at a REAL route — no fake pages.
+// framing, and that every call-to-action points at a REAL route — no invented pages.
 
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -15,23 +15,25 @@ describe("Landing page", () => {
     renderApp("/");
     expect(
       await screen.findByRole("heading", {
-        name: /Understand toxicological effects — and the biology behind them/i,
+        name: /Explore measured cellular responses — and the biology behind them/i,
       }),
     ).toBeInTheDocument();
     // Broad platform positioning (not endocrine-only).
-    expect(screen.getByText(/Mechanistic toxicology, powered by transcriptomics/i)).toBeInTheDocument();
+    expect(screen.getByText(/Mechanistic research, grounded in transcriptomics/i)).toBeInTheDocument();
     // Honest research-use framing.
     expect(screen.getAllByText(/Research use only · Experimental models/i).length).toBeGreaterThan(0);
     // ER/AR shown as the current available scope, not the whole platform.
     expect(screen.getByText(/Available today/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Experimental ER and AR models/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/^Planned$/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Implemented foundation/i)).toBeInTheDocument();
+    expect(screen.getByText(/Live and scientific validation remain pending/i)).toBeInTheDocument();
   });
 
   it("every CTA navigates ONLY to existing real routes", async () => {
     installFetchMock();
     renderApp("/");
-    await screen.findByRole("heading", { name: /Understand toxicological effects/i });
+    await screen.findByRole("heading", { name: /Explore measured cellular responses/i });
     for (const link of screen.getAllByRole("link", { name: /Start an analysis/i })) {
       expect(link).toHaveAttribute("href", "/analyze");
     }
@@ -52,7 +54,7 @@ describe("Landing page", () => {
   it("keeps the 'more than a score' evidence framing (the strong result, moved up)", async () => {
     installFetchMock();
     renderApp("/");
-    await screen.findByRole("heading", { name: /Understand toxicological effects/i });
+    await screen.findByRole("heading", { name: /Explore measured cellular responses/i });
     expect(screen.getByText(/See the evidence behind every result/i)).toBeInTheDocument();
     expect(screen.getByText(/Illustrative example/i)).toBeInTheDocument();
     expect(

@@ -315,7 +315,7 @@ class WorkflowService:
                 return self._snapshot(session, existing)
             count = int(session.scalar(select(func.count(EndpointBuildRow.id))) or 0)
             if count >= self.maximum_workflows:
-                raise WorkflowConflict("The configured Phase-0 workflow limit has been reached.")
+                raise WorkflowConflict("The configured workflow limit has been reached.")
             now = utc_text()
             build = EndpointBuildRow(
                 id=build_id,
@@ -366,9 +366,9 @@ class WorkflowService:
                         workflow_kind=request.workflow_kind.value,
                         benchmark_mode=request.benchmark_mode,
                         limitations=[
-                            "Phase 0 defines workflow scope only; it does not create a "
+                            "Build creation defines workflow scope only; it does not create a "
                             "scientific model.",
-                            "The prepared discovery simulation is not live dataset discovery.",
+                            "The prepared offline replay is not live dataset discovery.",
                         ],
                     )
                 ).encode(),
@@ -456,15 +456,13 @@ class WorkflowService:
                 approval_type=ApprovalType.ENDPOINT_DEFINITION,
                 proposed_decision=f"Freeze endpoint definition for {request.endpoint_name}.",
                 evidence_summary=request.biological_goal,
-                limitations=[
-                    "Creation is the explicit Phase-0 local-admin endpoint-definition decision."
-                ],
+                limitations=["Creation is the explicit local-admin endpoint-definition decision."],
                 artifact_hashes=[definition.sha256],
                 agent_recommendation="No agent recommendation; administrator-authored definition.",
                 requested_action=(
                     "Start target training-dataset specification."
                     if request.workflow_kind is WorkflowKind.TRAINING_DATASET_DISCOVERY
-                    else "Start bounded prepared discovery simulation."
+                    else "Start bounded prepared offline replay."
                 ),
             )
             approval = self._create_approval(
@@ -6500,7 +6498,7 @@ class WorkflowService:
                 idempotency_key=f"{idempotency_key}:compilation",
             )
         if self.harness is None:
-            raise WorkflowConflict("No Phase-0 agent harness is configured.")
+            raise WorkflowConflict("No agent harness is configured.")
         snapshot = self.transition(
             workflow_id,
             TransitionRequest(
@@ -6535,7 +6533,7 @@ class WorkflowService:
         refresh_source_metadata: bool = False,
     ) -> WorkflowSnapshot:
         if self.harness is None:
-            raise WorkflowConflict("No Phase-0 agent harness is configured.")
+            raise WorkflowConflict("No agent harness is configured.")
         snapshot = self.get_build(workflow_id)
         if snapshot.current_stage is not WorkflowState.DISCOVERING_DATA:
             raise InvalidTransition("Discovery can run only in DISCOVERING_DATA.")
@@ -6615,7 +6613,7 @@ class WorkflowService:
             logical_name=f"dataset-candidates-{run_mode}-v{revision}.json",
             producer="Dataset Discovery and Evaluation Agent",
             original_source=(
-                "phase1://validated-replay"
+                "offline-replay://validated"
                 if run_mode == "replay"
                 else "https://www.ncbi.nlm.nih.gov/geo/"
             ),
@@ -7133,10 +7131,10 @@ class WorkflowService:
                     step_id=step.id if step else None,
                     agent_run_id=None,
                     tool_call_id=None,
-                    code="phase0_controlled_failure",
+                    code="offline_fixture_controlled_failure",
                     category="demonstration",
                     retryable=1,
-                    safe_message="Prepared controlled Phase-0 failure; retry is allowed.",
+                    safe_message="Prepared controlled offline-provider failure; retry is allowed.",
                     detail_json=canonical_json(
                         versioned_payload(reason="Explicit local-admin demonstration action.")
                     ),
@@ -7783,7 +7781,7 @@ class WorkflowService:
                 ),
             )
         if approval.approval_type != ApprovalType.DATASET_SELECTION.value:
-            raise InvalidTransition("This approval type does not advance the Phase-1 workflow.")
+            raise InvalidTransition("This approval type does not advance the discovery workflow.")
         target_by_decision = {
             ApprovalDecisionValue.APPROVE: WorkflowState.CURATING_DATA,
             ApprovalDecisionValue.CHOOSE_ALTERNATIVE: WorkflowState.CURATING_DATA,

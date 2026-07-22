@@ -48,7 +48,7 @@ from endoscan_workflows.reviewed_source_adapters import (
 )
 from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_security import ScientificSourceClient
-from endoscan_workflows.tools import phase1_tool_registry
+from endoscan_workflows.tools import production_tool_registry
 from endoscan_workflows.training_dataset import (
     EndpointDiscoveryMode,
     EndpointDiscoveryScope,
@@ -58,7 +58,7 @@ from endoscan_workflows.training_dataset import (
 )
 
 
-def create_build(service, key="phase0-test-create"):
+def create_build(service, key="offline-fixture-test-create"):
     return service.create_build(
         EndpointBuildCreate(
             endpoint_name="Oxidative stress",
@@ -73,7 +73,7 @@ def create_build(service, key="phase0-test-create"):
     )
 
 
-def start_build(service, build, key="phase0-test-start"):
+def start_build(service, build, key="offline-fixture-test-start"):
     return service.start_build(
         build.id,
         expected_version=build.version,
@@ -133,8 +133,8 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
     database.dispose()
 
 
-def test_specification_outcome_migration_upgrades_phase1_database_in_place(tmp_path) -> None:
-    database = WorkflowDatabase(tmp_path / "phase1-before-outcomes.db")
+def test_specification_outcome_migration_upgrades_legacy_database_in_place(tmp_path) -> None:
+    database = WorkflowDatabase(tmp_path / "legacy-before-outcomes.db")
     with database.engine.begin() as connection:
         connection.execute(
             text(
@@ -954,7 +954,7 @@ def _legacy_four_role_orchestration_reference(
         artifacts=store,
     )
     discovery_tools = DiscoveryToolService(source_cache, store, source_client)
-    tools = phase1_tool_registry(service.repo_root, discovery_tools, reviewed)
+    tools = production_tool_registry(service.repo_root, discovery_tools, reviewed)
     providers = ProviderRegistry()
     providers.register("openai", OfflineRoleProvider)
     service.harness = AgentHarness(database, providers, tools)
@@ -1118,7 +1118,7 @@ def test_deterministic_compilation_never_invokes_configured_provider(
     _database, _store, providers, _harness, service = workflow_runtime
 
     class CountingFailureProvider:
-        name = "fake"
+        name = "offline_fixture"
 
         def __init__(self) -> None:
             self.calls = 0
@@ -1128,7 +1128,7 @@ def test_deterministic_compilation_never_invokes_configured_provider(
             raise ProviderFailure("Prepared terminal failure.", retryable=False)
 
     provider = CountingFailureProvider()
-    providers._providers["fake"] = lambda: provider
+    providers._providers["offline_fixture"] = lambda: provider
     build = service.create_build(
         EndpointBuildCreate(
             endpoint_name="X receptor antagonist",
@@ -1171,7 +1171,7 @@ def test_invalid_optional_review_preserves_draft_without_discovery_or_retry(
     database, store, providers, _harness, service = workflow_runtime
 
     class InvalidOutputProvider:
-        name = "fake"
+        name = "offline_fixture"
 
         def __init__(self) -> None:
             self.calls = 0
@@ -1191,7 +1191,7 @@ def test_invalid_optional_review_preserves_draft_without_discovery_or_retry(
             )
 
     provider = InvalidOutputProvider()
-    providers._providers["fake"] = lambda: provider
+    providers._providers["offline_fixture"] = lambda: provider
     build = service.create_build(
         EndpointBuildCreate(
             endpoint_name="X receptor antagonist",
@@ -1246,7 +1246,7 @@ def test_optional_reviewer_refusal_or_timeout_preserves_draft(
     _database, _store, providers, _harness, service = workflow_runtime
 
     class TerminalReviewProvider:
-        name = "fake"
+        name = "offline_fixture"
 
         def __init__(self) -> None:
             self.calls = 0
@@ -1273,7 +1273,7 @@ def test_optional_reviewer_refusal_or_timeout_preserves_draft(
             )
 
     provider = TerminalReviewProvider()
-    providers._providers["fake"] = lambda: provider
+    providers._providers["offline_fixture"] = lambda: provider
     build = service.create_build(
         EndpointBuildCreate(
             endpoint_name="X receptor antagonist",
@@ -1314,7 +1314,7 @@ def test_optional_reviewer_blocking_contradiction_preserves_compiled_draft(
     _database, store, providers, _harness, service = workflow_runtime
 
     class BlockingReviewProvider:
-        name = "fake"
+        name = "offline_fixture"
 
         def __init__(self) -> None:
             self.calls = 0
@@ -1343,7 +1343,7 @@ def test_optional_reviewer_blocking_contradiction_preserves_compiled_draft(
             )
 
     provider = BlockingReviewProvider()
-    providers._providers["fake"] = lambda: provider
+    providers._providers["offline_fixture"] = lambda: provider
     build = service.create_build(
         EndpointBuildCreate(
             endpoint_name="X receptor antagonist",
@@ -1387,12 +1387,12 @@ def test_specification_revision_requires_explicit_human_action(workflow_runtime)
     _database, _store, providers, _harness, service = workflow_runtime
 
     class InvalidOutputProvider:
-        name = "fake"
+        name = "offline_fixture"
 
         def run_turn(self, *_args, **_kwargs):
             return ProviderTurn(kind="output", output={"unexpected": True})
 
-    providers._providers["fake"] = InvalidOutputProvider
+    providers._providers["offline_fixture"] = InvalidOutputProvider
     build = service.create_build(
         EndpointBuildCreate(
             endpoint_name="toxicity",
@@ -1442,7 +1442,7 @@ def test_creation_idempotency_rejects_different_payload(workflow_runtime) -> Non
                 endpoint_slug="different-endpoint",
                 biological_goal="A different biological goal that must not reuse the key.",
                 created_by="test-admin",
-                idempotency_key="phase0-test-create",
+                idempotency_key="offline-fixture-test-create",
             )
         )
 
@@ -1459,7 +1459,7 @@ def test_discovery_reaches_persisted_dataset_approval(workflow_runtime) -> None:
         "agent_recommendation",
         "search_trace",
     }
-    assert service.agent_runs(started.id)[0]["provider"] == "fake"
+    assert service.agent_runs(started.id)[0]["provider"] == "offline_fixture"
 
 
 def test_invalid_transition_rolls_back_without_event(workflow_runtime) -> None:

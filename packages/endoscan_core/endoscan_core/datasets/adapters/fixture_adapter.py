@@ -2,7 +2,7 @@
 
 Resolves a source to a bundled CSV by ``source.id`` (e.g. ``lincs`` ->
 ``<root>/lincs.csv``). It deliberately ignores ``access_method`` — fixtures stand
-in for any real access method at M2. Missing values become ``None``.
+in for reviewed source access during offline tests. Missing values become ``None``.
 """
 
 from __future__ import annotations

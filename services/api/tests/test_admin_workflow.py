@@ -49,7 +49,7 @@ def post(client, path, payload, key):
     return client.post(path, json=payload, headers={**ADMIN, "Idempotency-Key": key})
 
 
-def create(client, key="api-phase0-create"):
+def create(client, key="api-workflow-create"):
     response = post(
         client,
         "/admin/endpoint-builds",
@@ -390,7 +390,7 @@ def test_provider_preflight_is_explicit_and_creates_no_workflow_state(
     monkeypatch.setenv("OPENAI_API_KEY", "unit-test-placeholder")
     app = create_app(repo_root)
 
-    class FakeClient:
+    class RecordingClient:
         retrieve_calls: list[str] = []
 
         def __init__(self, **_kwargs):
@@ -417,14 +417,14 @@ def test_provider_preflight_is_explicit_and_creates_no_workflow_state(
         def __getattr__(self, _name):
             raise AssertionError("Preflight must never access GEO")
 
-    fake_client = FakeClient()
+    recording_client = RecordingClient()
     app.state.provider_preflight = ProviderAccessPreflight(
         app.state.agent_configuration,
-        client_factory=lambda **_kwargs: fake_client,
+        client_factory=lambda **_kwargs: recording_client,
     )
     app.state.source_client = ForbiddenGeoClient()
     with TestClient(app) as client:
-        assert fake_client.retrieve_calls == []
+        assert recording_client.retrieve_calls == []
         with app.state.workflow_database.session() as session:
             before = {
                 "builds": session.execute(
@@ -436,7 +436,7 @@ def test_provider_preflight_is_explicit_and_creates_no_workflow_state(
         assert response.status_code == 200
         assert response.json()["generation_capability"] == "not_checked"
         assert response.json()["billing_status"] == "not_checked"
-        assert fake_client.retrieve_calls == ["gpt-5.4-mini"]
+        assert recording_client.retrieve_calls == ["gpt-5.4-mini"]
         with app.state.workflow_database.session() as session:
             after = {
                 "builds": session.execute(
@@ -604,7 +604,7 @@ def test_geo_validation_probe_rejects_arbitrary_url_before_execution(
     assert response.status_code == 422
 
 
-def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
+def test_full_offline_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
     configure(monkeypatch, tmp_path)
     registry = repo_root / "registry" / "models" / "endpoints.json"
     registry_before = hashlib.sha256(registry.read_bytes()).hexdigest()
@@ -612,9 +612,9 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
         health = client.get("/health").json()
         assert health["workflow_database"]["journal_mode"] == "wal"
         assert health["workflow_database"]["foreign_keys"] is True
-        assert health["agent_provider"]["configured"] == ["fake", "openai"]
+        assert health["agent_provider"]["configured"] == ["offline_fixture", "openai"]
         capabilities = client.get("/admin/capabilities", headers=ADMIN).json()
-        assert capabilities["provider"] == "fake"
+        assert capabilities["provider"] == "offline_fixture"
         assert capabilities["run_mode"] == "replay"
         assert capabilities["api_key_present"] is False
         assert capabilities["source_tools_available"] is True
@@ -635,7 +635,7 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
             client,
             f"/admin/endpoint-builds/{build['id']}/start",
             {"expected_version": build["version"], "actor": "local-admin"},
-            "api-phase0-start",
+            "api-workflow-start",
         )
         assert started_response.status_code == 200, started_response.text
         waiting = started_response.json()
@@ -656,7 +656,7 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
 
         runs = client.get(f"/admin/endpoint-builds/{build['id']}/agent-runs", headers=ADMIN).json()
         trace = client.get(f"/admin/agent-runs/{runs[0]['id']}", headers=ADMIN).json()
-        assert trace["provider"] == "fake"
+        assert trace["provider"] == "offline_fixture"
         assert trace["run_mode"] == "replay"
         assert len(trace["tools"]) == 4
         assert all(item["tool_name"] != "shell" for item in trace["tools"])
@@ -674,7 +674,7 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
                 "expected_version": waiting["version"],
                 "artifact_hashes": approval["request"]["artifact_hashes"],
             },
-            "api-phase0-approve",
+            "api-workflow-approve",
         )
         assert approved_response.status_code == 200, approved_response.text
         curating = approved_response.json()
@@ -684,14 +684,14 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
             client,
             f"/admin/endpoint-builds/{build['id']}/pause",
             {"expected_version": curating["version"], "actor": "local-admin"},
-            "api-phase0-pause",
+            "api-workflow-pause",
         ).json()
         assert paused["paused_from_state"] == "CURATING_DATA"
         resumed = post(
             client,
             f"/admin/endpoint-builds/{build['id']}/resume",
             {"expected_version": paused["version"], "actor": "local-admin"},
-            "api-phase0-resume",
+            "api-workflow-resume",
         ).json()
         assert resumed["current_stage"] == "CURATING_DATA"
 
@@ -699,14 +699,14 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
             client,
             f"/admin/endpoint-builds/{build['id']}/simulate-failure",
             {"expected_version": resumed["version"], "actor": "local-admin"},
-            "api-phase0-failure",
+            "api-workflow-failure",
         ).json()
         assert failed["current_stage"] == "FAILED"
         retried = post(
             client,
             f"/admin/endpoint-builds/{build['id']}/retry",
             {"expected_version": failed["version"], "actor": "local-admin"},
-            "api-phase0-retry",
+            "api-workflow-retry",
         ).json()
         assert retried["current_stage"] == "CURATING_DATA"
         assert (
@@ -722,7 +722,7 @@ def test_full_phase0_api_workflow(repo_root, monkeypatch, tmp_path) -> None:
         assert any(item["event_type"] == "approval.decided" for item in timeline)
         assert any(item["event_type"] == "workflow.retried" for item in timeline)
         errors = client.get(f"/admin/endpoint-builds/{build['id']}/errors", headers=ADMIN).json()
-        assert errors[-1]["code"] == "phase0_controlled_failure"
+        assert errors[-1]["code"] == "offline_fixture_controlled_failure"
 
         assert client.get("/admin/endpoint-builds/../../etc/passwd", headers=ADMIN).status_code in {
             404,

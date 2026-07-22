@@ -111,7 +111,7 @@ def test_labels_colour_the_map_when_they_join(tmp_path: Path) -> None:
 def test_unjoinable_labels_ship_uncoloured_never_fabricated(tmp_path: Path) -> None:
     _write_signatures(tmp_path, "FIX")
     labels = tmp_path / "labels.csv"
-    # compound_ids that DON'T match the matrix -> 0 joined -> uncoloured (labels null), not faked.
+    # Non-matching compound_ids -> 0 joined -> uncoloured (null labels), not fabricated.
     pd.DataFrame({"compound_id": ["OTHER_1", "OTHER_2"], "label": [1, 0]}).to_csv(
         labels, index=False
     )

@@ -85,6 +85,7 @@ repository cleanup audit.
 | `docs/` | `KEEP_AND_DOCUMENT` | Canonical public documentation and decisions |
 | `README.md` | `KEEP_IN_ROOT` | GitHub entry point |
 | `CONTRIBUTING.md` | `KEEP_IN_ROOT` | Conventional contributor entry point linking to detailed guidance |
+| `CITATION.cff` | `KEEP_IN_ROOT` | Accurate software-repository citation metadata without invented publication fields |
 | `LICENSE` | `KEEP_IN_ROOT` | Repository usage terms |
 | `Makefile` | `KEEP_IN_ROOT` | Optional thin aliases over the canonical Python task runner |
 | `pyproject.toml`, `uv.lock` | `KEEP_IN_ROOT` | Single Python workspace/tooling declaration and exact lock |
@@ -151,7 +152,7 @@ flowchart TB
   Gate -->|revise/reject| Revision["Versioned revision path"]
 ```
 
-The model cannot create arbitrary URLs, bypass tool schemas, consume an approval for a different version, or publish a model directly. Fake providers drive offline tests. The OpenAI adapter implements the same provider-neutral interface and is only selected by explicit live configuration.
+The model cannot create arbitrary URLs, bypass tool schemas, consume an approval for a different version, or publish a model directly. A fixture-backed deterministic provider drives offline tests. The OpenAI Agents SDK adapter implements the same provider-neutral interface and is selected only by explicit live configuration.
 
 ## Provider and artifact flow
 

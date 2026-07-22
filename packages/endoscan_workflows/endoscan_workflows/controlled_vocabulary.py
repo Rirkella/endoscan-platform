@@ -1,4 +1,4 @@
-"""Reviewed controlled vocabularies used at bounded Phase-1 tool boundaries."""
+"""Reviewed controlled vocabularies used at bounded discovery tool boundaries."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from types import MappingProxyType
 
-CONTROLLED_VOCABULARY_POLICY_VERSION = "phase1-controlled-vocabulary-v1"
+CONTROLLED_VOCABULARY_POLICY_VERSION = "controlled-vocabulary-v1"
 
 
 class VocabularyFieldCategory(str, Enum):
-    """Audit classification for values crossing a Phase-1 model boundary."""
+    """Audit classification for values crossing a bounded discovery model boundary."""
 
     EXACT_MACHINE_IDENTIFIER = "A"
     HUMAN_CONTROLLED_VOCABULARY = "B"
@@ -20,7 +20,7 @@ class VocabularyFieldCategory(str, Enum):
 
 
 class GeoStudyType(StrEnum):
-    """GEO study types supported by the Phase-1 deterministic search client."""
+    """GEO study types supported by the bounded deterministic search client."""
 
     EXPRESSION_PROFILING_BY_ARRAY = "Expression profiling by array"
     EXPRESSION_PROFILING_BY_HIGH_THROUGHPUT_SEQUENCING = (
@@ -28,7 +28,7 @@ class GeoStudyType(StrEnum):
     )
 
 
-PHASE1_VOCABULARY_AUDIT = MappingProxyType(
+CONTROLLED_VOCABULARY_AUDIT = MappingProxyType(
     {
         "organism_alternatives": VocabularyFieldCategory.HUMAN_CONTROLLED_VOCABULARY,
         "study_type_alternatives": VocabularyFieldCategory.HUMAN_CONTROLLED_VOCABULARY,

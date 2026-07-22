@@ -1,10 +1,10 @@
 """Config-driven ER endpoint pipeline runner (NOT a notebook).
 
 End-to-end flow:
-  M2 tools (build candidate table) -> dataset_quality_report -> quality_gates
+  dataset layer tools (build candidate table) -> dataset_quality_report -> quality_gates
   verdict -> train ONLY if the verdict PASSES and an explicit human-approval flag
   is set -> HONEST evaluation (nested grouped CV or compound-level held-out) ->
-  scorecard model selection -> write artifacts -> register into the M1 registry.
+  scorecard model selection -> write artifacts -> register in the endpoint registry.
 
 Data is read through the adapter seam: ``fixture`` (CSV fixtures, CI) or
 ``staged`` (local Parquet/CSV extracts staged by a human for the one-time real
@@ -111,7 +111,7 @@ class TrainingConfig(BaseModel):
     selection_tolerance: float = 0.02
     # Multi-metric floors (>=) and optional ceilings (<=), checked against the
     # HONEST estimate. Values are configurable defaults; finalize vs real
-    # prevalence in Phase 2 (AUPRC baseline = positive prevalence).
+    # prevalence in reviewed real-data workflow (AUPRC baseline = positive prevalence).
     validated_mvp_floors: dict[str, float] = Field(
         default_factory=lambda: {"auroc": 0.75, "auprc": 0.50, "balanced_accuracy": 0.65}
     )
@@ -233,7 +233,7 @@ def _metrics_dict(
         "selected_model": selected_model,
         "threshold": metrics.threshold,
         "evaluation": evaluation,
-        # Structured fields the M4 inference/limitations layer reads (no card parsing):
+        # Structured fields the inference/limitations layer reads (no card parsing):
         # the floors/ceilings the run was judged against and the endpoint's claim scope.
         "validated_mvp_floors": dict(validated_mvp_floors),
         "validated_mvp_ceilings": dict(validated_mvp_ceilings),
@@ -242,7 +242,7 @@ def _metrics_dict(
     }
     # ADDED ALONGSIDE the pooled scalar metrics (existing keys above are unchanged): the
     # bootstrap-CI / per-fold / sample-evidence blocks the strengthened status rule uses.
-    # The M4 inference layer reads these to evidence validated_mvp under uncertainty.
+    # The inference layer reads these to evidence validated_mvp under uncertainty.
     if uncertainty is not None:
         out["uncertainty"] = uncertainty
     if per_fold_metrics is not None:
@@ -273,7 +273,7 @@ def missed_floors(
 ) -> list[str]:
     """The reasons validated_mvp is NOT earned, phrased honestly.
 
-    Delegates to the SAME shared decision the M4 inference layer
+    Delegates to the SAME shared decision the inference layer
     (``inference.limitations.missed_criteria``) uses, so trainer status and served
     limitations can never diverge (the strengthened PR #24 agreement invariant): the
     min-evidence gate, the require-a-CI rule, and the CI-lower-bound floor / CI-upper-bound

@@ -2,7 +2,7 @@
 #
 # Uses the fixture adapter, the STRICT real quality gate, and approved: false, so
 # running it on fixtures is blocked (the tiny fixture set fails the strict gate
-# and no human has approved). The real ER on staged data is Phase 2: copy
+# and no human has approved). For a reviewed ER run on staged data, copy
 # config.real.example.yaml, point it at staged extracts, confirm floors, and have
 # a human set approved: true only after reviewing the gate verdict + dataset card.
 

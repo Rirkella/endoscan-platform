@@ -2,7 +2,7 @@
 // selects the visualization by LENGTH, so adding views later is additive:
 //   - 2 endpoints  -> ComparisonBars (BUILT)
 //   - >= 3         -> honest "coming later" panel (radar/ranked views need real multi-endpoint
-//                     data; NO fake radar/heatmap is rendered in Phase 1)
+//                     data; NO fabricated radar/heatmap is rendered in bounded discovery)
 //   - < 2          -> nothing (a single result needs no comparison)
 // Only successful predictions participate.
 

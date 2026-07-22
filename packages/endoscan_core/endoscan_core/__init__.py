@@ -1,8 +1,8 @@
 """EndoScan core science library (framework-free, transcriptomics-first).
 
-All scientific logic lives in this package. The FastAPI service and the Builder
-Agent import it; neither reimplements science. At M0 this is an empty, importable
-skeleton exposing only the package version.
+Scientific logic shared by the FastAPI service, deterministic jobs, and workflow
+tools lives in this package; those callers do not reimplement it. The package
+exposes the registry, dataset, feature, training, inference, and diagnostics layers.
 """
 
 __version__ = "0.0.0"

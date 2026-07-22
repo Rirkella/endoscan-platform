@@ -6,8 +6,8 @@ canonical InChIKey. Conflicted-label compounds are excluded from ``y`` (recorded
 never voted, as required by the documented label policy).
 
 The split plan is a GROUP ASSIGNMENT (compound -> group), not a trained split:
-every row inherits its compound's group, so no compound can span groups. M3 feeds
-these groups to a grouped CV splitter; M2 does not train.
+every row inherits its compound's group, so no compound can span groups. The training
+layer feeds these groups to a grouped CV splitter; dataset construction does not train.
 """
 
 from __future__ import annotations

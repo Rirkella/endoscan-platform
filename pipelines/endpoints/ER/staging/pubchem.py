@@ -26,7 +26,7 @@ def guess_casrn_column(columns: Sequence[str]) -> str | None:
 
 def normalize_mapping(rows: Sequence[dict]) -> list[dict]:
     """Map fetched id rows to ``{input_id, input_id_type, inchikey, cid, smiles,
-    mapping_confidence}`` consumed by the M2 ``compound_mapper``."""
+    mapping_confidence}`` consumed by the dataset layer ``compound_mapper``."""
     out: list[dict] = []
     for row in rows:
         inchikey = row.get("inchikey") or row.get("InChIKey")

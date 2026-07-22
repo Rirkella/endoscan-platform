@@ -941,7 +941,7 @@ def initial_execution_ledger(
                     provider=task.provider,
                     missing_capability=capability,
                     missing_typed_tool_or_adapter_method=(
-                        declaration.typed_tool_or_adapter_method or "not implemented"
+                        declaration.typed_tool_or_adapter_method or "unavailable"
                     ),
                     required_input_contract=(
                         declaration.input_contract or task.typed_input_contract

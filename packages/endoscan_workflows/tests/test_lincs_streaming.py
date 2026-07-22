@@ -43,7 +43,7 @@ from endoscan_workflows.source_security import ScientificResponse
 from endoscan_workflows.tools import ToolRegistry, extend_training_dataset_tool_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-FIXTURES = Path(__file__).with_name("fixtures") / "lincs_phase2a"
+FIXTURES = Path(__file__).with_name("fixtures") / "lincs_metadata"
 RELEASE_ID = "lincs-gse92742-phase1-2017"
 
 
@@ -112,8 +112,8 @@ def _workflow_id(service, key: str) -> str:
             biological_goal=(
                 "Compute complete reviewed metadata-only coverage without expression values."
             ),
-            created_by="phase2a-streaming-test",
-            idempotency_key=f"phase2a-streaming-{key}",
+            created_by="lincs-streaming-test",
+            idempotency_key=f"lincs-streaming-{key}",
             workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
         )
     ).id

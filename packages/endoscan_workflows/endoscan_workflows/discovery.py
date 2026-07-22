@@ -1,4 +1,4 @@
-"""Strict Phase-1 discovery output and bounded agent request builder."""
+"""Strict discovery output and bounded agent request builder."""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ class DiscoveryOutput(StrictContract):
     endpoint_name: str
     endpoint_definition_summary: str
     run_mode: Literal["live", "cached", "replay"]
-    simulation_label: str | None = None
+    offline_fixture_label: str | None = None
     live_discovery: bool = False
     search_strategy: str
     queries_executed: list[str] = Field(default_factory=list, max_length=20)
@@ -146,8 +146,8 @@ def discovery_request(
     configuration = configuration or AgentConfiguration()
     run_mode = configuration.run_mode
     live_provider = configuration.provider == "openai" and run_mode is not AgentRunMode.REPLAY
-    provider = "openai" if live_provider else "fake"
-    model = configuration.model if live_provider else "validated-phase1-replay-v1"
+    provider = "openai" if live_provider else "offline_fixture"
+    model = configuration.model if live_provider else "validated-offline-replay-v1"
     available_tools = (
         DISCOVERY_TOOLS
         if live_provider
@@ -162,8 +162,8 @@ def discovery_request(
         workflow_id=workflow_id,
         step_id=step_id,
         agent_name="Dataset Discovery and Evaluation Agent",
-        agent_version="phase1-v1",
-        instruction_version="phase1-discovery-v1",
+        agent_version="discovery-v1",
+        instruction_version="discovery-v1",
         instructions=(
             "Find public transcriptomic GEO Series for the oxidative-stress endpoint using only "
             "the provided tools. Plan at most four focused typed GEO searches; alternatives inside "
@@ -201,7 +201,7 @@ def discovery_request(
         output_schema_name=DiscoveryOutput.__name__,
         available_tools=available_tools,
         context={
-            "fake_mode": "discovery",
+            "offline_fixture_mode": "discovery",
             "endpoint_name": endpoint_name,
             "biological_goal": biological_goal,
             "workflow_stage": "DISCOVERING_DATA",

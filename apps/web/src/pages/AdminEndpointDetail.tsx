@@ -54,7 +54,7 @@ type CandidateArtifact = {
   candidates?: Candidate[];
   recommended_candidate_id?: string | null;
   run_mode?: "live" | "cached" | "replay";
-  simulation_label?: string | null;
+  offline_fixture_label?: string | null;
   live_discovery?: boolean;
   decision_summary?: string;
   unresolved_questions?: string[];
@@ -623,7 +623,7 @@ export function AdminEndpointDetail() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [recommendedCandidateId, setRecommendedCandidateId] = useState<string | null | undefined>(undefined);
   const [runMode, setRunMode] = useState<"live" | "cached" | "replay">("replay");
-  const [simulationLabel, setSimulationLabel] = useState<string | null>(null);
+  const [offlineFixtureLabel, setSimulationLabel] = useState<string | null>(null);
   const [decisionSummary, setDecisionSummary] = useState("");
   const [unresolvedQuestions, setUnresolvedQuestions] = useState<string[]>([]);
   const [comment, setComment] = useState("");
@@ -682,7 +682,7 @@ export function AdminEndpointDetail() {
         setRecommendedCandidateId(content.recommended_candidate_id);
         setSelected((current) => current || content.candidates?.[0]?.candidate_id || "");
         setRunMode(persistedRunMode ?? content.run_mode ?? nextCapabilities?.run_mode ?? "replay");
-        setSimulationLabel(content.simulation_label ?? null);
+        setSimulationLabel(content.offline_fixture_label ?? null);
         setDecisionSummary(content.decision_summary ?? "");
         setUnresolvedQuestions(content.unresolved_questions ?? []);
       } else {
@@ -1280,7 +1280,7 @@ export function AdminEndpointDetail() {
           {candidates.length > 0 && (
             <section className="admin-panel" aria-labelledby="candidate-comparison-title">
               <div className="admin-panel-heading">
-                <div><h2 id="candidate-comparison-title">Candidate comparison</h2><p>{runMode === "replay" ? simulationLabel ?? "Prepared replay fixture; not live scientific discovery." : "Official-source metadata prepared for human scientific review."}</p></div>
+                <div><h2 id="candidate-comparison-title">Candidate comparison</h2><p>{runMode === "replay" ? offlineFixtureLabel ?? "Prepared replay fixture; not live scientific discovery." : "Official-source metadata prepared for human scientific review."}</p></div>
                 <span>{candidates.length} candidates</span>
               </div>
               <div className="admin-candidate-grid">
@@ -1493,7 +1493,7 @@ export function AdminEndpointDetail() {
           {import.meta.env.DEV && (
             <details className="admin-panel admin-developer-tools">
               <summary>Developer tools <span>Test only</span></summary>
-              <p>Simulation-only recovery controls. These actions are not part of the production workflow.</p>
+              <p>Test-only recovery controls. These actions are not part of the production workflow.</p>
               {canFail ? <button className="admin-danger-outline" disabled={busy} onClick={() => void command("simulate-failure")}>Trigger controlled failure</button> : <span>No test action is valid in this state.</span>}
             </details>
           )}

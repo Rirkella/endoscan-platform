@@ -1,4 +1,4 @@
-"""Explore data-space (UMAP) routes — thin, read-only, NO science, NO fake projection.
+"""Explore data-space (UMAP) routes — thin, read-only, NO science, NO fabricated projection.
 
 ``GET  /explore/{context}/umap``   serve the committed map (points + counts + provenance);
                                    404 "not yet computed" when no artifact is committed.

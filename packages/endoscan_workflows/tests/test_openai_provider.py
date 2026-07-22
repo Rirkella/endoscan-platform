@@ -24,7 +24,7 @@ from endoscan_workflows.contracts import AgentBudget, AgentRunRequest, ModelConf
 from endoscan_workflows.harness import AgentHarness
 from endoscan_workflows.openai_provider import TOOL_ENVELOPE, OpenAIAgentProvider, sdk_output_schema
 from endoscan_workflows.providers import ProviderFailure, ProviderTimeout
-from endoscan_workflows.tools import phase0_tool_registry
+from endoscan_workflows.tools import offline_tool_registry
 from endoscan_workflows.training_dataset import TrainingDatasetSpecification
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -35,8 +35,8 @@ def request() -> AgentRunRequest:
         workflow_id="build-test",
         step_id="step-test",
         agent_name="Dataset Discovery and Evaluation Agent",
-        agent_version="phase1-v1",
-        instruction_version="phase1-v1",
+        agent_version="discovery-v1",
+        instruction_version="discovery-v1",
         instructions="Use only the provided bounded tool and return strict output.",
         model=ModelConfiguration(provider="openai", model_identifier="gpt-5.4-mini"),
         output_schema_name="DiscoveryOutput",
@@ -68,7 +68,7 @@ def valid_output() -> dict:
         "endpoint_name": "Oxidative stress",
         "endpoint_definition_summary": "Response-defined endpoint",
         "run_mode": "live",
-        "simulation_label": None,
+        "offline_fixture_label": None,
         "live_discovery": True,
         "search_strategy": "Search and validate official GEO series.",
         "queries_executed": ["oxidative stress transcriptome"],
@@ -113,7 +113,7 @@ def provider(runner) -> OpenAIAgentProvider:
     )
     return OpenAIAgentProvider(
         configuration,
-        phase0_tool_registry(REPO_ROOT),
+        offline_tool_registry(REPO_ROOT),
         runner=runner,
     )
 
@@ -395,7 +395,7 @@ def test_cancellation_returns_interruption_without_calling_provider() -> None:
 
 def test_missing_api_key_disables_provider_cleanly() -> None:
     configuration = AgentConfiguration(provider="openai", run_mode=AgentRunMode.REPLAY)
-    item = OpenAIAgentProvider(configuration, phase0_tool_registry(REPO_ROOT))
+    item = OpenAIAgentProvider(configuration, offline_tool_registry(REPO_ROOT))
     with pytest.raises(ProviderFailure, match="not configured"):
         item.run_turn(request(), [], interruption_requested=False)
 

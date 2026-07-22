@@ -1,4 +1,4 @@
-"""Explicit Phase-0 development authorization; production authentication is deferred."""
+"""Explicit local-development authorization; production authentication is deferred."""
 
 from __future__ import annotations
 

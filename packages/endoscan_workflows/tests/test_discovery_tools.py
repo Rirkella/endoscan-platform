@@ -16,8 +16,8 @@ from endoscan_workflows.contracts import (
     WorkflowState,
 )
 from endoscan_workflows.controlled_vocabulary import (
+    CONTROLLED_VOCABULARY_AUDIT,
     CONTROLLED_VOCABULARY_POLICY_VERSION,
-    PHASE1_VOCABULARY_AUDIT,
     GeoStudyType,
     VocabularyFieldCategory,
 )
@@ -39,7 +39,7 @@ from endoscan_workflows.source_security import (
     SourceTimeoutError,
     sanitize_untrusted_text,
 )
-from endoscan_workflows.tools import normalize_geo_search_arguments, phase1_tool_registry
+from endoscan_workflows.tools import normalize_geo_search_arguments, production_tool_registry
 
 GEO_SOFT_FIXTURE = """^SERIES = GSE12345
 !Series_geo_accession = GSE12345
@@ -128,10 +128,10 @@ def create_build(service) -> str:
     return service.create_build(
         EndpointBuildCreate(
             endpoint_name="Oxidative stress",
-            endpoint_slug="phase1-tools",
+            endpoint_slug="discovery-tools",
             biological_goal="Evaluate bounded official-source discovery tools.",
             created_by="test",
-            idempotency_key="phase1-tools-build",
+            idempotency_key="discovery-tools-build",
         )
     ).id
 
@@ -335,7 +335,7 @@ def test_unknown_study_type_never_reaches_the_geo_execution_boundary() -> None:
         def __getattr__(self, _name):
             return lambda *_args, **_kwargs: {}
 
-    registry = phase1_tool_registry(Path.cwd(), ForbiddenBoundaryService())
+    registry = production_tool_registry(Path.cwd(), ForbiddenBoundaryService())
     supplied = {
         **EXACT_LIVE_SEARCH_ARGUMENTS,
         "study_type_alternatives": ["Expression profiling by array", "proteomics"],
@@ -376,11 +376,11 @@ def test_empty_study_type_array_is_the_only_empty_optional_form() -> None:
         SearchGeoSeriesInput.model_validate(normalized.arguments)
 
 
-def test_phase1_bounded_vocabulary_audit_is_explicit() -> None:
-    assert PHASE1_VOCABULARY_AUDIT["study_type_alternatives"] is (
+def test_bounded_vocabulary_audit_is_explicit() -> None:
+    assert CONTROLLED_VOCABULARY_AUDIT["study_type_alternatives"] is (
         VocabularyFieldCategory.HUMAN_CONTROLLED_VOCABULARY
     )
-    assert PHASE1_VOCABULARY_AUDIT["organism_alternatives"] is (
+    assert CONTROLLED_VOCABULARY_AUDIT["organism_alternatives"] is (
         VocabularyFieldCategory.HUMAN_CONTROLLED_VOCABULARY
     )
     for field in (
@@ -390,9 +390,11 @@ def test_phase1_bounded_vocabulary_audit_is_explicit() -> None:
         "candidate_status",
         "confidence_category",
     ):
-        assert PHASE1_VOCABULARY_AUDIT[field] is (VocabularyFieldCategory.EXACT_MACHINE_IDENTIFIER)
+        assert CONTROLLED_VOCABULARY_AUDIT[field] is (
+            VocabularyFieldCategory.EXACT_MACHINE_IDENTIFIER
+        )
     for field in ("scientific_terms", "cell_tissue_terms", "treatment_terms"):
-        assert PHASE1_VOCABULARY_AUDIT[field] is (VocabularyFieldCategory.FREE_SCIENTIFIC_TEXT)
+        assert CONTROLLED_VOCABULARY_AUDIT[field] is (VocabularyFieldCategory.FREE_SCIENTIFIC_TEXT)
 
 
 def test_search_tool_schema_exposes_exact_canonical_study_type_enum() -> None:
@@ -453,7 +455,7 @@ def test_exact_failed_live_arguments_reach_mocked_geo_boundary_normalized() -> N
         def __getattr__(self, _name):
             return lambda *_args, **_kwargs: {}
 
-    registry = phase1_tool_registry(Path.cwd(), BoundaryDiscoveryService())
+    registry = production_tool_registry(Path.cwd(), BoundaryDiscoveryService())
     result = registry.invoke(
         ToolInvocation(
             tool_name="search_geo_series",
@@ -784,7 +786,7 @@ def test_geo_batch_registry_enforces_stage_permission_and_maximum() -> None:
                 AssertionError("Prohibited batch tool must not execute")
             )
 
-    registry = phase1_tool_registry(Path.cwd(), ForbiddenExecutionService())
+    registry = production_tool_registry(Path.cwd(), ForbiddenExecutionService())
     base = {
         "tool_name": "validate_geo_accessions",
         "arguments": {"accessions": ["GSE12345"]},
@@ -1310,7 +1312,7 @@ def test_old_geo_validation_policy_cache_entry_is_not_reused(workflow_runtime) -
                 cache_key=old_key,
                 tool_name="validate_geo_accession",
                 normalized_arguments_json=json.dumps(arguments),
-                policy_version="phase1-source-policy-v1",
+                policy_version="source-policy-v1",
                 source_version=None,
                 source_url="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345",
                 http_metadata_json="{}",

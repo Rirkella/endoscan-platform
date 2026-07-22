@@ -124,7 +124,7 @@ describe("Reference data view", () => {
     fireEvent.change(screen.getByLabelText(/Endpoint/i), { target: { value: "AR" } });
 
     expect(await screen.findByText(/No reference map for AR yet/i)).toBeInTheDocument();
-    expect(pointCircles().length).toBe(0); // no placeholder / fake points
+    expect(pointCircles().length).toBe(0); // no placeholder / synthetic points
   });
 });
 

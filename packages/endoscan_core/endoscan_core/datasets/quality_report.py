@@ -2,7 +2,7 @@
 
 The report quantifies the dataset's fitness (overlap, class balance, duplicate
 signatures, label conflicts/confidence, metadata coverage, leakage, split
-feasibility). It writes a dataset card from the M1 ``dataset_card.md`` template
+feasibility). It writes a dataset card from the registry's ``dataset_card.md`` template
 but makes NO pass/fail decision — that is the quality gate's job.
 """
 

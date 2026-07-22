@@ -1,7 +1,7 @@
 # Dataset-construction test fixtures — schemas (FLAGGED FOR HUMAN REVIEW)
 
-Tiny, **offline** stand-ins for the real sources, used by the M2 toolchain tests.
-They contain no real data and make no scientific claims. Git-tracked via the M0
+Tiny, **offline** stand-ins for the real sources, used by the dataset layer toolchain tests.
+They contain no real data and make no scientific claims. Git-tracked via the initial scaffold
 `.gitignore` exception for `tests/fixtures/**`.
 
 > **Reviewer note:** these shapes are best-effort mimics of the real source

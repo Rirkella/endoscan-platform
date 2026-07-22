@@ -1,20 +1,20 @@
 # Registry test fixtures — schema (FLAGGED FOR HUMAN REVIEW)
 
-These are **dummy fixtures** for M1 registry round-trip and validation tests.
+These are **dummy fixtures** for registry round-trip and validation tests.
 They contain no real models, data, metrics, or scientific claims. They are
-git-tracked via the M0 `.gitignore` exception for `tests/fixtures/**`.
+git-tracked via the `.gitignore` exception for `tests/fixtures/**`.
 
 > **Reviewer note:** this document defines the shapes these fixtures invent.
 > Please confirm the field names, ID types, and label encoding before they are
-> relied on by later milestones.
+> relied on by production or workflow paths.
 
 ## ID types
 - `endpoint_id` (`DEMO_ER`) is an **uppercase symbolic endpoint token**, matching
   `^[A-Z][A-Z0-9_]*$`. It is deliberately **distinct from `ER`**, the real
-  endpoint M3 will register under `models/ER/`, so the fixture can never be
+  endpoint training path registers under `models/ER/`, so the fixture can never be
   confused with a real model.
 - These fixtures contain **no compound identifiers**. CID / InChIKey / SMILES /
-  perturbagen IDs belong to the M2 *dataset* fixtures, not the registry index.
+  perturbagen IDs belong to the dataset layer *dataset* fixtures, not the registry index.
 
 ## Layout
 ```
@@ -48,16 +48,16 @@ A serialized `endoscan_core.registry.EndpointEntry`. Fields:
 | `model_path` | str | repo-root-relative path to `model.pkl` |
 | `feature_schema_path` | str | repo-root-relative path |
 | `metrics_path` | str | repo-root-relative path |
-| `explainer_path` | str \| null | `null` at M1 (no explainer) |
+| `explainer_path` | str \| null | `null` at registry layer (no explainer) |
 | `model_card_path` | str | repo-root-relative path |
 | `dataset_card_path` | str | repo-root-relative path |
 | `status` | enum str | one of the `EndpointStatus` values; `candidate` here |
 | `version` | str | semver-ish string (`0.1.0`) |
 | `created_at` | str | ISO-8601 datetime (`2026-06-19T00:00:00Z`) |
-| `source_refs` | list[str] | **opaque** provenance tags at M1 (no `sources.yaml` until M2) |
+| `source_refs` | list[str] | **opaque** serving-registry provenance tags; dataset sources are validated separately |
 
 ### `models/DEMO_ER/model.pkl`
-A **pickled stub** — a plain `dict`, NOT a real estimator. M1 only deserializes
+A **pickled stub** — a plain `dict`, NOT a real estimator. The registry only deserializes
 it via `load_model` to prove the registry hands back the referenced artifact.
 Contents:
 ```python

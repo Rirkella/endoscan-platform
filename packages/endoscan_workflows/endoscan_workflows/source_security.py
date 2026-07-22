@@ -135,7 +135,7 @@ class ScientificSourceClient:
         maximum_attempts: int = 3,
         maximum_redirects: int = 2,
         approved_hosts: frozenset[str] = APPROVED_SOURCE_HOSTS,
-        user_agent: str = "EndoScan/phase1-live-discovery (scientific metadata only)",
+        user_agent: str = "EndoScan/bounded-live-discovery (scientific metadata only)",
         transport: httpx.BaseTransport | None = None,
         sleep: Any = time.sleep,
     ):

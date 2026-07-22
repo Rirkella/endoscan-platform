@@ -59,7 +59,9 @@ from endoscan_workflows.tools import ToolRegistry, extend_training_dataset_tool_
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = json.loads(
     (
-        Path(__file__).with_name("fixtures") / "provider_phase2b" / "semantics_v2_providers.json"
+        Path(__file__).with_name("fixtures")
+        / "preapproval_providers"
+        / "semantics_v2_providers.json"
     ).read_text(encoding="utf-8")
 )
 HOST = "fixture.ncbi.invalid"
@@ -532,11 +534,11 @@ def _authorized_executor_build(service, suffix: str):
 def _workflow_id(service) -> str:
     return service.create_build(
         EndpointBuildCreate(
-            endpoint_name="Phase 2B provider fixture",
-            endpoint_slug="phase-2b-provider-fixture",
+            endpoint_name="Preapproval provider fixture",
+            endpoint_slug="preapproval-provider-fixture",
             biological_goal="Verify complete metadata-only provider execution.",
-            created_by="phase2b-test",
-            idempotency_key="phase2b-provider-fixture",
+            created_by="preapproval-test",
+            idempotency_key="preapproval-provider-fixture",
             workflow_kind=WorkflowKind.TRAINING_DATASET_DISCOVERY,
         )
     ).id
@@ -558,7 +560,7 @@ def _invocation(workflow_id: str, provider: str) -> ToolInvocation:
         arguments={},
         workflow_id=workflow_id,
         workflow_stage=WorkflowState.DISCOVERING_SOURCE_CANDIDATES,
-        idempotency_key=f"phase2b:{provider}",
+        idempotency_key=f"preapproval:{provider}",
     )
 
 
@@ -569,9 +571,9 @@ def _identifier_artifact(store, workflow_id: str) -> ArtifactReference:
         content=("\n".join(values) + "\n").encode(),
         mime_type="text/plain",
         artifact_type="complete_upstream_compound_identifier_index",
-        logical_name="phase2b-identifiers.ndjson",
-        producer="phase2b-offline-fixture",
-        idempotency_key="phase2b-identifiers",
+        logical_name="preapproval-identifiers.ndjson",
+        producer="preapproval-offline-fixture",
+        idempotency_key="preapproval-identifiers",
     )
     return ArtifactReference(
         artifact_id=descriptor.id,
@@ -758,7 +760,7 @@ def test_registry_planning_accepts_live_validated_preapproval_providers() -> Non
         artifact_type="training_dataset_specification",
     )
     plan = build_discovery_plan(
-        workflow_id="build-provider-phase2b",
+        workflow_id="build-provider-preapproval",
         endpoint_identifier="example-receptor",
         approved_specification_artifact=artifact,
         discovery_round=0,
@@ -815,7 +817,7 @@ def test_non_receptor_plan_uses_different_provider_and_modality_configuration() 
     ]
     registry = OperationalCapabilityRegistry(providers=providers)
     plan = build_discovery_plan(
-        workflow_id="build-non-receptor-phase2b",
+        workflow_id="build-non-receptor-preapproval",
         endpoint_identifier="oxidative-stress-response",
         approved_specification_artifact=ArtifactReference(
             artifact_id="art-non-receptor-spec",
@@ -858,9 +860,9 @@ def test_pubchem_identity_processes_every_upstream_compound_without_sampling(
         content=("\n".join(identifiers) + "\n").encode(),
         mime_type="text/plain",
         artifact_type="complete_upstream_compound_identifier_index",
-        logical_name="phase2b-arbitrary-identifiers.ndjson",
-        producer="phase2b-offline-fixture",
-        idempotency_key="phase2b-arbitrary-identifiers",
+        logical_name="preapproval-arbitrary-identifiers.ndjson",
+        producer="preapproval-offline-fixture",
+        idempotency_key="preapproval-arbitrary-identifiers",
     )
     transport = ArbitraryCompoundTransport()
     provider = PreapprovalMetadataProvider(

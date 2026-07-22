@@ -8,13 +8,13 @@ Four independent columns prevent “implemented” from being mistaken for “va
 
 | Component | Implemented | Offline validated | Live technically validated | Scientifically validated | Notes / next evidence |
 |---|---:|---:|---:|---:|---|
-| Analysis API and React workspace | Yes | Yes | Local browser gate completed historically | No | Repeat final Stage 4 browser audit on consolidated tree |
-| Saved analyses, Projects, Library, Explore | Yes | Yes | Local real-stack restore gate completed historically | No | Capture current screenshots and release evidence |
-| Admin Console | Yes | Yes | Historical local real-stack gates | No | Final consolidated gate, auth/RBAC and screenshots pending |
+| Analysis API and React workspace | Yes | Yes | Local browser gate completed historically | No | Current interactive browser evidence remains pending |
+| Saved analyses, Projects, Library, Explore | Yes | Yes | Local real-stack restore gate completed historically | No | Capture a reviewed current screenshot package |
+| Admin Console | Yes | Yes | Historical local real-stack gates | No | Auth/RBAC and current browser evidence remain pending |
 | AR and ER serving registry/models | Yes | Yes | Local serving paths exercised | No | External dataset/model review and independent validation required |
 | SQLite/Alembic durable workflow control plane | Yes | Yes | Local restart/use exercised | No | Production DB, backup, concurrency and operations pending |
-| State machine, approvals, events, artifacts, budgets | Yes | Yes | Selected real-run traces exist | No | Final consolidated browser/admin audit pending |
-| Provider-neutral model harness and fake provider | Yes | Yes | OpenAI boundary exercised in historical bounded runs | No | Repeat controlled acceptance only when explicitly authorized |
+| State machine, approvals, events, artifacts, budgets | Yes | Yes | Selected real-run traces exist | No | Current consolidated browser/admin evidence pending |
+| Provider-neutral model harness and deterministic offline provider | Yes | Yes | OpenAI boundary exercised in historical bounded runs | No | Repeat controlled acceptance only when explicitly authorized |
 | PubChem BioAssay provider | Yes | Yes | Yes, bounded selected operations | No | Endpoint-specific suitability remains a scientific review |
 | Tox21 provider | Yes | Yes | Yes, bounded exact release operations | No | Validate intended endpoint/release and licensing per build |
 | EPA ToxCast/invitroDB public-release provider | Yes | Yes | Yes, bounded release/archive path | No | Full endpoint-specific assembly remains pending |
@@ -36,7 +36,7 @@ Four independent columns prevent “implemented” from being mistaken for “va
 | Offline TR and DNA-damage lifecycle demos | Yes | Yes | Not applicable | No | Prepared fixtures; not scientific discoveries |
 | Broad thyroid-receptor endpoint build | Foundations only | Representative fixtures only | Incomplete/failed historical attempts | No | Do not claim a successful joinable live dataset |
 | Thyroid-receptor scientific model validation | No final real model | No—fixtures are architecture-only | No | No | Real dataset, benchmark, expert and independent validation required |
-| CI, command surface, docs and repository hygiene | Yes | Yes | Not applicable | Not applicable | Stage 4 final audit and screenshot package pending |
+| CI, command surface, docs and repository hygiene | Yes | Yes | Not applicable | Not applicable | Final repository/offline audit complete; screenshot package pending |
 | Production auth, RBAC, multi-user deployment, monitoring | No | No | No | No | Required before production exposure |
 
 Historical live-smoke transcripts remain available through Git history. Technical smoke evidence is not product or scientific certification.
@@ -58,9 +58,9 @@ Historical live-smoke transcripts remain available through Git history. Technica
 
 ## Roadmap
 
-### Final audit and demonstrator release
+### Browser evidence and demonstrator release
 
-Run the consolidated full gate, current real-browser acceptance, accessibility/responsive review, screenshot capture, and documentation cross-check. Record immutable release evidence without changing scientific semantics.
+Complete current real-browser acceptance, accessibility/responsive review, and truthful screenshot capture. Record immutable release evidence without changing scientific semantics; the consolidated offline gate and documentation cross-check are complete.
 
 ### Provider and live-workflow acceptance
 

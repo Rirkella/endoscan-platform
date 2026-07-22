@@ -8,7 +8,7 @@ large enough for nested grouped CV (16 compounds: 8 active, 8 inactive), with
 landmark-gene values that carry NO class signal — each gene pattern (high / low /
 alt / mid) appears equally in both classes — so the cross-validated AUROC sits
 near 0.5 and the end-to-end run deterministically registers ER as `experimental`.
-This is a documented stand-in; the real ER (Phase 2) uses real staged data.
+This is a documented stand-in; the real ER (reviewed real-data workflow) uses real staged data.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Transcriptomic landmark-feature schema (transcriptomics-only, no SMILES).
 
-At M3 the features are the gene columns of the M2 candidate table's ``X``. This
-module captures the gene-column order (the contract M4 inference will align an
+The features are the gene columns of the candidate table's ``X``. This module
+captures the gene-column order (the contract inference will align an
 incoming signature to) and records that standardization is applied. The
 standardization itself lives inside the training `Pipeline` (`StandardScaler`),
 so it is saved with the model and reapplied at inference time.

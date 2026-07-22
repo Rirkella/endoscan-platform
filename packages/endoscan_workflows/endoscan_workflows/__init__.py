@@ -1,4 +1,4 @@
-"""Durable Phase-0 workflow foundation for EndoScan."""
+"""Durable workflow orchestration and agent integration for EndoScan."""
 
 from .contracts import WorkflowState
 from .database import WorkflowDatabase

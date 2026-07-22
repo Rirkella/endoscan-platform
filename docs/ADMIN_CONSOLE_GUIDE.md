@@ -32,7 +32,7 @@ Refreshing a build page or returning with browser Back must restore the same bui
 
 ## Screenshot gap
 
-No current reviewed screenshots are committed. Stage 4 should capture, at minimum: analysis results and provenance; Projects restore/rename/delete behavior; Model Library; Explore; build overview; specification approval; source inventory and joinability; strategy review; dataset review; benchmark/scientific review; tool/provider trace; and a representative safe failure. Captures must use synthetic/offline data, hide personal information and secrets, match the final UI, and include descriptive alt text. Stale historical browser captures should not be promoted.
+No current reviewed screenshot package is committed. The final repository audit could not attach a reliable browser capture surface and therefore published no stale or synthetic images. A future capture should include, at minimum: analysis results and provenance; Projects restore/rename/delete behavior; Model Library; Explore; build overview; specification approval; source inventory and joinability; strategy review; dataset review; benchmark/scientific review; tool/provider trace; and a representative safe failure. Captures must use synthetic/offline data, hide personal information and secrets, match the current UI, and include descriptive alt text. Stale historical browser captures should not be promoted.
 
 ## Related guides
 

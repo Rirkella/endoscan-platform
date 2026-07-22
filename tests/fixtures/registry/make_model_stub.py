@@ -2,7 +2,7 @@
 
 Run from the repo root:  uv run python tests/fixtures/registry/make_model_stub.py
 
-The stub is a trusted, git-tracked plain dict — NOT a real estimator. M1's
+The stub is a trusted, git-tracked plain dict — NOT a real estimator. The registry's
 `load_model` only deserializes it; it performs no inference.
 """
 

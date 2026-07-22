@@ -1,4 +1,7 @@
-"""Create the durable Phase-0 workflow schema."""
+"""Create the durable workflow-foundation schema.
+
+The revision identifier is historical and remains stable for Alembic compatibility.
+"""
 
 from alembic import op
 

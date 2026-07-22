@@ -36,7 +36,7 @@ from .errors import AgentPolicyError
 from .source_security import SourceTimeoutError, SourceToolError
 
 logger = logging.getLogger("uvicorn.error.endoscan.workflow.source_tool")
-SEARCH_TERM_NORMALIZATION_POLICY_VERSION = "phase1-search-term-normalization-v1"
+SEARCH_TERM_NORMALIZATION_POLICY_VERSION = "search-term-normalization-v1"
 ACTIVITY_MODALITY_POLICY_VERSION = "activity-modality-v1"
 
 
@@ -301,7 +301,7 @@ class ToolRegistry:
         if tool.definition.name in self._tools:
             raise ValueError(f"tool {tool.definition.name!r} is already registered")
         if tool.definition.side_effect is SideEffectClassification.PRODUCTION_WRITE:
-            raise ValueError("Production-write tools are prohibited in the Phase-0 registry")
+            raise ValueError("Production-write tools are prohibited in the offline tool registry")
         self._tools[tool.definition.name] = tool
 
     def get(self, name: str) -> RegisteredTool:
@@ -567,7 +567,7 @@ class ToolRegistry:
         )
 
 
-def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
+def offline_tool_registry(repo_root: Path) -> ToolRegistry:
     root = Path(repo_root).resolve()
     registry = ToolRegistry()
     discovery = [WorkflowState.DISCOVERING_DATA]
@@ -618,12 +618,12 @@ def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
 
     def candidates(request: CandidateFixtureInput) -> CandidateFixtureOutput:
         return CandidateFixtureOutput(
-            fixture_label="Prepared deterministic Phase-0 fixture — not live discovery",
+            fixture_label="Prepared deterministic offline fixture — not live discovery",
             candidates=[
                 {
-                    "candidate_id": "phase0-candidate-a",
+                    "candidate_id": "offline-fixture-candidate-a",
                     "title": f"Prepared metadata candidate A for {request.endpoint_name}",
-                    "source": "phase0://prepared-fixture/a",
+                    "source": "offline-fixture://prepared-fixture/a",
                     "accession_verified": False,
                     "license_verified": False,
                     "recommendation": "review-first",
@@ -634,9 +634,9 @@ def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
                     ],
                 },
                 {
-                    "candidate_id": "phase0-candidate-b",
+                    "candidate_id": "offline-fixture-candidate-b",
                     "title": f"Prepared metadata candidate B for {request.endpoint_name}",
-                    "source": "phase0://prepared-fixture/b",
+                    "source": "offline-fixture://prepared-fixture/b",
                     "accession_verified": False,
                     "license_verified": False,
                     "recommendation": "alternative",
@@ -678,7 +678,7 @@ def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
         ),
         (
             "create_dataset_candidate_artifact",
-            "Return clearly labelled prepared Phase-0 candidate fixtures.",
+            "Return clearly labelled prepared offline candidate fixtures.",
             CandidateFixtureInput,
             CandidateFixtureOutput,
             candidates,
@@ -707,7 +707,7 @@ def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
                     idempotency=IdempotencyClassification.IDEMPOTENT_WITH_KEY,
                     timeout_seconds=5.0,
                     allowed_workflow_stages=discovery,
-                    implementation_version="phase0-v1",
+                    implementation_version="offline-fixture-v1",
                 ),
                 input_model,
                 output_model,
@@ -717,7 +717,7 @@ def phase0_tool_registry(repo_root: Path) -> ToolRegistry:
     return registry
 
 
-def phase1_tool_registry(
+def production_tool_registry(
     repo_root: Path,
     discovery_service,
     adapter_registry=None,
@@ -725,7 +725,7 @@ def phase1_tool_registry(
     lincs_metadata_provider=None,
     preapproval_provider_layer=None,
 ) -> ToolRegistry:
-    """Phase-0 tools plus bounded Phase-1 compatibility and staged discovery tools."""
+    """Offline tools plus bounded compatibility and staged discovery tools."""
     from .discovery_tools import (
         CompareDatasetCandidatesInput,
         CompareDatasetCandidatesOutput,
@@ -741,7 +741,7 @@ def phase1_tool_registry(
         SearchGeoSeriesOutput,
     )
 
-    registry = phase0_tool_registry(repo_root)
+    registry = offline_tool_registry(repo_root)
     discovery = [WorkflowState.DISCOVERING_DATA]
     specs = [
         (
@@ -838,7 +838,7 @@ def phase1_tool_registry(
                     idempotency=IdempotencyClassification.IDEMPOTENT_WITH_KEY,
                     timeout_seconds=30.0,
                     allowed_workflow_stages=discovery,
-                    implementation_version="phase1-v1",
+                    implementation_version="discovery-v1",
                 ),
                 input_model,
                 output_model,
@@ -1165,7 +1165,7 @@ def extend_training_dataset_tool_registry(
         "slice_approved_lincs_level5_expression",
         (
             "Future batched partial Level-5 GCTX extraction for an immutable approved "
-            "assembly recipe; unavailable during Phase 2A."
+            "assembly recipe; unavailable during pre-approval metadata stage."
         ),
         ApprovedLincsSliceInput,
         ApprovedLincsSliceOutput,

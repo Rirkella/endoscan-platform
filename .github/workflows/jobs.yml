@@ -21,6 +21,9 @@ on:
         required: true
         default: "AR"
 
+permissions:
+  contents: read
+
 concurrency:
   group: endoscan-jobs-${{ github.ref }}
   cancel-in-progress: false

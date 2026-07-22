@@ -37,7 +37,7 @@ def parse_cerapp_experimental(
 ) -> list[dict]:
     """Map experimental CERAPP rows to normalized label records.
 
-    Output rows match the staged ``cerapp.csv`` label schema consumed by the M2
+    Output rows match the staged ``cerapp.csv`` label schema consumed by the dataset layer
     ``label_retriever`` (compound id = CASRN; ``consensus_call`` carries the
     experimental call so the existing parser path is reused).
     """

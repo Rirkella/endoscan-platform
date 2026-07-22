@@ -1,4 +1,4 @@
-"""Provider-neutral contract and deterministic Phase-0 fake provider."""
+"""Provider-neutral contract and deterministic offline provider."""
 
 from __future__ import annotations
 
@@ -181,10 +181,10 @@ class ProviderRegistry:
         return sorted(self._providers)
 
 
-class FakeAgentProvider:
-    """Stateless deterministic provider used for tests and prepared Phase-0 demos."""
+class DeterministicOfflineProvider:
+    """Stateless fixture-backed provider used for tests and offline demonstrations."""
 
-    name = "fake"
+    name = "offline_fixture"
 
     def __init__(self, script: list[ProviderTurn] | None = None):
         self.script = script
@@ -207,18 +207,18 @@ class FakeAgentProvider:
                     category="interruption",
                 ),
             )
-        mode = str(request.context.get("fake_mode", "discovery"))
+        mode = str(request.context.get("offline_fixture_mode", "discovery"))
         if mode == "timeout":
-            raise ProviderTimeout("Prepared fake-provider timeout.")
+            raise ProviderTimeout("Prepared offline-provider timeout.")
         if mode == "failure":
-            raise ProviderFailure("Prepared fake-provider failure.", retryable=False)
+            raise ProviderFailure("Prepared offline-provider failure.", retryable=False)
         if mode == "transient_failure" and self._transient_failures == 0:
             self._transient_failures += 1
             raise ProviderFailure("Prepared transient provider failure.", retryable=True)
         if self.script is not None:
             index = len(history)
             if index >= len(self.script):
-                raise ProviderFailure("Fake-provider script was exhausted.", retryable=False)
+                raise ProviderFailure("Offline-provider script was exhausted.", retryable=False)
             return self.script[index]
         if mode == "malformed":
             return ProviderTurn(
@@ -345,7 +345,7 @@ class FakeAgentProvider:
                 usage=self._usage(len(history)),
             )
         endpoint_name = str(request.context.get("endpoint_name", "Oxidative stress"))
-        fixture_path = Path(__file__).with_name("fixtures") / "phase1_oxidative_stress_replay.json"
+        fixture_path = Path(__file__).with_name("fixtures") / "oxidative_stress_offline_replay.json"
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
         output = fixture["output"]
         output["endpoint_name"] = endpoint_name
@@ -368,12 +368,12 @@ class FakeAgentProvider:
             output_tokens=40 + index * 5,
             cached_tokens=0,
             cost_cents=0.0,
-            provider_request_ids=[f"fake-request-{index + 1}"],
+            provider_request_ids=[f"offline-fixture-request-{index + 1}"],
             provider_invocations=1,
         )
 
 
-class SlowFakeAgentProvider(FakeAgentProvider):
+class SlowDeterministicOfflineProvider(DeterministicOfflineProvider):
     def __init__(self, delay_seconds: float):
         super().__init__()
         self.delay_seconds = delay_seconds

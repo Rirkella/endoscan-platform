@@ -1,7 +1,7 @@
 """Load and render the registry's card/config templates.
 
-Templates use ``{{ token }}`` placeholders. M1 ships the template set so later
-milestones (e.g. the M3 ER model card) render real content from one canonical
+Templates use ``{{ token }}`` placeholders so endpoint and model cards render
+reviewed content from one canonical
 source. Rendering is intentionally trivial string substitution — no templating
 engine dependency.
 """

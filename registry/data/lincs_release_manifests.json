@@ -87,10 +87,10 @@
           "maximum_response_bytes": 25000000000,
           "required": false,
           "access_phase": "post_approval_extraction",
-          "licence_and_provenance": ["Future post-approval Level-5 matrix locator; retrieval is forbidden in Phase 2A."]
+          "licence_and_provenance": ["Future post-approval Level-5 matrix locator; retrieval is forbidden in pre-approval metadata stage."]
         }
       ],
-      "manifest_fingerprint": "ad1e072b77a78ca9c3ec5b0a7363b85de32da138957ec4f0a8a2d47c5ddeb44b"
+      "manifest_fingerprint": "557efe29030b57210526de9425ea497da4fd21aa888ca0811c256421ec866da0"
     }
   ]
 }

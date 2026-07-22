@@ -23,7 +23,7 @@ from endoscan_workflows.providers import ProviderRegistry
 from endoscan_workflows.reviewed_source_adapters import production_reviewed_source_registry
 from endoscan_workflows.source_cache import SourceResponseCache
 from endoscan_workflows.source_security import ScientificSourceClient
-from endoscan_workflows.tools import phase1_tool_registry
+from endoscan_workflows.tools import production_tool_registry
 
 
 def _approval_policy() -> dict:
@@ -349,7 +349,7 @@ def _run(workflow_runtime, scenario: str):
     provider = ScenarioProvider(scenario)
     providers = ProviderRegistry()
     providers.register("openai", lambda: provider)
-    tools = phase1_tool_registry(
+    tools = production_tool_registry(
         service.repo_root,
         DiscoveryToolService(cache, store, client),
         reviewed,

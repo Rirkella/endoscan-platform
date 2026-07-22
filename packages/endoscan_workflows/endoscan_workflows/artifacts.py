@@ -124,7 +124,9 @@ class LocalArtifactStore:
         original_source: str | None = None,
     ) -> ArtifactDescriptor:
         if len(content) > self.maximum_bytes:
-            raise ArtifactTooLarge(f"Artifact exceeds the {self.maximum_bytes}-byte Phase-0 limit.")
+            raise ArtifactTooLarge(
+                f"Artifact exceeds the {self.maximum_bytes}-byte workflow limit."
+            )
         if mime_type not in ALLOWED_MIME_TYPES:
             raise ArtifactError("Artifact MIME type is not allowed.")
         build = require_build(session, workflow_id)

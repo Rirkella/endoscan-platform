@@ -9,7 +9,7 @@ VALID_KEY = "QAIPRVGONGVQAS-DUXPYHPUSA-N"
 INVALID_KEY = "NOT-AN-INCHIKEY"
 
 
-class FakePubChemClient:
+class RecordingPubChemClient:
     requests_per_second = 3.0
 
     def __init__(self) -> None:
@@ -48,7 +48,7 @@ def test_batch_pubchem_enrichment_records_resolved_and_invalid_identities(tmp_pa
         json.dumps({"points": [{"compound_id": VALID_KEY}, {"compound_id": INVALID_KEY}]}),
         encoding="utf-8",
     )
-    client = FakePubChemClient()
+    client = RecordingPubChemClient()
     artifact = build_artifact(tmp_path, client, artifact_version="test-v1")
 
     assert artifact["statistics"]["total_unique_inchikeys"] == 2

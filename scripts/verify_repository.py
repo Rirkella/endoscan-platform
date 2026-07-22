@@ -38,14 +38,18 @@ REQUIRED_TASKS = {
     "test",
     "test-workflows",
     "test-api",
+    "test-backend",
     "test-frontend",
     "lint",
     "format",
+    "format-check",
     "typecheck",
     "build",
     "demo",
     "demo-tr",
     "demo-dna-damage",
+    "docs-check",
+    "hygiene-check",
     "verify",
 }
 FORBIDDEN_TRACKED_PARTS = {
@@ -78,6 +82,11 @@ LOCAL_PATH_PATTERNS = (
     re.compile(r"[A-Za-z]:\\Users\\[^\\\s]+", re.IGNORECASE),
     re.compile(r"(?<![A-Za-z0-9.])/" + r"Users/[^/\s]+"),
     re.compile(r"(?<![A-Za-z0-9.])/" + r"home/[^/\s]+"),
+)
+MISLEADING_AGENT_PATTERNS = (
+    re.compile("fa" + "ke", re.IGNORECASE),
+    re.compile("cannot " + "publish production endpoints", re.IGNORECASE),
+    re.compile(r"(?:placeholder|simulated|demo-only|prototype-only)[-_ ]agent", re.IGNORECASE),
 )
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 
@@ -160,7 +169,7 @@ def _check_docs() -> list[str]:
                 tomllib.loads(path.read_text(encoding="utf-8"))
             except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
                 failures.append(f"invalid TOML {path.relative_to(ROOT)}: {error}")
-        elif path.suffix.lower() in {".yaml", ".yml"}:
+        elif path.suffix.lower() in {".yaml", ".yml", ".cff"}:
             try:
                 yaml.safe_load(path.read_text(encoding="utf-8"))
             except (UnicodeDecodeError, yaml.YAMLError) as error:
@@ -202,6 +211,7 @@ def _check_hygiene() -> list[str]:
 
     text_suffixes = {
         ".css",
+        ".cff",
         ".html",
         ".js",
         ".json",
@@ -240,6 +250,9 @@ def _check_hygiene() -> list[str]:
         for pattern in LOCAL_PATH_PATTERNS:
             if pattern.search(text):
                 failures.append(f"machine-local absolute path in tracked file: {tracked_relative}")
+        for pattern in MISLEADING_AGENT_PATTERNS:
+            if pattern.search(text):
+                failures.append(f"misleading agent terminology in tracked file: {tracked_relative}")
     return failures
 
 

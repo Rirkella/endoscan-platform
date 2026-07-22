@@ -1,4 +1,4 @@
-"""Train an endpoint model from an M2 candidate table.
+"""Train an endpoint model from a reviewed candidate table.
 
 Two model types only (no AutoML zoo): elastic-net logistic regression and
 gradient boosting, each a scaler+classifier `Pipeline`. Selection is by pooled

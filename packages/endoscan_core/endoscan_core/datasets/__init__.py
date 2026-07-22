@@ -2,7 +2,7 @@
 
 A set of deterministic, individually-tested data-engineering tools that turn an
 approved allow-list of sources into a candidate training table, a quality report,
-a dataset card, and a quality-gate verdict — all offline on fixtures at M2.
+a dataset card, and a quality-gate verdict — all exercised offline with fixtures.
 
 No training, registration, inference, or agent orchestration lives here. The
 quality gate emits a verdict only; it never triggers training.
