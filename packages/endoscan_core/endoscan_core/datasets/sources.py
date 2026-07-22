@@ -1,7 +1,7 @@
 """Data-source allow-list for dataset construction.
 
-``registry/data/sources.yaml`` is the APPROVED, CURATED allow-list of sources the
-construction pipeline may ingest from (PROJECT_RULES.md §3.1). It is intentionally
+``registry/data/sources.yaml`` is the approved, curated allow-list of sources the
+construction pipeline may ingest from. It is intentionally
 NOT the universe of all possible sources; new sources are added only by explicit
 human approval. The construction tools never pull from the open web.
 """
@@ -100,7 +100,7 @@ def is_allowed(source_id: str, allow_list: SourcesAllowList) -> bool:
 def require_allowed(sources: list[SourceEntry], allow_list: SourcesAllowList) -> None:
     """Raise `UnregisteredSourceError` if any source is not in the allow-list.
 
-    Enforces PROJECT_RULES.md §3.1 at every tool boundary: construction tools
+    Enforces the reviewed-source policy at every tool boundary: construction tools
     only ever touch approved sources.
     """
     allowed = allow_list.ids()

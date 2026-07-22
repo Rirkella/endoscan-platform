@@ -1,4 +1,4 @@
-# EndoScan data-source allow-list (PROJECT_RULES.md §3.1).
+# EndoScan reviewed data-source allow-list (docs/PROVIDER_ARCHITECTURE.md).
 #
 # This file is the APPROVED, CURATED allow-list of sources the dataset-
 # construction pipeline may ingest from. It is intentionally NOT the universe of
@@ -6,7 +6,7 @@
 # approved. The construction tools never pull from the open web. New sources enter
 # this list ONLY by explicit human approval. (A future, propose-only Source
 # Discovery mode may emit candidate-source proposals for review, but it never
-# ingests data and never writes here — see PROJECT_RULES.md §3.1a.)
+# ingests data and never writes here; additions require explicit human review.)
 #
 # Schema per entry:
 #   id            unique short identifier (used to resolve adapters/fixtures)

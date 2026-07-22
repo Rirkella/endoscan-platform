@@ -7,8 +7,8 @@ have a LINCS signature and the positive/negative split — versus the gate floor
 Everything here is pure: inputs are a ``{InChIKey: 0|1}`` label map and, per cell line,
 the set of InChIKeys profiled there. No rdkit, no network, no file I/O — the
 ``endoscan_jobs`` coverage job builds those inputs (CoMPARA parse + rdkit identity +
-LINCS metadata) and calls these functions. This mirrors the gate the M5 agent enforces;
-it never recomputes or weakens the gate — it only REPORTS a verdict against its floors.
+LINCS metadata) and calls these functions. This mirrors the canonical quality gate;
+it never recomputes or weakens the gate — it only reports a verdict against its floors.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
-#: Default floors mirror ``registry/data/quality_gates.yaml`` (the agent reads them too).
+#: Default floors mirror ``registry/data/quality_gates.yaml``.
 DEFAULT_MIN_OVERLAP = 40
 DEFAULT_MIN_COMPOUNDS_PER_CLASS = 20
 

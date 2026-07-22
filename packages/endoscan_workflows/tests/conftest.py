@@ -9,7 +9,7 @@ from endoscan_workflows.database import WorkflowDatabase
 from endoscan_workflows.harness import AgentHarness
 from endoscan_workflows.providers import FakeAgentProvider, ProviderRegistry
 from endoscan_workflows.service import WorkflowService
-from endoscan_workflows.state_machine import WorkflowGraph
+from endoscan_workflows.state_machine import WorkflowGraph, canonical_workflow_graph_path
 from endoscan_workflows.tools import phase0_tool_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -26,7 +26,7 @@ def workflow_runtime(tmp_path):
     service = WorkflowService(
         database,
         store,
-        WorkflowGraph(REPO_ROOT / "docs" / "agents" / "workflow-state-machine.json"),
+        WorkflowGraph(canonical_workflow_graph_path()),
         repo_root=REPO_ROOT,
         harness=harness,
     )

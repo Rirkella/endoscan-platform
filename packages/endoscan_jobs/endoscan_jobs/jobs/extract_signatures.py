@@ -1,7 +1,7 @@
 """Extract a per-endpoint LINCS signature matrix — the memory-efficient server build path.
 
-Promotes the frozen ER staging slice (a Colab-only script) into a first-class, tested job
-that the M5 Builder Agent uses as ``signature_retriever``'s real-data backend on a modest
+Promotes the original ER staging slice into a first-class, tested heavy-data job
+that the durable workflow can use behind a reviewed tool boundary on a modest
 (~3.7 GB RAM) server. It is a memory-efficient implementation of the SAME extraction — it
 produces the SAME fused 978-gene-per-compound matrix and SAME ``compound_id`` contract the
 frozen ER ``lincs.parquet`` uses; it changes no thresholds, gate logic, or the ER model.

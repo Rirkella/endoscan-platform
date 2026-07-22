@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "EndoScan web frontend — a data-driven, honesty-first React SPA over the M7 serving API.",
+  "description": "EndoScan web frontend — a data-driven, honesty-first React SPA over the serving API.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -24,13 +24,13 @@
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.0.4",
     "autoprefixer": "^10.4.20",
     "jsdom": "^25.0.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vite": "^5.4.11",
-    "vitest": "^2.1.8"
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }

@@ -461,8 +461,8 @@ def _classify_columns(columns) -> str:
 def inspect_cerapp_archives(paths: Sequence[Path], work_dir: Path) -> list[dict]:
     """Extract CERAPP archives, find EVERY tabular file, print + return a manifest.
 
-    Does NOT auto-select a file — the operator/Claude Chat picks the experimental table
-    at Stop 1. Returns one dict per readable table: ``rel`` (relative to ``work_dir``),
+    Does NOT auto-select a file — a scientific reviewer selects the experimental table
+    from the manifest. Returns one dict per readable table: ``rel`` (relative to ``work_dir``),
     ``path``, ``rows``, ``columns``, ``kind``, ``readable``. An empty list means no
     readable table was found (only then should the caller fall back to manual upload).
     """

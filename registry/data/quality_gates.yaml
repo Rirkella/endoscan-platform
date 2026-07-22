@@ -2,7 +2,7 @@
 #
 # These are the configurable thresholds the quality gate compares a dataset
 # quality report against. The gate emits ONLY a pass/fail verdict — it never
-# triggers training (PROJECT_RULES.md §3.2/§3.3). Thresholds are starting
+# triggers training (docs/ENDPOINT_BUILDING_WORKFLOW.md). Thresholds are starting
 # defaults and are expected to be tuned against real overlap later.
 
 thresholds:

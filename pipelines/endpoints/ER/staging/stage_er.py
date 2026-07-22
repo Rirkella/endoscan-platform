@@ -1,16 +1,13 @@
-"""Orchestrate ER staging — fetch approved sources, build the staged files.
+"""Orchestrate an explicitly authorized ER reproduction staging run.
 
-Run in the CLOUD via the four-stop operator notebook
-(``notebooks/colab_run_er_phase2_clean.ipynb``);
-NOT in CI, NOT on a laptop. Produces
+This is not run in CI or by the application workflow. It produces
 ``data/staged/er/{lincs.parquet, cerapp.csv, pubchem.csv}`` which the toolchain
 then reads via ``StagedSourceAdapter``. The pure transforms it calls
 (``condition``, ``gctx``, ``cerapp``, ``pubchem``) are unit-tested in CI; the
-network fetch (``fetch``) and the real column wiring run only in the cloud.
+network fetch (``fetch``) and real column wiring require a separate reviewed operation.
 
 All functions are parameterized by column names supplied at call time (the
-operator pastes the reviewed column names into the notebook's CONFIG cells); there
-is no hardcoded schema. The pure transforms are unit-tested on fixtures.
+operator supplies reviewed column names); there is no hardcoded source schema.
 """
 
 from __future__ import annotations
@@ -20,7 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 
-# Allow `import gctx` etc. when run as a script / from the Colab notebook.
+# Allow `import gctx` etc. when invoked as a reviewed staging script.
 sys.path.insert(0, str(Path(__file__).parent))
 
 import cerapp as cerapp_mod  # noqa: E402
@@ -134,10 +131,9 @@ def build_pubchem_csv(mapping_rows: list[dict], out_path: Path) -> Path:
 
 def main() -> None:  # pragma: no cover - cloud entry point, not run in CI
     raise SystemExit(
-        "Run the staging steps from the Colab notebook "
-        "(notebooks/colab_run_er_phase2_clean.ipynb): it "
-        "fetches the approved locators, wires the reviewed column names, calls the "
-        "build_* functions above, then runs the ER pipeline. Not runnable offline in CI."
+        "This module exposes reviewed ER staging transforms and is not a standalone "
+        "network workflow. Follow pipelines/README.md and invoke the required functions "
+        "only from an explicitly authorized reproduction operation."
     )
 
 

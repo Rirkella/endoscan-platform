@@ -6,11 +6,12 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  lint-and-test:
+  python:
     runs-on: ubuntu-latest
-    # Python 3.12 is the supported workflow runtime. Python 3.11 triggers an
-    # import-time typing failure in the pinned openai-agents dependency.
     env:
       UV_PYTHON: "3.12"
     steps:
@@ -25,10 +26,63 @@ jobs:
         run: uv sync --frozen
 
       - name: Ruff lint
-        run: uv run ruff check .
+        run: uv run python scripts/project.py lint
 
       - name: Ruff format check
-        run: uv run ruff format --check .
+        run: uv run python scripts/project.py format-check
 
-      - name: Pytest
-        run: uv run pytest
+      - name: Python type check
+        run: >-
+          uv run mypy
+          scripts/project.py
+          scripts/verify_repository.py
+          packages/endoscan_core/endoscan_core/registry/schema.py
+          packages/endoscan_core/endoscan_core/registry/store.py
+          packages/endoscan_core/endoscan_core/inference/schema_validation.py
+          packages/endoscan_workflows/endoscan_workflows/models.py
+          packages/endoscan_workflows/endoscan_workflows/state_machine.py
+          packages/endoscan_workflows/endoscan_workflows/artifacts.py
+          packages/endoscan_workflows/endoscan_workflows/database.py
+          services/api/endoscan_api/app.py
+
+      - name: Python tests
+        run: uv run python scripts/project.py test-backend
+
+      - name: Repository docs and hygiene
+        run: |
+          uv run python scripts/project.py docs-check
+          uv run python scripts/project.py hygiene-check
+          git diff --check
+
+      - name: Offline endpoint demos
+        run: uv run python scripts/project.py demo
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install frontend dependencies (locked)
+        run: npm ci
+
+      - name: Frontend dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: TypeScript
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build

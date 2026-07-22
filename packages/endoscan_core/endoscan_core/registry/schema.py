@@ -1,13 +1,13 @@
 """Pydantic v2 schema for the EndoScan registry.
 
-The registry is THE contract between dataset construction, training, and serving
-(PROJECT_RULES.md §2.4). This module defines the typed entry shape and the
+The registry is the contract between dataset construction, training, and serving
+(see ``docs/DATA_MODEL_AND_ARTIFACTS.md``). This module defines the typed entry shape and the
 status lifecycle. Persistence lives in `store.py`.
 
 Design notes
 ------------
 - `input_type` is constrained to ``"transcriptomics"`` at the schema level to
-  enforce EndoScan's transcriptomics-first rule (PROJECT_RULES.md §1, §4.3).
+  enforce EndoScan's documented transcriptomics-first contract.
 - Artifact paths are stored **relative to the repository root** (see `store.py`
   for why and how they are resolved).
 - `source_refs` are **opaque strings** at M1; the allow-list (`sources.yaml`)
@@ -34,8 +34,8 @@ class EndpointStatus(StrEnum):
 
     Flow: ``candidate`` → ``dataset_ready`` → ``under_review`` → one terminal
     state of ``validated_mvp`` / ``experimental`` / ``failed_qc`` /
-    ``deprecated``. The lifecycle encodes the human-in-the-loop gate
-    (PROJECT_RULES.md §3): reaching ``validated_mvp`` requires that every
+    ``deprecated``. The lifecycle encodes the documented human-in-the-loop gate:
+    reaching ``validated_mvp`` requires that every
     referenced artifact exists (enforced in `store.py`).
     """
 

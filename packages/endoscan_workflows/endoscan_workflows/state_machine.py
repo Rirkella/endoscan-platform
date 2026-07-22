@@ -10,6 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from .contracts import ActorType, WorkflowState
 from .errors import InvalidTransition
 
+WORKFLOW_GRAPH_PATH = Path(__file__).with_name("workflow-state-machine.json")
+
+
+def canonical_workflow_graph_path() -> Path:
+    """Return the state-machine contract owned and packaged with the workflow runtime."""
+    return WORKFLOW_GRAPH_PATH
+
 
 class TransitionSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")

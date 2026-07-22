@@ -4,10 +4,10 @@ Resolves a source to a local file under a staged-data directory by ``source.id``
 reading **Parquet** (the wide LINCS signature matrix) or **CSV** (narrow
 label/mapping tables). Parquet is preferred when both exist. This is the adapter
 used for the one-time real ER run (Phase 2); the data is staged locally by a human
-(e.g. converted from a LINCS ``.gctx`` — see ``docs/er_real_data_phase2.md``).
+(for example, converted from a LINCS ``.gctx`` by the reviewed ER staging transforms).
 
 It implements the same `SourceAdapter` interface as the fixture adapter, so the
-M2 tools consume it unchanged. ``RealDownloadAdapter`` remains a stub — nothing
+M2 tools consume it unchanged. ``RealDownloadAdapter`` remains disabled — nothing
 here fetches from the network.
 """
 

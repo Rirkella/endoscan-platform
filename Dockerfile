@@ -1,12 +1,5 @@
-# EndoScan heavy-job runtime — reproducible image used locally AND on the future
-# self-hosted runner. Runs `python -m endoscan_jobs run <job> <target>`.
-#
-# Built from the SAME uv.lock the CI uses (single source of truth). Installs only the
-# runtime workspace (endoscan-core + endoscan-jobs incl. rdkit/scikit-learn/requests/
-# openpyxl) — NOT the dev/notebook tooling (ruff/pytest/nbformat/h5py/shap/dvc), and NOT
-# the serving API (endoscan-api / fastapi-uvicorn): this is the heavy-JOB image. The sync
-# below is scoped to the endoscan-jobs package, so the api workspace member is neither
-# required on disk nor installed (fastapi/uvicorn stay out of the image).
+# EndoScan heavy-job runtime. It runs `python -m endoscan_jobs <command>`
+# locally or on a controlled worker using the same lockfile as CI.
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
@@ -14,21 +7,14 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     ENDOSCAN_DATA_ROOT=/data
 
-# Workspace manifests + lock first (layer cache); then the package sources.
+# Copy manifests first for layer caching, then only the installable job runtime packages.
 COPY pyproject.toml uv.lock README.md ./
 COPY packages/ ./packages/
-# Forward-compat: the later `build` job imports these (top-level, like the tests do).
-COPY pipelines/ ./pipelines/
-COPY agent/ ./agent/
-COPY registry/ ./registry/
 
-# Runtime install of the jobs package ONLY (no dev group). Scoping to --package
-# endoscan-jobs installs just its closure (endoscan-core + rdkit/scikit-learn/...), so the
-# serving-API workspace member (services/api) is neither needed on disk nor installed —
-# the heavy-job image stays lean. uv builds /app/.venv from the frozen lock.
+# Scope installation to the job package and its workspace dependencies. API,
+# frontend, notebook, and development dependencies are intentionally absent.
 RUN uv sync --frozen --no-dev --package endoscan-jobs
 
-# Persistent artifact root is mounted here on the server (-v <disk>:/data).
 RUN mkdir -p /data
 
 ENTRYPOINT ["/app/.venv/bin/python", "-m", "endoscan_jobs"]

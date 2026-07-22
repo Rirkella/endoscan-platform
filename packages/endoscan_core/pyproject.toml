@@ -1,8 +1,7 @@
 # EndoScan core science library.
 #
-# This is THE package that holds all scientific logic (framework-free, tested).
-# Both the FastAPI service and the Builder Agent import it. At M0 it is an empty,
-# installable skeleton that exposes only __version__.
+# This package holds framework-free, independently tested domain and scientific logic.
+# FastAPI and durable workflows consume it without reimplementing that logic.
 
 [project]
 name = "endoscan-core"

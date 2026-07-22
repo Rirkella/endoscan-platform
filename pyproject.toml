@@ -23,9 +23,6 @@ dev = [
     # Staging-layer / CI helper only (NOT an endoscan_core runtime dependency):
     # the gctx slicer + its synthetic-gctx test use h5py (NumPy-2 compatible).
     "h5py>=3.11",
-    # Notebook structural test (tests/staging/test_notebook_structure.py) parses the
-    # operator .ipynb with nbformat. CI-only; not an endoscan_core runtime dependency.
-    "nbformat>=5.10",
     # TreeSHAP for the M4 inference/explainability tests; installed in CI so the explain
     # tests run. NOT an endoscan_core runtime dependency (shap import is lazy in
     # inference/explain.py and explain tests importorskip it).
@@ -54,10 +51,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "f
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages", "services"]
 addopts = "-q"
-# Repo root on the path so the top-level `agent` package (not an installed dist) imports.
+# Keep the repository root importable for config-driven pipeline regression tests.
 pythonpath = ["."]
 
-# --- Types (minimal, NON-blocking; CI does not gate on mypy) -----------------
+# --- Types (bounded production surface; gated by CI) -------------------------
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true

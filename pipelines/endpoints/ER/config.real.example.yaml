@@ -1,10 +1,10 @@
 # ER endpoint pipeline config — REAL run TEMPLATE (Phase 2). Copy this, do NOT
 # commit a filled-in real config with approved: true until the run is reviewed.
 #
-# Phase 2 is run by a human on their machine (where the OneDrive-synced DVC remote
-# lives). Stage the real extracts under data/staged/er/ first (see
-# docs/er_real_data_phase2.md), then set approved: true ONLY after reviewing the
-# gate verdict + dataset card. No regulatory-grade claims are made anywhere.
+# An authorized reproduction is run by a maintainer with separately reviewed source
+# artifacts. Stage the real extracts under data/staged/er/ as described in
+# pipelines/README.md, then set approved: true only in an untracked working copy after
+# reviewing the gate verdict and dataset card. No regulatory-grade claim is implied.
 
 endpoint_id: ER
 biological_target: Estrogen Receptor

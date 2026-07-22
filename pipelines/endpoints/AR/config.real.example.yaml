@@ -1,7 +1,7 @@
 # AR endpoint pipeline config — REAL run TEMPLATE (server build). Copy this, point it at
-# the staged extracts, and set approved: true ONLY after a human reviews the gate verdict
-# + dataset card. Run by the M5 Builder Agent on the server (start_build -> review ->
-# approve -> promote); NOT in CI, NOT a change to thresholds or the frozen ER model.
+# the staged extracts, and set approved: true only in an untracked working copy after a
+# human reviews the gate verdict and dataset card. This reproduction configuration is not
+# run in CI and does not alter thresholds or the frozen ER model.
 #
 # Stage the three files under data/staged/ar/ (the StagedSourceAdapter resolves each
 # source by `<staged_dir>/<source.id>.{parquet|csv}`):

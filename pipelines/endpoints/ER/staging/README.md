@@ -1,4 +1,4 @@
-# ER staging layer (offline prep — cloud-run, never the laptop)
+# ER staging transforms for reviewed reproduction
 
 This directory is the **explicit offline prep layer** that fetches from the
 **approved** locators in `registry/data/sources.yaml` and writes small **staged
@@ -11,19 +11,11 @@ local files** that the toolchain then reads via `StagedSourceAdapter`. It is
   a synthetic `.gctx` — `gctx.py` (h5py slicer), `condition.py` (10 µM/24 h
   selection + MCF7/A549 early fusion), `cerapp.py` (experimental-call parser),
   `pubchem.py` (mapping normalizer). **No real data, no network.**
-- **Cloud (Colab, operator-run):** `notebooks/colab_run_er_phase2_clean.ipynb` is a
-  **four-stop** operator runbook (NOT "Run all"); see `docs/runbooks/er_phase2_colab.md`.
-  A **Preflight** cell verifies a **read-only,
-  single-repo** fine-grained PAT (Colab Secret `GH_PAT_RO`) before anything else;
-  the clone is **read-only and token-safe** (PAT supplied via `GIT_ASKPASS`, never
-  in the URL/argv/`.git/config`/output) and the notebook **never pushes to GitHub**.
-  The operator only pastes confirmed values into the Stop 2 / Stop 3 CONFIG cells and
-  sends outputs to Claude Chat between stops: Stop 1 fetch+inspect, Stop 2 stage +
-  **gate only** (training hard-wired off), Stop 3 train, Stop 4 DVC-push the binaries
-  to Drive + download a **review bundle** (text artifacts + `.dvc` pointers +
-  proposed `endpoints.json`) that Claude Code turns into the review PR. `fetch.py`
-  downloads the approved sources; `stage_er.py`'s tested helpers build
-  `data/staged/er/`; `bundle.py` assembles the Stop-4 handoff bundle.
+- **Authorized reproduction environment:** a maintainer obtains the reviewed source
+  artifacts through a separately approved operation, inspects their schemas, and invokes
+  the parameterized transforms. `stage_er.py` builds `data/staged/er/`; `bundle.py`
+  assembles a review bundle. There is no public notebook, automatic download-to-training
+  path, or assistant-specific handoff protocol.
 
 ## Key rules
 - **CERAPP = EXPERIMENTAL ER activity calls only** — never the consensus-model
@@ -60,7 +52,8 @@ alternative. DVC-track `data/staged/er/` + `models/ER/model.pkl`; git-track the
 scripts, `sources.yaml`, small label/mapping CSVs, `metrics.json`, cards, the
 `model_selection` report, the `endpoints.json` entry, and `.dvc` pointers.
 
-## Phase 2b is a separate, reviewed step
-The cloud run produces the real ER + artifacts; a human reviews metrics, the
-scorecard, leakage, and cards (no overclaim) **before** the `endpoints.json`
-entry lands in its own PR.
+## Review boundary
+
+A reproduction operation is separate from normal development. A human reviews source
+provenance, staged-table diagnostics, leakage controls, metrics, uncertainty, cards, and
+claim scope before any registry change. See [`pipelines/README.md`](../../../README.md).
