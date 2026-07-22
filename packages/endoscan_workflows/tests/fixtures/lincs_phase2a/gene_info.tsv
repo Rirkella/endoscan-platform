@@ -1,0 +1,5 @@
+pr_gene_id	pr_gene_symbol	pr_is_lm
+101	GENE_A	1
+102	GENE_B	1
+103	GENE_C	0
+	MISSING_ID	0

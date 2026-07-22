@@ -10,13 +10,25 @@ from endoscan_core.registry import get_endpoint, list_endpoints
 
 from ..assemblers import build_endpoint_detail
 from ..deps import get_repo_root
-from ..schemas import EndpointDetail, EndpointSummary
+from ..schemas import EndpointDetail, EndpointSummary, ExplanationCapabilityStatus
 
 router = APIRouter(prefix="/endpoints", tags=["endpoints"])
 
 
 def _status_str(entry) -> str:
     return entry.status.value if hasattr(entry.status, "value") else str(entry.status)
+
+
+def _explanation_status(request: Request, entry) -> dict:
+    return request.app.state.explanation_capabilities.get(
+        entry.endpoint_id,
+        {
+            "declared_method": entry.explanation.method if entry.explanation else None,
+            "available": False,
+            "missing_dependencies": [],
+            "reason": "The endpoint was published after process startup; reload warms its model.",
+        },
+    )
 
 
 @router.get("", response_model=list[EndpointSummary])
@@ -29,7 +41,8 @@ def list_all(request: Request, repo_root: Path = Depends(get_repo_root)) -> list
             status=_status_str(e),
             input_type=e.input_type,
             frozen=e.frozen,
-            explanation=request.app.state.explanation_capabilities[e.endpoint_id],
+            explanation=ExplanationCapabilityStatus.model_validate(_explanation_status(request, e)),
+            validation_status=e.validation_status.model_dump(mode="json"),
         )
         for e in list_endpoints(repo_root=repo_root)
     ]
@@ -44,6 +57,4 @@ def detail(
     ``get_endpoint`` raises ``EndpointNotFoundError`` for an unknown id -> 404 (handler).
     """
     entry = get_endpoint(endpoint_id, repo_root=repo_root)
-    return build_endpoint_detail(
-        entry, repo_root, request.app.state.explanation_capabilities[endpoint_id]
-    )
+    return build_endpoint_detail(entry, repo_root, _explanation_status(request, entry))

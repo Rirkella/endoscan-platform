@@ -1,0 +1,5 @@
+cell_id	organism	cell_lineage	primary_disease
+A549	Homo sapiens	lung	carcinoma
+MCF7	Homo sapiens	breast	adenocarcinoma
+HEPG2	Homo sapiens	liver	hepatocellular carcinoma
+	Homo sapiens	unknown	unknown

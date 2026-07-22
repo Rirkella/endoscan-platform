@@ -57,6 +57,21 @@ class ExplanationCapability(BaseModel):
     required_dependencies: list[str] = Field(default_factory=list)
 
 
+class ValidationStatusMetadata(BaseModel):
+    """Truthful implementation/live/scientific validation dimensions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    implementation: Literal["implemented"] = "implemented"
+    offline: Literal["offline_validated", "offline_validation_pending"] = (
+        "offline_validation_pending"
+    )
+    live: Literal["live_validated", "live_validation_pending"] = "live_validation_pending"
+    scientific: Literal["scientifically_validated", "scientifically_validation_pending"] = (
+        "scientifically_validation_pending"
+    )
+
+
 class EndpointEntry(BaseModel):
     """A single registered endpoint — the registry's unit of record."""
 
@@ -84,6 +99,11 @@ class EndpointEntry(BaseModel):
     #: it (e.g. ER). Re-registration is for non-frozen endpoints only.
     frozen: bool = False
     source_refs: list[str] = Field(default_factory=list)
+    validation_status: ValidationStatusMetadata = Field(default_factory=ValidationStatusMetadata)
+    applicability: dict[str, str] = Field(default_factory=dict)
+    training_dataset_summary: dict[str, int | float | str] = Field(default_factory=dict)
+    model_metrics_summary: dict[str, int | float | str] = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list)
 
     @field_validator("endpoint_id")
     @classmethod

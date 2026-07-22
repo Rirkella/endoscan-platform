@@ -1,0 +1,21 @@
+{
+  "fixture_version": "1.0.0",
+  "endpoint": "Example receptor functional activity",
+  "target": "Example receptor",
+  "modalities": ["binding", "agonism", "antagonism"],
+  "activity_sources": [
+    {"provider":"activity-alpha","source_id":"alpha-binding-1","modality":"binding","compounds":["CID1","CID2","CID3"],"active":1,"inactive":2},
+    {"provider":"activity-alpha","source_id":"alpha-agonism-1","modality":"agonism","compounds":["CID1","CID2"],"active":1,"inactive":1},
+    {"provider":"activity-beta","source_id":"beta-agonism-2","modality":"agonism","compounds":["CID2","CID3"],"active":1,"inactive":1},
+    {"provider":"activity-alpha","source_id":"alpha-antagonism-1","modality":"antagonism","compounds":["CID1","CID3"],"active":1,"inactive":1},
+    {"provider":"activity-beta","source_id":"beta-antagonism-2","modality":"antagonism","compounds":["CID2","CID3"],"active":1,"inactive":1}
+  ],
+  "transcriptomic_sources": [
+    {"provider":"transcript-alpha","source_id":"tx-cell-a","context":{"cell":"CELL_A","dose":"1 uM","time":"24 h"},"compounds":["CID1","CID2"]},
+    {"provider":"transcript-beta","source_id":"tx-cell-b","context":{"cell":"CELL_B","dose":"10 uM","time":"6 h"},"compounds":["CID2","CID3"]}
+  ],
+  "missing_provider_capability": {"provider":"activity-beta","capability":"related_assay_relationships"},
+  "expected_viable_combinations": 10,
+  "expected_strategy_proposals": 3,
+  "expression_values_retrieved": false
+}

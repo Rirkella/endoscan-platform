@@ -1,5 +1,9 @@
 # Target architecture for agent-assisted endpoint builds
 
+> The general public-data training-dataset discovery architecture is specified in
+> `training-dataset-discovery-and-assembly.md`. It supersedes fixed one-dataset or two-source
+> interpretations while preserving all historical workflows.
+
 ## Architectural decision
 
 Build a deterministic, database-backed orchestrator in the existing FastAPI/Python stack. Do **not** introduce Temporal, Prefect or Dagster for the first vertical slice.

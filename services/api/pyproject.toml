@@ -4,7 +4,7 @@
 name = "endoscan-api"
 version = "0.0.0"
 description = "EndoScan thin read-only serving API (FastAPI over endoscan_core)."
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "endoscan-core",
     "endoscan-workflows",

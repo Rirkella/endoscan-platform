@@ -23,8 +23,10 @@ def health(request: Request) -> HealthResponse:
         artifact_store=dict(state.artifact_store.capability()),
         agent_provider={
             "configured": list(state.provider_registry.configured()),
-            "live_model_api": False,
-            "label": "Prepared deterministic agent simulation",
+            "live_model_api": bool(state.agent_configuration.live_enabled),
+            "label": f"{state.agent_configuration.run_mode.value.title()} agent mode",
+            "model": state.agent_configuration.model,
+            "api_key_present": state.agent_configuration.api_key_present,
         },
         admin={
             "development_mode": bool(state.admin_development_mode),

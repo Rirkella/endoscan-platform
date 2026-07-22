@@ -1,9 +1,9 @@
 import type { AdminBuild, AdminTimelineEvent } from "./api/types";
 
 export const WORKFLOW_STAGES = [
-  { label: "Definition", states: ["DRAFT"] },
-  { label: "Discovery", states: ["DISCOVERING_DATA"] },
-  { label: "Dataset review", states: ["AWAITING_DATASET_APPROVAL"] },
+  { label: "Definition", states: ["DRAFT", "COMPILING_TARGET_DATASET_SPECIFICATION", "AWAITING_DATASET_SPECIFICATION_REVIEW", "REVIEWING_DATASET_SPECIFICATION", "SPECIFYING_TARGET_DATASET", "AWAITING_DATASET_SPECIFICATION_APPROVAL", "AWAITING_DATASET_SPECIFICATION_REVISION", "APPROVED_SPECIFICATION"] },
+  { label: "Discovery", states: ["DISCOVERING_DATA", "DISCOVERY_PLANNING", "REGISTERED_PROVIDER_CAPABILITY_BLOCKED", "DISCOVERING_SOURCE_CANDIDATES", "HYDRATING_SOURCE_CANDIDATES", "COMPUTING_COMBINATION_COVERAGE", "GENERATING_ASSEMBLY_STRATEGIES"] },
+  { label: "Dataset review", states: ["AWAITING_DATASET_APPROVAL", "AWAITING_SEARCH_REVIEW", "AWAITING_ASSEMBLY_STRATEGY_REVIEW", "ASSEMBLY_RECIPE_APPROVED", "ASSEMBLING_APPROVED_DATASET"] },
   { label: "Curation", states: ["CURATING_DATA", "AWAITING_LABEL_APPROVAL"] },
   { label: "Identity", states: ["RESOLVING_IDENTITIES"] },
   { label: "Quality audit", states: ["AUDITING_DATASET", "AUDITING_LEAKAGE"] },
@@ -15,8 +15,25 @@ export const WORKFLOW_STAGES = [
 
 const STATE_LABELS: Record<string, string> = {
   DRAFT: "Draft ready to start",
+  COMPILING_TARGET_DATASET_SPECIFICATION: "Compiling target dataset specification",
+  AWAITING_DATASET_SPECIFICATION_REVIEW: "Review target training dataset",
+  REVIEWING_DATASET_SPECIFICATION: "Running optional specification review",
+  SPECIFYING_TARGET_DATASET: "Preparing dataset specification",
+  AWAITING_DATASET_SPECIFICATION_APPROVAL: "Waiting for specification review",
+  AWAITING_DATASET_SPECIFICATION_REVISION: "Dataset specification needs revision",
+  APPROVED_SPECIFICATION: "Approved specification ready for discovery planning",
+  DISCOVERY_PLANNING: "Compiling complete provider discovery plan",
+  REGISTERED_PROVIDER_CAPABILITY_BLOCKED: "Blocked by registered-provider capabilities",
+  DISCOVERING_SOURCE_CANDIDATES: "Discovering all planned source candidates",
+  HYDRATING_SOURCE_CANDIDATES: "Hydrating candidate source metadata",
+  COMPUTING_COMBINATION_COVERAGE: "Computing all source-combination coverage",
+  GENERATING_ASSEMBLY_STRATEGIES: "Generating coverage-bound alternatives",
+  AWAITING_ASSEMBLY_STRATEGY_REVIEW: "Waiting for explicit assembly-strategy review",
+  ASSEMBLY_RECIPE_APPROVED: "Assembly recipe approved; assembly remains deferred",
+  ASSEMBLING_APPROVED_DATASET: "Assembling the approved dataset",
   DISCOVERING_DATA: "Searching for candidate datasets",
   AWAITING_DATASET_APPROVAL: "Waiting for dataset review",
+  AWAITING_SEARCH_REVIEW: "Waiting for revised-search review",
   CURATING_DATA: "Preparing the selected dataset",
   AWAITING_LABEL_APPROVAL: "Waiting for label review",
   RESOLVING_IDENTITIES: "Resolving compound identities",
@@ -71,6 +88,11 @@ export function buildFilter(build: AdminBuild): BuildFilter {
 
 export function shortBuildId(id: string): string {
   const compact = id.replace(/^build-/, "").replace(/-/g, "");
+  return compact.slice(0, 8).toUpperCase();
+}
+
+export function shortRunId(id: string): string {
+  const compact = id.replace(/^run-/, "").replace(/-/g, "");
   return compact.slice(0, 8).toUpperCase();
 }
 
@@ -137,6 +159,10 @@ export function toolLabel(name: string): string {
     list_known_source_adapters: "Listed available source adapters",
     summarize_existing_endpoint_pipeline: "Reviewed the existing endpoint pipeline",
     create_dataset_candidate_artifact: "Prepared candidate comparison artifact",
+    search_geo_series: "Searched GEO Series",
+    validate_geo_accessions: "Validated GEO accessions",
+    inspect_geo_candidates: "Inspected candidate metadata and sample design",
+    compare_dataset_candidates: "Compared candidate facts",
   };
   return labels[name] ?? humanizeMachineValue(name);
 }

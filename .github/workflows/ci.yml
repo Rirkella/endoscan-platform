@@ -9,7 +9,8 @@ on:
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
-    # Single Python version for now (3.12). A 3.11/3.12/3.13 matrix can be added later.
+    # Python 3.12 is the supported workflow runtime. Python 3.11 triggers an
+    # import-time typing failure in the pinned openai-agents dependency.
     env:
       UV_PYTHON: "3.12"
     steps:

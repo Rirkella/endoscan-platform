@@ -15,10 +15,13 @@ export interface Health {
 
 export interface AdminBuild {
   schema_version: "1.0.0";
+  workflow_semantics_version?: string | null;
   id: string;
   endpoint_name: string;
   endpoint_slug: string;
   biological_goal: string;
+  workflow_kind?: "legacy_single_source_discovery" | "training_dataset_discovery";
+  benchmark_mode?: string;
   state: string;
   status: string;
   current_stage: string;
@@ -33,6 +36,65 @@ export interface AdminBuild {
   paused_at: string | null;
   cancelled_at: string | null;
   completed_at: string | null;
+}
+
+export interface AdminTrainingDatasetWorkflow {
+  schema_version: "1.0.0";
+  contract_version?: string;
+  workflow_semantics_version?: string;
+  workflow_id: string;
+  workflow_kind: string;
+  benchmark_mode?: string;
+  legacy: boolean;
+  legacy_semantics_read_only?: boolean;
+  label?: string;
+  initial_context?: Record<string, unknown>;
+  endpoint_discovery_scope?: Record<string, unknown> | null;
+  target_specification?: Record<string, unknown> | null;
+  specification_draft?: Record<string, unknown> | null;
+  specification_agent_outcome?: Record<string, unknown> | null;
+  specification_semantic_validation?: Record<string, unknown> | null;
+  specification_compilation_outcome?: Record<string, unknown> | null;
+  specification_review?: Record<string, unknown> | null;
+  component_requirements?: Record<string, unknown> | null;
+  source_discovery_authorization?: Record<string, unknown> | null;
+  source_discovery_budget?: Record<string, unknown> | null;
+  source_discovery_readiness?: Record<string, unknown> | null;
+  source_observations?: Array<Record<string, unknown>>;
+  source_search_outcomes?: Array<Record<string, unknown>>;
+  source_discovery_execution?: Record<string, unknown> | null;
+  source_fragments?: Array<Record<string, unknown>>;
+  verified_source_inventory?: Record<string, unknown> | null;
+  capability_matrix?: Record<string, unknown> | null;
+  assembly_strategies?: Record<string, unknown> | null;
+  joinability_diagnostics?: Record<string, unknown> | null;
+  gap_report?: Record<string, unknown> | null;
+  preparation_plan?: Record<string, unknown> | null;
+  assembly_review?: Record<string, unknown> | null;
+  discovery_plan?: Record<string, unknown> | null;
+  discovery_execution_ledger?: Record<string, unknown> | null;
+  source_candidates?: Record<string, unknown> | null;
+  hydrated_sources?: Record<string, unknown> | null;
+  combination_coverage?: Record<string, unknown> | null;
+  strategy_proposals?: Record<string, unknown> | null;
+  assembly_recipe?: Record<string, unknown> | null;
+  provider_capability_findings?: Record<string, unknown> | null;
+  strategy_set_rejection?: Record<string, unknown> | null;
+  dataset_bundle?: Record<string, unknown> | null;
+  dataset_quality_report?: Record<string, unknown> | null;
+  dataset_review_decision?: Record<string, unknown> | null;
+  explore_manifest?: Record<string, unknown> | null;
+  benchmark_plan?: Record<string, unknown> | null;
+  model_benchmark_results?: Array<Record<string, unknown>>;
+  benchmark_comparison?: Record<string, unknown> | null;
+  model_selection_record?: Record<string, unknown> | null;
+  final_validation_report?: Record<string, unknown> | null;
+  publication_receipt?: Record<string, unknown> | null;
+  implementation_validation_status?: Record<string, unknown> | null;
+  planned_discovery_agents?: Array<Record<string, unknown>>;
+  discovery_round?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AdminArtifact {
@@ -94,6 +156,7 @@ export interface AdminAgentRun {
   agent_name: string;
   provider: string;
   model_identifier: string;
+  run_mode: "live" | "cached" | "replay" | null;
   status: string;
   turns: number;
   duration_ms: number;
@@ -101,6 +164,46 @@ export interface AdminAgentRun {
   tools: Array<{ id: string; tool_name: string; status: string; duration_ms: number }>;
   trace?: { events?: Array<Record<string, unknown>> };
   tool_calls?: Array<Record<string, unknown>>;
+}
+
+export interface AdminAgentCapabilities {
+  schema_version: "1.0.0";
+  provider: string;
+  model: string;
+  run_mode: "live" | "cached" | "replay";
+  api_key_present: boolean;
+  live_mode_enabled: boolean;
+  source_tools_available: boolean;
+  tracing_enabled: boolean;
+  configured_budget: {
+    maximum_turns: number;
+    maximum_tool_calls: number;
+    timeout_seconds: number;
+    maximum_input_tokens: number;
+    maximum_output_tokens: number;
+    maximum_cost_usd: number;
+    retry_count: number;
+    input_cost_per_million_usd: number;
+    output_cost_per_million_usd: number;
+  };
+  label?: string;
+  live_unavailable_reason?: string | null;
+}
+
+export interface AdminProviderPreflight {
+  schema_version: "1.0.0";
+  provider: string;
+  configured_model: string;
+  api_key_present: boolean;
+  authentication_accepted: boolean;
+  model_accessible: boolean;
+  http_status: number | null;
+  provider_error_code: string | null;
+  provider_error_type: string | null;
+  request_id: string | null;
+  billing_status: "not_checked";
+  generation_capability: "not_checked";
+  checked_at: string;
 }
 
 export interface AdminWorkflowError {
@@ -111,7 +214,50 @@ export interface AdminWorkflowError {
   category: string;
   retryable: boolean;
   safe_message: string;
+  detail?: {
+    source_diagnostic?: AdminSourceToolDiagnostic | null;
+    tool_diagnostic?: AdminToolInvocationFailureDiagnostic | null;
+  };
   created_at: string;
+}
+
+export interface AdminToolInvocationFailureDiagnostic {
+  tool_name: string;
+  tool_schema_version: string;
+  tool_schema_hash: string;
+  agent_role: string;
+  invocation_stage: string;
+  supplied_argument_field_names: string[];
+  normalized_argument_field_names: string[];
+  validation_error_category: string;
+  field_errors: Array<{ field: string; category: string; message: string }>;
+  dependency_status: string;
+  adapter_resolution_status: string;
+  source_transport_started: boolean;
+  exception_class: string;
+  safe_message: string;
+  retryable: boolean;
+}
+
+export interface AdminSourceToolDiagnostic {
+  tool_name: string;
+  source_host: string;
+  safe_url_path: string;
+  http_method: "GET";
+  http_status: number | null;
+  final_approved_host: string | null;
+  content_type: string | null;
+  artifact_content_type: string | null;
+  response_byte_count: number | null;
+  parser_outcome: string | null;
+  source_artifact_id: string | null;
+  cache_status: "live" | "cached" | "not_available" | null;
+  exception_class: string | null;
+  source_error_category: string;
+  retryable: boolean;
+  attempt_number: number;
+  request_duration_ms: number;
+  developer_message: string | null;
 }
 
 export interface ExplanationCapabilityStatus {
@@ -130,6 +276,7 @@ export interface EndpointSummary {
   input_type: string;
   frozen: boolean;
   explanation: ExplanationCapabilityStatus;
+  validation_status: Record<string, string>;
 }
 
 export interface LimitationsBlock {
@@ -188,6 +335,11 @@ export interface EndpointDetail {
   source_refs: string[];
   explanation: ExplanationCapabilityStatus;
   variants: ContextVariant[];
+  validation_status: Record<string, string>;
+  applicability: Record<string, string>;
+  training_dataset_summary: Record<string, number | string>;
+  model_metrics_summary: Record<string, number | string>;
+  registry_limitations: string[];
 }
 
 export interface PredictionResult {

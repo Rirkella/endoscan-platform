@@ -28,14 +28,21 @@
 .admin-danger-outline { background: #fff; border: 1px solid #c96d63; color: #8b2e22; }
 .admin-link-button { background: transparent; color: #176e52; padding-inline: 2px; text-decoration: underline; text-underline-offset: 3px; }
 .admin-primary:hover, .admin-actions button:hover, .admin-approval-actions button:hover { filter: brightness(.95); }
-.admin-primary:focus-visible, .admin-actions button:focus-visible, .admin-approval-actions button:focus-visible, .admin-secondary:focus-visible, .admin-danger:focus-visible, .admin-danger-outline:focus-visible, .admin-link-button:focus-visible, .admin-filter-tabs button:focus-visible, .admin-tabs button:focus-visible, .admin-back:focus-visible, .admin-candidate-choice:focus-within, .admin-page input:focus-visible, .admin-page textarea:focus-visible, .admin-modal input:focus-visible, .admin-modal textarea:focus-visible {
+.admin-primary:focus-visible, .admin-actions button:focus-visible, .admin-approval-actions button:focus-visible, .admin-secondary:focus-visible, .admin-danger:focus-visible, .admin-danger-outline:focus-visible, .admin-link-button:focus-visible, .admin-copy-button:focus-visible, .admin-filter-tabs button:focus-visible, .admin-tabs button:focus-visible, .admin-back:focus-visible, .admin-candidate-choice:focus-within, .admin-page input:focus-visible, .admin-page textarea:focus-visible, .admin-modal input:focus-visible, .admin-modal textarea:focus-visible {
   outline: 3px solid #f3b63f;
   outline-offset: 2px;
 }
 button:disabled { opacity: .48; cursor: not-allowed; }
 .admin-icon-button { white-space: nowrap; }
-.admin-mode-row { display: flex; gap: 10px; align-items: baseline; border: 1px solid #b9dacc; background: #f2faf6; color: #315f50; border-radius: 12px; padding: 10px 13px; margin-bottom: 18px; font-size: .82rem; }
+.admin-mode-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border: 1px solid #b9dacc; background: #f2faf6; color: #315f50; border-radius: 12px; padding: 10px 13px; margin-bottom: 10px; font-size: .82rem; }
 .admin-mode-row strong { color: #145d45; white-space: nowrap; }
+.admin-mode-row button { margin-left: auto; }
+.admin-provider-preflight { display: flex; flex-wrap: wrap; gap: 6px 14px; border: 1px solid #cad8d2; background: #f8fbfa; color: #40564d; border-radius: 12px; padding: 10px 13px; margin-bottom: 18px; font-size: .82rem; }
+.admin-provider-preflight strong { color: #173f32; }
+.admin-source-diagnostic { display: grid; gap: 5px; margin: 10px 0 0; font-size: .78rem; }
+.admin-source-diagnostic div { display: grid; grid-template-columns: minmax(88px, .65fr) minmax(0, 1.35fr); gap: 8px; }
+.admin-source-diagnostic dt { color: #64766f; }
+.admin-source-diagnostic dd { margin: 0; overflow-wrap: anywhere; color: #243c33; }
 .admin-mode-badge { display: inline-flex; width: max-content; border: 1px solid #b9dacc; background: #edf8f3; color: #145d45; border-radius: 999px; padding: 5px 9px; font-size: .74rem; font-weight: 750; }
 .admin-error { background: #fff0ee; border: 1px solid #edb8b1; color: #8b2e22; border-radius: 12px; padding: 13px 16px; margin-bottom: 16px; }
 .admin-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
@@ -83,6 +90,9 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .admin-back { display: inline-block; margin-bottom: 12px; color: #176e52; font-weight: 700; text-decoration: none; }
 .admin-detail-heading { margin-bottom: 16px; }
 .admin-title-meta { display: flex; gap: 14px; color: #567168; font: 700 .75rem ui-monospace, SFMono-Regular, Consolas, monospace; }
+.admin-identifier, .admin-run-identifier { display: inline-flex; align-items: center; gap: 6px; }
+.admin-run-identifier { margin-top: 12px; color: #567168; font: 700 .72rem ui-monospace, SFMono-Regular, Consolas, monospace; }
+.admin-copy-button { border: 1px solid #cbd9d3; border-radius: 999px; background: #f7faf8; color: #315f50; padding: 2px 7px; font: 700 .64rem system-ui, sans-serif; cursor: pointer; }
 .admin-build-status-summary { min-width: 240px; display: grid; gap: 5px; justify-items: start; padding-top: 4px; }
 .admin-build-status-summary > strong { font-size: 1.05rem; }
 .admin-build-status-summary > span:not(.admin-status):not(.admin-mode-badge) { color: #718078; font-size: .78rem; }
@@ -152,6 +162,9 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .admin-trace-summary { margin-top: 12px; border-top: 1px solid #e4ebe7; padding-top: 10px; }
 .admin-trace-summary h4 { margin: 0 0 6px; }
 .admin-trace-summary ol { margin: 0; padding-left: 18px; font-size: .74rem; color: #586861; }
+.admin-normalization-list { display: grid; gap: 6px; list-style: none; margin: 9px 0 0; padding: 0; }
+.admin-normalization-list li { display: grid; gap: 2px; border-left: 2px solid #b9dacc; padding-left: 8px; font-size: .7rem; overflow-wrap: anywhere; }
+.admin-normalization-list small { color: #718078; }
 .admin-artifact-list { display: grid; gap: 8px; margin-top: 12px; }
 .admin-artifact-list article { padding: 10px; border-radius: 9px; background: #f6f9f7; overflow-wrap: anywhere; }
 .admin-artifact-list strong { font-size: .77rem; }
@@ -167,6 +180,10 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .admin-activity-list strong { font-size: .76rem; }
 .admin-activity-list p { margin: 2px 0 0; color: #718078; font-size: .68rem; }
 .admin-audit-list { display: grid; gap: 10px; }
+.admin-audit-identifiers { display: grid; gap: 4px; margin: 0 0 12px; padding: 9px; border-radius: 9px; background: #f6f9f7; }
+.admin-audit-identifiers div { display: grid; grid-template-columns: 82px 1fr; gap: 8px; font-size: .66rem; }
+.admin-audit-identifiers dt { color: #718078; }
+.admin-audit-identifiers dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .admin-audit-list > li { border-bottom: 1px solid #e9eeeb; padding-bottom: 10px; overflow-wrap: anywhere; }
 .admin-audit-list > li > div { display: flex; justify-content: space-between; gap: 10px; }
 .admin-audit-list strong { font: 700 .7rem ui-monospace, SFMono-Regular, Consolas, monospace; }

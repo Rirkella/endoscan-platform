@@ -146,7 +146,10 @@ LINCS/transcriptomics ↔ toxicology-label linkage for ER and TR — and is kept
 
 ## Getting started
 
-Requires Python ≥ 3.11 and [`uv`](https://docs.astral.sh/uv/).
+Requires Python 3.12 and [`uv`](https://docs.astral.sh/uv/). The workspace is
+intentionally constrained to `>=3.12,<3.13`: the pinned `openai-agents==0.18.2`
+dependency has an import-time generic-type introspection failure on Python 3.11,
+while the complete workflow suite collects and runs on Python 3.12.
 
 ```bash
 uv sync                 # install workspace + endoscan_core (editable)

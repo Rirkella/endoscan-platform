@@ -79,6 +79,10 @@ export function ModelLibrary() {
                     <dt>Status</dt>
                     <dd>{e.status}</dd>
                   </div>
+                  <div>
+                    <dt>Validation</dt>
+                    <dd>{e.validation_status.scientific ?? "scientific validation pending"}</dd>
+                  </div>
                 </dl>
                 <Link
                   className="button outline"

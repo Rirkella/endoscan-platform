@@ -155,6 +155,7 @@ class EndpointSummary(BaseModel):
     input_type: str
     frozen: bool
     explanation: ExplanationCapabilityStatus
+    validation_status: dict[str, str]
 
 
 class MetricsSummary(BaseModel):
@@ -216,6 +217,11 @@ class EndpointDetail(BaseModel):
     source_refs: list[str]
     explanation: ExplanationCapabilityStatus
     variants: list[ContextVariant]
+    validation_status: dict[str, str]
+    applicability: dict[str, str]
+    training_dataset_summary: dict[str, int | float | str]
+    model_metrics_summary: dict[str, int | float | str]
+    registry_limitations: list[str]
 
 
 class ErrorResponse(BaseModel):

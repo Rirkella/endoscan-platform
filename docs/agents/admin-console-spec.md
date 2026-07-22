@@ -1,5 +1,11 @@
 # Admin console specification
 
+New `training_dataset_discovery` builds use a target-schema-first workspace: target training data,
+component requirements, verified source inventory, capability matrix, arbitrary assembly graphs,
+strategy comparison, gap report, preparation plan, and multi-agent trace. The human action is
+**Approve assembly strategy**, not **Approve dataset**. Legacy builds retain the original candidate
+comparison and `dataset_selection` wording.
+
 The primary interaction is workflow control and scientific review, not chat. All mutations require an authenticated administrator and optimistic-lock version.
 
 ## `/admin/endpoints`
@@ -36,7 +42,7 @@ Rows are candidates; columns include verified accession, title/source/version, l
 
 ### Agent-run trace
 
-Shows a concise reasoning summary, not hidden chain-of-thought: goal, inputs, cited findings, recommendation, uncertainties and escalation. A separate event table shows provider/model/prompt version, turns, tool calls, arguments with secrets redacted, result artifacts, status, latency, usage and cost. Raw external text is visibly untrusted.
+Shows a concise reasoning summary, not hidden chain-of-thought: goal, inputs, cited findings, recommendation, uncertainties and escalation. A separate event table shows provider/model/prompt version, agent-run count, normal model turns, provider retries, tool calls, arguments with secrets redacted, result artifacts, status, latency, cumulative usage and cost. A normal post-tool model turn is not a retry. Live GEO discovery also exposes each typed plan's rendered official query, result count and cache status. Raw external text is visibly untrusted. A no-candidate outcome must not display dataset approval controls.
 
 ### Identity-resolution conflicts
 

@@ -4,14 +4,35 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, Request
 
-from endoscan_workflows.contracts import ApprovalDecision, EndpointBuildCreate, WorkflowState
+from endoscan_workflows.contracts import (
+    ApprovalDecision,
+    ApprovalDecisionValue,
+    EndpointBuildCreate,
+    WorkflowState,
+)
+from endoscan_workflows.offline_demo import build_offline_assembly_input
 
 from .auth import (
     require_development_admin,
     require_mutation_budget,
     validate_resource_id,
 )
-from .schemas import ApprovalDecisionBody, CreateBuildBody, WorkflowCommandBody
+from .schemas import (
+    ApprovalDecisionBody,
+    AssemblyRunBody,
+    CreateBuildBody,
+    DatasetReviewBody,
+    DatasetRevisionBody,
+    DatasetSpecificationRetryBody,
+    DiscoveryRevisionBody,
+    GeoValidationProbeBody,
+    ModelReviewBody,
+    ModelSelectionBody,
+    SourceDiscoveryAuthorizationBody,
+    StrategyApprovalBody,
+    StrategySetRejectionBody,
+    WorkflowCommandBody,
+)
 
 router = APIRouter(
     prefix="/admin",
@@ -31,6 +52,32 @@ def _key(idempotency_key: str = Header(alias="Idempotency-Key", min_length=8)) -
 @router.get("/capabilities")
 def capabilities(request: Request) -> dict:
     return request.app.state.agent_capabilities
+
+
+@router.post("/agent-provider/preflight", dependencies=[Depends(require_mutation_budget)])
+def provider_preflight(request: Request):
+    return request.app.state.provider_preflight.check()
+
+
+@router.post("/agent-provider/boundary-probe", dependencies=[Depends(require_mutation_budget)])
+def adapter_boundary_probe(request: Request):
+    return request.app.state.adapter_boundary_probe.check()
+
+
+@router.post(
+    "/agent-provider/specialized-boundary-probes",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def specialized_adapter_boundary_probes(request: Request):
+    return {
+        "network_requests": 0,
+        "results": request.app.state.adapter_boundary_probe.check_specialized_agents(),
+    }
+
+
+@router.post("/source-tools/geo-validation-probe", dependencies=[Depends(require_mutation_budget)])
+def geo_validation_probe(body: GeoValidationProbeBody, request: Request):
+    return request.app.state.geo_validation_probe.run(body.accessions)
 
 
 @router.post("/endpoint-builds", dependencies=[Depends(require_mutation_budget)])
@@ -54,6 +101,13 @@ def get_build(build_id: str, request: Request):
     return _service(request).get_build(validate_resource_id(build_id, "Endpoint build"))
 
 
+@router.get("/endpoint-builds/{build_id}/training-dataset-workflow")
+def training_dataset_workflow(build_id: str, request: Request):
+    return _service(request).training_dataset_workflow(
+        validate_resource_id(build_id, "Endpoint build")
+    )
+
+
 def _command(action: str, build_id: str, body: WorkflowCommandBody, request: Request, key: str):
     service = _service(request)
     build_id = validate_resource_id(build_id, "Endpoint build")
@@ -68,6 +122,295 @@ def _command(action: str, build_id: str, body: WorkflowCommandBody, request: Req
 @router.post("/endpoint-builds/{build_id}/start", dependencies=[Depends(require_mutation_budget)])
 def start(build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)):
     return _command("start_build", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/continue-training-dataset",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def continue_training_dataset(
+    build_id: str,
+    body: WorkflowCommandBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _command("continue_training_dataset_workflow", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/authorize-source-discovery",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def authorize_source_discovery(
+    build_id: str,
+    body: SourceDiscoveryAuthorizationBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    service = _service(request)
+    return service.authorize_source_discovery(
+        validate_resource_id(build_id, "Endpoint build"),
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+        confirmed=body.confirmation == "authorize_reviewed_source_discovery",
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/request-discovery-revision",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def request_discovery_revision(
+    build_id: str,
+    body: DiscoveryRevisionBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).request_semantics_v2_discovery_revision(
+        validate_resource_id(build_id, "Endpoint build"),
+        reason=body.reason,
+        provider_policy_revision=body.provider_policy_revision,
+        modality_policy_revision=body.modality_policy_revision,
+        context_constraint_revision=body.context_constraint_revision,
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/calculate-combination-coverage",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def calculate_combination_coverage(
+    build_id: str,
+    body: WorkflowCommandBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _command("calculate_semantics_v2_coverage", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/generate-assembly-strategies",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def generate_assembly_strategies(
+    build_id: str,
+    body: WorkflowCommandBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _command("generate_semantics_v2_strategies", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/approve-assembly-strategy",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def approve_assembly_strategy(
+    build_id: str,
+    body: StrategyApprovalBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).approve_semantics_v2_strategy(
+        validate_resource_id(build_id, "Endpoint build"),
+        strategy_proposal_id=body.strategy_proposal_id,
+        approved_modality_aggregation=body.approved_modality_aggregation,
+        approved_context_filters=body.approved_context_filters,
+        approved_dose_time_rules=body.approved_dose_time_rules,
+        approved_label_policy=body.approved_label_policy,
+        exclusion_rules=body.exclusion_rules,
+        required_extraction_fields=body.required_extraction_fields,
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/reject-assembly-strategies",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def reject_assembly_strategies(
+    build_id: str,
+    body: StrategySetRejectionBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).reject_semantics_v2_strategy_set(
+        validate_resource_id(build_id, "Endpoint build"),
+        reason=body.reason,
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/run-approved-assembly",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def run_approved_assembly(
+    build_id: str,
+    body: AssemblyRunBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).run_approved_dataset_assembly(
+        validate_resource_id(build_id, "Endpoint build"),
+        offline_input=build_offline_assembly_input(body.offline_fixture_id),
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/approve-dataset",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def approve_dataset(
+    build_id: str,
+    body: DatasetReviewBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).approve_dataset_for_benchmarking(
+        validate_resource_id(build_id, "Endpoint build"),
+        rationale=body.rationale,
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/review-dataset-revision",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def review_dataset_revision(
+    build_id: str,
+    body: DatasetRevisionBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).request_dataset_assembly_revision(
+        validate_resource_id(build_id, "Endpoint build"),
+        decision=body.decision,
+        rationale=body.rationale,
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/run-benchmark",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def run_benchmark(
+    build_id: str,
+    body: WorkflowCommandBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _command("run_endpoint_benchmark", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/select-and-validate-model",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def select_and_validate_model(
+    build_id: str,
+    body: ModelSelectionBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).select_and_validate_endpoint_model(
+        validate_resource_id(build_id, "Endpoint build"),
+        candidate_id=body.candidate_id,
+        decision_threshold=body.decision_threshold,
+        rationale=body.rationale,
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/review-models",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def review_models(
+    build_id: str,
+    body: ModelReviewBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).request_new_model_benchmark(
+        validate_resource_id(build_id, "Endpoint build"),
+        decision=body.decision,
+        rationale=body.rationale,
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/publish-endpoint",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def publish_endpoint(
+    build_id: str,
+    body: WorkflowCommandBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _command("publish_validated_endpoint", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/retry-dataset-specification",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def retry_dataset_specification(
+    build_id: str,
+    body: DatasetSpecificationRetryBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    return _service(request).retry_training_dataset_specification(
+        validate_resource_id(build_id, "Endpoint build"),
+        expected_version=body.expected_version,
+        actor=body.actor,
+        idempotency_key=key,
+        endpoint_discovery_scope=body.endpoint_discovery_scope,
+    )
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/run-dataset-specification-review",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def run_dataset_specification_review(
+    build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)
+):
+    return _command("run_optional_dataset_specification_review", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/revise-endpoint-request",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def revise_endpoint_request(
+    build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)
+):
+    return _command("revise_training_dataset_request", build_id, body, request, key)
 
 
 @router.post("/endpoint-builds/{build_id}/pause", dependencies=[Depends(require_mutation_budget)])
@@ -88,6 +431,54 @@ def cancel(build_id: str, body: WorkflowCommandBody, request: Request, key: str 
 @router.post("/endpoint-builds/{build_id}/retry", dependencies=[Depends(require_mutation_budget)])
 def retry(build_id: str, body: WorkflowCommandBody, request: Request, key: str = Depends(_key)):
     return _command("retry_failed", build_id, body, request, key)
+
+
+@router.post(
+    "/endpoint-builds/{build_id}/refresh-source-metadata",
+    dependencies=[Depends(require_mutation_budget)],
+)
+def refresh_source_metadata(
+    build_id: str,
+    body: WorkflowCommandBody,
+    request: Request,
+    key: str = Depends(_key),
+):
+    service = _service(request)
+    build_id = validate_resource_id(build_id, "Endpoint build")
+    build = service.get_build(build_id)
+    if build.current_stage not in {
+        WorkflowState.AWAITING_DATASET_APPROVAL,
+        WorkflowState.AWAITING_SEARCH_REVIEW,
+    }:
+        return service.run_discovery(
+            build_id,
+            expected_version=body.expected_version,
+            actor=body.actor,
+            idempotency_key=f"{key}:refresh",
+            refresh_source_metadata=True,
+        )
+    pending = service.list_approvals(build_id, pending_only=True)
+    if not pending:
+        return build
+    request_payload = pending[-1]["request"]
+    revised = service.decide_approval(
+        pending[-1]["id"],
+        ApprovalDecision(
+            decision=ApprovalDecisionValue.REQUEST_REVISION,
+            reviewer_id=body.actor,
+            reviewer_comment="Administrator requested an explicit scientific source refresh.",
+            expected_version=body.expected_version,
+            idempotency_key=f"{key}:revision",
+            artifact_hashes=request_payload["artifact_hashes"],
+        ),
+    )
+    return service.run_discovery(
+        build_id,
+        expected_version=revised.version,
+        actor=body.actor,
+        idempotency_key=f"{key}:refresh",
+        refresh_source_metadata=True,
+    )
 
 
 @router.post(

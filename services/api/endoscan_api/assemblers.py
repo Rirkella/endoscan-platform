@@ -19,6 +19,7 @@ from .schemas import (
     ContextBlock,
     ContextVariant,
     EndpointDetail,
+    ExplanationCapabilityStatus,
     MetricsSummary,
 )
 
@@ -66,13 +67,20 @@ def build_endpoint_detail(
         version=entry.version,
         status=status,
         frozen=entry.frozen,
+        validation_status=entry.validation_status.model_dump(mode="json"),
+        applicability=entry.applicability,
+        training_dataset_summary=entry.training_dataset_summary,
+        model_metrics_summary=entry.model_metrics_summary,
+        registry_limitations=entry.limitations,
         source_refs=list(entry.source_refs),
-        explanation=explanation
-        or {
-            "declared_method": entry.explanation.method if entry.explanation else None,
-            "available": False,
-            "missing_dependencies": [],
-            "reason": "Runtime capability was not evaluated.",
-        },
+        explanation=ExplanationCapabilityStatus.model_validate(
+            explanation
+            or {
+                "declared_method": entry.explanation.method if entry.explanation else None,
+                "available": False,
+                "missing_dependencies": [],
+                "reason": "Runtime capability was not evaluated.",
+            }
+        ),
         variants=[variant],  # LIST — additive when contexts multiply
     )

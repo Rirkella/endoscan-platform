@@ -1,0 +1,106 @@
+{
+  "toxcast": {
+    "release": [{"record_kind":"release","release_id":"fixture-toxcast-v1","version":"invitrodb fixture v1","checksum":"fixture-sha","provenance":["offline fixture"]}],
+    "compounds": [
+      {"record_kind":"compound","source_identifier":"DTXSID001","compound_identifier":"DTXSID001","cid":"101","inchikey":"AAAAAAAAAAAAAA-BBBBBBBBBB-C","canonical_name":"Compound Alpha","mapping_status":"exact","provenance":["toxcast chemical catalogue"]},
+      {"record_kind":"compound","source_identifier":"DTXSID002","compound_identifier":"DTXSID002","cid":"102","inchikey":"CCCCCCCCCCCCCC-DDDDDDDDDD-E","canonical_name":"Compound Beta salt","mapping_status":"salt_or_parent","parent_identifier":"DTXSID020","provenance":["toxcast chemical catalogue"]},
+      {"record_kind":"compound","source_identifier":"DTXSID003","compound_identifier":"DTXSID003","cid":"103","canonical_name":"Compound Gamma mixture","mapping_status":"mixture","provenance":["toxcast chemical catalogue"]}
+    ],
+    "assays": [
+      {"record_kind":"assay","source_identifier":"TOX-BIND-1","assay_identifier":"TOX-BIND-1","target":"example receptor","modality":"binding","assay_component":"binding component","compound_identifier_field":"DTXSID","activity_field":"hitc","completeness_status":"complete","provenance":["invitroDB assay catalogue"]},
+      {"record_kind":"assay","source_identifier":"TOX-AGO-1","assay_identifier":"TOX-AGO-1","target":"example receptor","modality":"agonism","assay_component":"reporter component","compound_identifier_field":"DTXSID","activity_field":"hitc","completeness_status":"complete","provenance":["invitroDB assay catalogue"]}
+    ],
+    "activity": [
+      {"record_kind":"activity","source_identifier":"TOX-BIND-1:DTXSID001","assay_identifier":"TOX-BIND-1","compound_identifier":"DTXSID001","cid":"101","target":"example receptor","modality":"binding","activity_call":"active","activity_value":"0.8","activity_unit":"hitc","caution_fields":{},"provenance":["invitroDB activity table"]},
+      {"record_kind":"activity","source_identifier":"TOX-BIND-1:DTXSID002","assay_identifier":"TOX-BIND-1","compound_identifier":"DTXSID002","cid":"102","target":"example receptor","modality":"binding","activity_call":"inactive","activity_value":"0","activity_unit":"hitc","caution_fields":{"flag":"low efficacy"},"provenance":["invitroDB activity table"]},
+      {"record_kind":"activity","source_identifier":"TOX-AGO-1:DTXSID003","assay_identifier":"TOX-AGO-1","compound_identifier":"DTXSID003","cid":"103","target":"example receptor","modality":"agonism","activity_call":null,"activity_value":"1.73","activity_unit":"logAC50","caution_fields":{},"provenance":["continuous source value; no approved threshold"]},
+      {"record_kind":"relationship","source_identifier":"TOX-REL-1","parent_assay_identifier":"TOX-AGO-1","child_assay_identifier":"TOX-VIABILITY-1","relationship_type":"counterscreen","relationship_provenance":["invitroDB assay relationship"]}
+    ]
+  },
+  "tox21_pages": [
+    {
+      "records": [
+        {"record_kind":"assay","source_identifier":"T21-SUMMARY-1","assay_identifier":"T21-SUMMARY-1","target":"example receptor","modality":"antagonism","assay_role":"summary","compound_identifier_field":"PubChem CID","activity_field":"activity_outcome","provenance":["Tox21 via PubChem"]},
+        {"record_kind":"assay","source_identifier":"T21-COMPONENT-1","assay_identifier":"T21-COMPONENT-1","target":"example receptor","modality":"antagonism","assay_role":"component","compound_identifier_field":"PubChem CID","activity_field":"activity_outcome","provenance":["Tox21 via PubChem"]},
+        {"record_kind":"relationship","source_identifier":"T21-REL-1","parent_assay_identifier":"T21-SUMMARY-1","child_assay_identifier":"T21-COMPONENT-1","relationship_type":"summary_component","relationship_provenance":["Tox21 assay relation"]}
+      ],
+      "next_cursor": "tox21-page-2",
+      "terminal": false,
+      "total_count": 6
+    },
+    {
+      "records": [
+        {"record_kind":"relationship","source_identifier":"T21-REL-2","parent_assay_identifier":"T21-COMPONENT-1","child_assay_identifier":"T21-VIABILITY-1","relationship_type":"viability_counterscreen","relationship_provenance":["Tox21 assay relation"]},
+        {"record_kind":"activity","source_identifier":"T21-COMPONENT-1:101","assay_identifier":"T21-COMPONENT-1","compound_identifier":"CID:101","cid":"101","target":"example receptor","modality":"antagonism","activity_call":"active","activity_value":"1","activity_unit":"PubChem activity outcome","provenance":["Tox21 activity record transported by PubChem"]},
+        {"record_kind":"activity","source_identifier":"T21-COMPONENT-1:104","assay_identifier":"T21-COMPONENT-1","compound_identifier":"CID:104","cid":"104","target":"example receptor","modality":"antagonism","activity_call":"inactive","activity_value":"0","activity_unit":"PubChem activity outcome","provenance":["Tox21 activity record transported by PubChem"]}
+      ],
+      "next_cursor": null,
+      "terminal": true,
+      "total_count": 6
+    }
+  ],
+  "pubchem_bioassay_pages": [
+    {
+      "records": [
+        {"record_kind":"assay","source_identifier":"AID:9001","assay_identifier":"9001","target":"example receptor","modality":"binding","compound_identifier_field":"PubChem CID","activity_field":"PUBCHEM_ACTIVITY_OUTCOME","provenance":["PubChem BioAssay"]},
+        {"record_kind":"activity","source_identifier":"AID:9001:CID:101","assay_identifier":"9001","compound_identifier":"CID:101","cid":"101","target":"example receptor","modality":"binding","activity_call":"active","provenance":["PubChem BioAssay result"]},
+        {"record_kind":"relationship","source_identifier":"AID:9001:related:9002","parent_assay_identifier":"9001","child_assay_identifier":"9002","relationship_type":"same_project","relationship_provenance":["PubChem linked assay"]}
+      ],
+      "next_cursor": "3",
+      "terminal": false,
+      "total_count": 5
+    },
+    {
+      "records": [
+        {"record_kind":"assay","source_identifier":"AID:9002","assay_identifier":"9002","target":"example receptor","modality":"antagonism","compound_identifier_field":"PubChem CID","activity_field":"PUBCHEM_ACTIVITY_OUTCOME","provenance":["PubChem BioAssay"]},
+        {"record_kind":"activity","source_identifier":"AID:9002:CID:105","assay_identifier":"9002","compound_identifier":"CID:105","cid":"105","target":"example receptor","modality":"antagonism","activity_call":"inactive","provenance":["PubChem BioAssay result"]}
+      ],
+      "next_cursor": null,
+      "terminal": true,
+      "total_count": 5
+    }
+  ],
+  "pubchem_compounds": [
+    {"record_kind":"compound","source_identifier":"CID:101","compound_identifier":"CID:101","cid":"101","inchikey":"AAAAAAAAAAAAAA-BBBBBBBBBB-C","canonical_name":"Compound Alpha","exact_synonyms":["Alpha"],"mapping_status":"exact","structure_status":"single_structure","provenance":["PubChem Compound"]},
+    {"record_kind":"compound","source_identifier":"CID:102","compound_identifier":"CID:102","cid":"102","canonical_name":"Compound Beta","mapping_status":"multiple_structures","structure_status":"multiple_structures","provenance":["PubChem Compound"]},
+    {"record_kind":"compound","source_identifier":"CID:103","compound_identifier":"CID:103","cid":"103","canonical_name":"Compound Gamma","mapping_status":"ambiguous","structure_status":"stereochemical_difference","provenance":["PubChem Compound"]},
+    {"record_kind":"compound","source_identifier":"CID:104","compound_identifier":"CID:104","cid":"104","mapping_status":"missing","structure_status":"unavailable_record","provenance":["PubChem Compound"]},
+    {"record_kind":"compound","source_identifier":"CID:105","compound_identifier":"CID:105","cid":"105","inchikey":"EEEEEEEEEEEEEE-FFFFFFFFFF-G","canonical_name":"Compound Epsilon","mapping_status":"exact","structure_status":"single_structure","provenance":["PubChem Compound"]}
+  ],
+  "geo_pages": [
+    {
+      "records": [
+        {"record_kind":"transcriptomic","source_identifier":"GSE100001","accession":"GSE100001","compound_identifier":"CID:101","profile_identifier":"GSM-A1","organism":"Homo sapiens","biological_model":"A549","dose":"10 uM","exposure_time":"24 h","processing_level":"processed normalized matrix","matrix_locator":"https://ftp.ncbi.nlm.nih.gov/geo/series/GSE100nnn/GSE100001/suppl/matrix.tsv.gz","perturbation_verified":true,"outcome":"verified_compound_perturbation","provenance":["GEO Series/Sample metadata"]},
+        {"record_kind":"transcriptomic","source_identifier":"GSE100002","accession":"GSE100002","organism":"Homo sapiens","biological_model":"tissue cohort","perturbation_verified":false,"outcome":"unrelated_name_match","provenance":["GEO name-only match"]},
+        {"record_kind":"transcriptomic","source_identifier":"GSE100003","accession":"GSE100003","compound_identifier":"CID:105","organism":"Mus musculus","perturbation_verified":true,"outcome":"biological_context_incomplete","missing_fields":["dose","exposure_time","biological_model"],"provenance":["GEO incomplete design metadata"]}
+      ],
+      "next_cursor": "3",
+      "terminal": false,
+      "total_count": 4
+    },
+    {
+      "records": [
+        {"record_kind":"transcriptomic","source_identifier":"GSE100004","accession":"GSE100004","compound_identifier":"CID:102","organism":"Homo sapiens","biological_model":"HepG2","dose":"1 uM","exposure_time":"6 h","perturbation_verified":true,"outcome":"processed_matrix_missing","missing_fields":["matrix_locator","processing_level"],"provenance":["GEO Series/Sample metadata"]}
+      ],
+      "next_cursor": null,
+      "terminal": true,
+      "total_count": 4
+    }
+  ],
+  "supporting_pages": [
+    {
+      "records": [
+        {"record_kind":"dataset_link","source_identifier":"PMID:12345:GSE100001","publication_identifier":"PMID:12345","metadata_field_or_relation":"ArticleIdList/AccessionNumber","dataset_identifier":"GSE100001","target_provider":"ncbi-geo","verification_status":"verified","provenance":["NCBI PubMed linked dataset metadata"]},
+        {"record_kind":"dataset_link","source_identifier":"DOI:10.1000/example:AID9001","publication_identifier":"DOI:10.1000/example","metadata_field_or_relation":"supplementary dataset relation","dataset_identifier":"AID:9001","target_provider":"pubchem-bioassay","verification_status":"candidate_requires_verification","provenance":["reviewed publication metadata service"]}
+      ],
+      "next_cursor": null,
+      "terminal": true,
+      "total_count": 2
+    }
+  ],
+  "non_receptor_endpoint": {
+    "endpoint":"oxidative stress response",
+    "modalities":["activation"],
+    "providers":["toxcast","ncbi-geo","pubchem-compound"]
+  }
+}

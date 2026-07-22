@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0.0",
+  "artifact_contract_version": "2.0.0",
+  "registry_version": "1.2.0",
+  "providers": [
+    {
+      "provider": "pubchem-bioassay",
+      "display_name": "PubChem BioAssay",
+      "registered_source_id": "pubchem",
+      "evidence_roles": ["activity"],
+      "supported_modalities": ["binding", "agonism", "antagonism", "activation", "inhibition", "cytotoxicity", "*"],
+      "generic_fallback_prohibited": true,
+      "capabilities": [
+        {"capability":"candidate_search","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Reviewed deterministic query tasks retain every discovered assay candidate."},
+        {"capability":"pagination","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Cursor/page execution continues to exhaustion and records explicit safety truncation as incomplete."},
+        {"capability":"lightweight_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Bounded live validation hydrated an exact reviewed AID through ESummary, concise activity and assay-description resources; arbitrary queries retain every search candidate and report safety truncation explicitly."},
+        {"capability":"activity_assay_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Assay summaries, descriptions, target fields, activity availability and source provenance are normalized into disk-backed records."},
+        {"capability":"compound_identifier_index","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The concise result-table path extracts source-backed CID/SID values for hydrated assays; PubChem AID remains an assay identifier and is never promoted to compound identity."},
+        {"capability":"activity_call_retrieval","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The official concise CSV operation preserves compound-level source outcomes and supplied activity fields without inventing thresholds or labels."},
+        {"capability":"related_assay_relationships","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Reviewed assay-description JSON preserves source-declared linked AIDs and comments; unavailable role semantics remain explicit and are never inferred."},
+        {"capability":"cache_replay","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Raw response cache replay performs zero transport requests and preserves fingerprints."},
+        {"capability":"version_checksum_provenance","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_pubchem_bioassay_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Versioned manifest, response hashes, raw artifacts, and completion proofs are persisted."}
+      ]
+    },
+    {
+      "provider": "toxcast",
+      "display_name": "EPA ToxCast / invitroDB",
+      "registered_source_id": "toxcast",
+      "evidence_roles": ["activity"],
+      "supported_modalities": ["binding", "agonism", "antagonism", "activation", "inhibition", "cytotoxicity", "*"],
+      "generic_fallback_prohibited": true,
+      "capabilities": [
+        {"capability":"candidate_search","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The mandatory unauthenticated public_release mode indexes the complete public assay workbook before deterministic local target/modality matching; Clowder release lists are never candidates."},
+        {"capability":"pagination","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The public release hierarchy, file manifests and complete workbook rows are reconciled without top-N truncation; optional authenticated expansion is not required for workflow progress."},
+        {"capability":"lightweight_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Public assay, target, process, context, quality and chemical-reference metadata are disk-backed and indexed without authentication."},
+        {"capability":"activity_assay_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The public invitroDB v4.3 assay_annotations and assay_target_mappings workbooks provide the complete versioned assay/endpoint catalogue."},
+        {"capability":"compound_identifier_index","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The verified invitroDB v4.3 summary archive supplies the complete tested-chemical reference across normalized activity rows, retaining DTXSID, source chemical ID, available CID/InChIKey and original QC fields. AEID/AID are never compound identities."},
+        {"capability":"activity_call_retrieval","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Verified mc4, mc5-6 and sc1/sc2 members are normalized separately into an immutable disk-backed activity cache with source hit calls, values, flags and original fields; no API key or substitute source is required."},
+        {"capability":"related_assay_relationships","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Source-backed ASID/ACID/AEID/AID, target and viability relationships are preserved. A counterscreen role absent from public source fields is reported as unavailable and is never inferred."},
+        {"capability":"cache_replay","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Immutable raw response replay performs zero transport requests."},
+        {"capability":"version_checksum_provenance","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_toxcast_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"invitroDB v4.3 citation, manifest fingerprint, source hashes, and provenance are retained."}
+      ]
+    },
+    {
+      "provider": "tox21",
+      "display_name": "Tox21 qHTS",
+      "registered_source_id": "tox21",
+      "evidence_roles": ["activity"],
+      "supported_modalities": ["binding", "agonism", "antagonism", "activation", "inhibition", "cytotoxicity", "*"],
+      "generic_fallback_prohibited": true,
+      "capabilities": [
+        {"capability":"candidate_search","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Dedicated Tox21 query plans enumerate Tox21-labelled assays through a reviewed transport surface."},
+        {"capability":"pagination","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Tox21 cursor traversal requires explicit exhaustion or remains incomplete."},
+        {"capability":"lightweight_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The source-constrained cursor path now hydrates bounded Tox21 candidates through official assay summary, description and result-table resources with disk-backed provenance."},
+        {"capability":"activity_assay_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Hydrated Tox21 assay title, target/mechanism, source, modality evidence and result-table availability are preserved without selecting one assay per modality."},
+        {"capability":"compound_identifier_index","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Official concise result rows supply source-backed CID/SID mappings for hydrated Tox21 assays; AID remains an assay identifier only."},
+        {"capability":"activity_call_retrieval","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The bounded live hydration path retained 10,486 official compound-level outcome rows and their supplied activity fields without creating new labels."},
+        {"capability":"related_assay_relationships","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Official assay descriptions preserve linked summary/component, counterscreen and viability annotations when exposed; absent roles remain explicit."},
+        {"capability":"cache_replay","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Dedicated Tox21 fingerprints replay from immutable cache without transport."},
+        {"capability":"version_checksum_provenance","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_tox21_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Tox21 provider identity, transport surface, source version, and response hashes are retained."}
+      ]
+    },
+    {
+      "provider": "ncbi-geo",
+      "display_name": "NCBI GEO perturbational studies",
+      "registered_source_id": "lincs",
+      "evidence_roles": ["transcriptomic"],
+      "supported_modalities": ["*"],
+      "generic_fallback_prohibited": true,
+      "capabilities": [
+        {"capability":"candidate_search","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_geo_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Independent GEO query plans retain all candidate Series records."},
+        {"capability":"pagination","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_geo_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"GEO result pages are traversed to cursor exhaustion; safety truncation is not completion."},
+        {"capability":"lightweight_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_geo_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"GDS UIDs are deterministically resolved and hydrated through official ESummary and endpoint-scoped GEO Series SOFT resources; search hits remain separate from hydrated records."},
+        {"capability":"context_metadata","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_geo_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The hydrated record contract preserves accession/title, organism, model, perturbation evidence, dose/time, sample design, processing level and bounded supplementary locators when the source exposes them, with explicit missing-field classifications otherwise."},
+        {"capability":"compound_signature_overlap","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_geo_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Hydrated records expose source-backed compound/profile identifiers for deterministic downstream overlap; unavailable identifiers produce explicit non-joinable outcomes rather than inferred mappings."},
+        {"capability":"cache_replay","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_geo_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"GEO raw response replay makes zero transport requests."},
+        {"capability":"version_checksum_provenance","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_geo_preapproval_metadata","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Accessions, locators, source versions, immutable hashes, and completion proofs are retained."}
+      ]
+    },
+    {
+      "provider": "lincs-l1000",
+      "display_name": "LINCS L1000",
+      "registered_source_id": "lincs",
+      "evidence_roles": ["transcriptomic"],
+      "supported_modalities": ["*"],
+      "generic_fallback_prohibited": true,
+      "capabilities": [
+        {"capability":"candidate_search","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"lincs-l1000.search_lincs_resources","input_contract":"ReviewedSourceOperationInput","output_contract":"VerifiedSourceObservationBatch","evidence":"Reviewed official LINCS release discovery is implemented."},
+        {"capability":"pagination","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"lincs-l1000.retrieve_lincs_metadata_release","input_contract":"LincsMetadataRetrievalInput","output_contract":"LincsMetadataRetrievalOutput","evidence":"Reviewed multi-file manifest execution reconciles all mandatory metadata files and records an explicit completion proof."},
+        {"capability":"lightweight_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"lincs-l1000.retrieve_lincs_metadata_release","input_contract":"LincsMetadataRetrievalInput","output_contract":"LincsMetadataRetrievalOutput","evidence":"Reviewed GSE92742 perturbagen, signature, cell, and gene metadata resources are retrieved and normalized without expression values."},
+        {"capability":"perturbagen_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"lincs-l1000.retrieve_lincs_metadata_release","input_contract":"LincsMetadataRetrievalInput","output_contract":"LincsMetadataRetrievalOutput","evidence":"Complete reviewed pert_info rows are retained, including invalid and excluded source rows."},
+        {"capability":"signature_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"lincs-l1000.retrieve_lincs_metadata_release","input_contract":"LincsMetadataRetrievalInput","output_contract":"LincsMetadataRetrievalOutput","evidence":"Complete reviewed sig_info rows are retained and chemical perturbation signatures are distinguished from controls."},
+        {"capability":"cell_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"lincs-l1000.retrieve_lincs_metadata_release","input_contract":"LincsMetadataRetrievalInput","output_contract":"LincsMetadataRetrievalOutput","evidence":"Reviewed cell_info metadata is normalized with original source fields and release provenance."},
+        {"capability":"gene_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"lincs-l1000.retrieve_lincs_metadata_release","input_contract":"LincsMetadataRetrievalInput","output_contract":"LincsMetadataRetrievalOutput","evidence":"Reviewed gene_info metadata and landmark-gene status are normalized without reading expression values."},
+        {"capability":"deterministic_compound_index","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"build_lincs_metadata_indexes","input_contract":"LincsIndexInput","output_contract":"LincsIndexOutput","evidence":"All supplied perturbagens are indexed by full InChIKey, PubChem CID, reviewed provider ID, and exact name/synonym without fuzzy matching."},
+        {"capability":"deterministic_signature_index","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"build_lincs_metadata_indexes","input_contract":"LincsIndexInput","output_contract":"LincsIndexOutput","evidence":"All supplied signature, cell, gene, and landmark identifiers are indexed deterministically."},
+        {"capability":"context_metadata","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"compute_lincs_metadata_coverage","input_contract":"LincsCoverageInput","output_contract":"LincsCoverageOutput","evidence":"Cell, organism, dose, time, and quality coverage are computed from normalized metadata."},
+        {"capability":"context_coverage","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"compute_lincs_metadata_coverage","input_contract":"LincsCoverageInput","output_contract":"LincsCoverageOutput","evidence":"Individual, union, intersection, at-least-one, and every-context compound coverage is available with exact signature identifiers."},
+        {"capability":"compound_signature_overlap","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"compute_lincs_metadata_coverage","input_contract":"LincsCoverageInput","output_contract":"LincsCoverageOutput","evidence":"Exact compound/signature overlap is computed from full metadata indexes without expression retrieval."},
+        {"capability":"heavy_expression_extraction","availability":"post_approval_only","phase":"post_approval","typed_tool_or_adapter_method":"lincs-l1000.slice_approved_gctx","input_contract":"ApprovedLincsSliceInput","output_contract":"ApprovedLincsSliceArtifact","evidence":"Required Phase-2 capability: batched partial GCTX reads only after recipe approval."},
+        {"capability":"cache_replay","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"ReviewedSourceAdapter.execute","input_contract":"ReviewedSourceOperationInput","output_contract":"VerifiedSourceObservationBatch","evidence":"Reviewed LINCS metadata responses use the immutable source cache."},
+        {"capability":"version_checksum_provenance","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"lincs-l1000.inspect_lincs_release_manifest","input_contract":"ReviewedSourceOperationInput","output_contract":"VerifiedSourceObservationBatch","evidence":"Official release metadata and response hashes are persisted."}
+      ]
+    },
+    {
+      "provider": "pubchem-compound",
+      "display_name": "PubChem Compound",
+      "registered_source_id": "pubchem",
+      "evidence_roles": ["identity"],
+      "supported_modalities": ["*"],
+      "generic_fallback_prohibited": true,
+      "capabilities": [
+        {"capability":"compound_identifier_index","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"resolve_pubchem_compound_full_set","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Every identifier from an immutable upstream index is deterministically batched and processed without sampling."},
+        {"capability":"lightweight_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"resolve_pubchem_compound_full_set","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"The validated PUG REST path preserves canonical CID, full InChIKey, PubChem title and connectivity SMILES with exact mapping status; fields not returned by the reviewed property operation are not claimed."},
+        {"capability":"cache_replay","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"resolve_pubchem_compound_full_set","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Every identifier batch replays from immutable response cache."},
+        {"capability":"version_checksum_provenance","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"resolve_pubchem_compound_full_set","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Source identifiers, batch fingerprints, versions, response hashes, and mapping provenance are persisted."}
+      ]
+    },
+    {
+      "provider": "ncbi-supporting-metadata",
+      "display_name": "NCBI supporting metadata",
+      "registered_source_id": "lincs",
+      "evidence_roles": ["supporting_metadata"],
+      "supported_modalities": ["*"],
+      "generic_fallback_prohibited": true,
+      "capabilities": [
+        {"capability":"lightweight_metadata_catalogue","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_supporting_metadata_catalogue","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Reviewed DOI/publication metadata, linked dataset accessions, exact source relations, and supplementary manifests are retained."},
+        {"capability":"cache_replay","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_supporting_metadata_catalogue","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Supporting metadata pages replay from immutable cache without transport."},
+        {"capability":"version_checksum_provenance","availability":"operational","phase":"pre_approval","typed_tool_or_adapter_method":"retrieve_supporting_metadata_catalogue","input_contract":"ProviderMetadataExecutionInput","output_contract":"ProviderMetadataExecutionOutput","evidence":"Publication identifiers, exact metadata fields/relations, target providers, verification status, and content hashes are persisted."}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "fixture_version": "1.0.0",
+  "endpoint": "Mitochondrial membrane depolarization",
+  "target": "Mitochondrial membrane potential loss",
+  "modalities": ["depolarization"],
+  "modality_union_allowed": false,
+  "activity_sources": [
+    {"provider":"phenotype-assay","source_id":"mito-phenotype-1","modality":"depolarization","compounds":["CID10","CID11"],"active":1,"inactive":1}
+  ],
+  "transcriptomic_sources": [
+    {"provider":"transcript-phenotype","source_id":"tx-hepatocyte","context":{"cell":"hepatocyte","dose":"3 uM","time":"24 h"},"compounds":["CID10","CID12"]}
+  ],
+  "provider_capabilities": ["candidate_search","pagination","lightweight_metadata_catalogue","compound_identifier_index","activity_call_retrieval","context_metadata","compound_signature_overlap"],
+  "expected_viable_combinations": 1,
+  "expected_strategy_proposals": 1,
+  "expression_values_retrieved": false
+}

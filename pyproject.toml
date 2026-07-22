@@ -34,7 +34,7 @@ dev = [
 
 # --- Lint + format -----------------------------------------------------------
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 # Notebooks are cloud-run artifacts (Colab), not linted production code.
 extend-exclude = ["*.ipynb"]
@@ -59,7 +59,7 @@ pythonpath = ["."]
 
 # --- Types (minimal, NON-blocking; CI does not gate on mypy) -----------------
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 warn_unused_ignores = false
 warn_return_any = false

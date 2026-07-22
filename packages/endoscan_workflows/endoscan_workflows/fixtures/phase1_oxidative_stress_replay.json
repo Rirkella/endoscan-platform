@@ -1,0 +1,77 @@
+{
+  "schema_version": "1.0.0",
+  "fixture_kind": "prepared_validated_replay",
+  "validation_status": "presentation_and_contract_validated",
+  "live_scientific_discovery": false,
+  "output": {
+    "schema_version": "1.0.0",
+    "endpoint_name": "Oxidative stress",
+    "endpoint_definition_summary": "Evaluate a response-defined oxidative-stress endpoint from transcriptomic signatures.",
+    "run_mode": "replay",
+    "simulation_label": "Prepared validated replay fixture",
+    "live_discovery": false,
+    "search_strategy": "Replay the stored validated comparison without external calls.",
+    "queries_executed": [],
+    "candidates": [
+      {
+        "schema_version": "1.0.0",
+        "candidate_id": "SIM-OS-001",
+        "accession": "SIM-OS-001",
+        "title": "Prepared metadata candidate A for Oxidative stress",
+        "source": "phase1://validated-replay/SIM-OS-001",
+        "organism": ["Homo sapiens"],
+        "data_type": "transcriptomic metadata fixture",
+        "sample_count": 24,
+        "biological_context": "Prepared oxidative-stress comparison context.",
+        "treatment_control_evidence": "Prepared treatment and vehicle-control fields.",
+        "dose_time_evidence": "Prepared dose and time fields for replay presentation.",
+        "strengths": ["Stable deterministic replay for workflow and UI acceptance."],
+        "limitations": [
+          "Prepared replay fixture; not a live scientific discovery.",
+          "The SIM accession is deliberately not a GEO accession."
+        ],
+        "exclusion_reasons": [],
+        "recommendation_status": "recommended_for_human_review",
+        "evidence_references": [],
+        "accession_verified": false,
+        "license_verified": false
+      },
+      {
+        "schema_version": "1.0.0",
+        "candidate_id": "SIM-OS-002",
+        "accession": "SIM-OS-002",
+        "title": "Prepared metadata candidate B for Oxidative stress",
+        "source": "phase1://validated-replay/SIM-OS-002",
+        "organism": ["Homo sapiens"],
+        "data_type": "transcriptomic metadata fixture",
+        "sample_count": 16,
+        "biological_context": "Prepared alternative comparison context.",
+        "treatment_control_evidence": "Control labels intentionally remain ambiguous.",
+        "dose_time_evidence": "Prepared time field; dose field is incomplete.",
+        "strengths": ["Exercises alternative and uncertainty presentation."],
+        "limitations": [
+          "Prepared replay fixture; not a live scientific discovery.",
+          "A human must resolve the intentionally ambiguous controls."
+        ],
+        "exclusion_reasons": [],
+        "recommendation_status": "alternative",
+        "evidence_references": [],
+        "accession_verified": false,
+        "license_verified": false
+      }
+    ],
+    "recommended_candidate_id": "SIM-OS-001",
+    "recommendation": "Review SIM-OS-001 as the prepared replay default.",
+    "decision_summary": "Replay mode restored a previously validated presentation fixture and stopped at the human dataset-review gate.",
+    "rejected_candidates": [],
+    "unresolved_questions": ["Live GEO suitability and labels remain unverified in replay mode."],
+    "requires_human_review": true,
+    "evidence_references": [],
+    "limitations": [
+      "Candidate metadata is a deterministic validated replay fixture.",
+      "No GEO, PubMed, OpenAI, Anthropic, or other network request occurred.",
+      "A live run must independently verify GEO accessions and metadata."
+    ],
+    "confidence_category": "low"
+  }
+}

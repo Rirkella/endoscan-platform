@@ -33,6 +33,8 @@ ALLOWED_MIME_TYPES = {
     "application/octet-stream",
 }
 
+MAXIMUM_REVIEWED_DERIVED_ARTIFACT_BYTES = 500_000_000
+
 
 class LocalArtifactStore:
     def __init__(
@@ -70,6 +72,38 @@ class LocalArtifactStore:
                 handle.write(content)
                 handle.flush()
                 os.fsync(handle.fileno())
+            Path(temp_name).replace(target)
+        finally:
+            Path(temp_name).unlink(missing_ok=True)
+        return target.relative_to(self.root).as_posix()
+
+    @staticmethod
+    def _hash_file(path: Path) -> tuple[str, int]:
+        digest = hashlib.sha256()
+        size = 0
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+                size += len(chunk)
+        return digest.hexdigest(), size
+
+    def _write_file_blob(self, source: Path, sha256: str) -> str:
+        target = self._path(sha256)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            existing_hash, _ = self._hash_file(target)
+            if existing_hash != sha256:
+                raise ArtifactIntegrityError(
+                    "Existing artifact blob failed integrity verification."
+                )
+            return target.relative_to(self.root).as_posix()
+        descriptor, temp_name = tempfile.mkstemp(prefix="artifact-", dir=target.parent)
+        try:
+            with source.open("rb") as source_handle, os.fdopen(descriptor, "wb") as target_handle:
+                while chunk := source_handle.read(1024 * 1024):
+                    target_handle.write(chunk)
+                target_handle.flush()
+                os.fsync(target_handle.fileno())
             Path(temp_name).replace(target)
         finally:
             Path(temp_name).unlink(missing_ok=True)
@@ -163,6 +197,97 @@ class LocalArtifactStore:
         content = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False).encode()
         return self.put_bytes(content=content, mime_type="application/json", **kwargs)
 
+    def put_file(
+        self,
+        *,
+        workflow_id: str,
+        source_path: Path,
+        mime_type: str,
+        artifact_type: str,
+        logical_name: str,
+        producer: str,
+        idempotency_key: str,
+        step_id: str | None = None,
+        original_source: str | None = None,
+        reviewed_maximum_bytes: int | None = None,
+    ) -> ArtifactDescriptor:
+        """Persist a file without materializing it in memory.
+
+        ``reviewed_maximum_bytes`` is reserved for bounded derived artifacts whose
+        expansion can legitimately exceed the source-response limit. Raw source
+        responses continue to use the store-wide limit through ``put_bytes``.
+        """
+
+        source = Path(source_path).resolve()
+        if not source.is_file():
+            raise ArtifactError("Artifact source file was not found.")
+        digest, size = self._hash_file(source)
+        maximum_bytes = reviewed_maximum_bytes or self.maximum_bytes
+        if maximum_bytes > MAXIMUM_REVIEWED_DERIVED_ARTIFACT_BYTES:
+            raise ArtifactError("Reviewed derived-artifact limit exceeds the hard safety bound.")
+        if size > maximum_bytes:
+            raise ArtifactTooLarge(f"Artifact exceeds the {maximum_bytes}-byte reviewed limit.")
+        if mime_type not in ALLOWED_MIME_TYPES:
+            raise ArtifactError("Artifact MIME type is not allowed.")
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            if step_id is not None and session.get(WorkflowStepRow, step_id) is None:
+                raise WorkflowNotFound("Producer step was not found.")
+            existing = session.scalar(
+                select(ArtifactRow).where(
+                    ArtifactRow.workflow_id == workflow_id,
+                    ArtifactRow.logical_name == logical_name,
+                    ArtifactRow.sha256 == digest,
+                )
+            )
+            if existing is not None:
+                return self._descriptor(existing)
+            storage_key = self._write_file_blob(source, digest)
+            created_at = utc_text()
+            artifact = ArtifactRow(
+                id=deterministic_id("art", workflow_id, logical_name, digest),
+                workflow_id=workflow_id,
+                step_id=step_id,
+                sha256=digest,
+                size_bytes=size,
+                mime_type=mime_type,
+                artifact_type=artifact_type,
+                logical_name=logical_name,
+                storage_key=storage_key,
+                producer=producer,
+                original_source=original_source,
+                metadata_json=canonical_json(
+                    versioned_payload(
+                        artifact_type=artifact_type,
+                        logical_name=logical_name,
+                        producer=producer,
+                        original_source=original_source,
+                    )
+                ),
+                created_at=created_at,
+            )
+            session.add(artifact)
+            session.flush()
+            append_event(
+                session,
+                build,
+                event_type="artifact.created",
+                actor_type="system",
+                actor_id=producer,
+                idempotency_key=f"{idempotency_key}:artifact:{digest}",
+                payload={
+                    "artifact_id": artifact.id,
+                    "artifact_type": artifact_type,
+                    "logical_name": logical_name,
+                    "sha256": digest,
+                    "size_bytes": size,
+                    "step_id": step_id,
+                },
+                from_state=build.current_stage,
+                to_state=build.current_stage,
+            )
+            return self._descriptor(artifact)
+
     def get(self, artifact_id: str) -> tuple[ArtifactDescriptor, bytes]:
         with self.database.session() as session:
             row = session.get(ArtifactRow, artifact_id)
@@ -177,6 +302,35 @@ class LocalArtifactStore:
     def verify(self, artifact_id: str) -> bool:
         self.get(artifact_id)
         return True
+
+    def verified_path(self, artifact_id: str) -> tuple[ArtifactDescriptor, Path]:
+        """Return a verified immutable artifact path without loading the file into memory."""
+
+        with self.database.session() as session:
+            row = session.get(ArtifactRow, artifact_id)
+            if row is None:
+                raise WorkflowNotFound("Artifact was not found.")
+            descriptor = self._descriptor(row)
+            path = self._path(row.sha256)
+        observed, size = self._hash_file(path)
+        if observed != descriptor.sha256 or size != descriptor.size_bytes:
+            raise ArtifactIntegrityError("Artifact failed integrity verification.")
+        return descriptor, path
+
+    def find_by_logical_name(
+        self, workflow_id: str, logical_name: str
+    ) -> ArtifactDescriptor | None:
+        with self.database.session() as session:
+            require_build(session, workflow_id)
+            row = session.scalar(
+                select(ArtifactRow)
+                .where(
+                    ArtifactRow.workflow_id == workflow_id,
+                    ArtifactRow.logical_name == logical_name,
+                )
+                .order_by(ArtifactRow.created_at.desc(), ArtifactRow.id.desc())
+            )
+            return self._descriptor(row) if row is not None else None
 
     def list_artifacts(self, workflow_id: str) -> list[ArtifactDescriptor]:
         with self.database.session() as session:
@@ -223,6 +377,9 @@ class LocalArtifactStore:
 
     @staticmethod
     def _descriptor(row: ArtifactRow) -> ArtifactDescriptor:
+        created_at = parse_utc(row.created_at)
+        if created_at is None:
+            raise ArtifactIntegrityError("Artifact creation timestamp is invalid.")
         return ArtifactDescriptor(
             id=row.id,
             workflow_id=row.workflow_id,
@@ -234,5 +391,5 @@ class LocalArtifactStore:
             logical_name=row.logical_name,
             producer=row.producer,
             original_source=row.original_source,
-            created_at=parse_utc(row.created_at),
+            created_at=created_at,
         )

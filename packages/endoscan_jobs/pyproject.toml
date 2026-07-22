@@ -10,7 +10,7 @@ name = "endoscan-jobs"
 version = "0.0.0"
 description = "EndoScan containerized job runner (coverage diagnostics; later the build job)."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "endoscan-core",
     "pydantic>=2.6",

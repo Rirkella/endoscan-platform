@@ -6,10 +6,13 @@
 import type {
   AnalyzeResponse,
   AdminAgentRun,
+  AdminAgentCapabilities,
   AdminApproval,
   AdminArtifact,
   AdminBuild,
+  AdminProviderPreflight,
   AdminTimelineEvent,
+  AdminTrainingDatasetWorkflow,
   AdminWorkflowError,
   ApiError,
   BiologicalResponse,
@@ -218,23 +221,198 @@ export const api = {
   },
 
   adminListBuilds: () => adminGet<AdminBuild[]>("/admin/endpoint-builds"),
+  adminCapabilities: () => adminGet<AdminAgentCapabilities>("/admin/capabilities"),
+  adminProviderPreflight: () =>
+    adminPost<AdminProviderPreflight>("/admin/agent-provider/preflight", {}, "provider-preflight"),
   adminGetBuild: (id: string) =>
     adminGet<AdminBuild>(`/admin/endpoint-builds/${encodeURIComponent(id)}`),
+  adminTrainingDatasetWorkflow: (id: string) =>
+    adminGet<AdminTrainingDatasetWorkflow>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/training-dataset-workflow`,
+    ),
   adminCreateBuild: (payload: {
     endpoint_name: string;
     endpoint_slug: string;
     biological_goal: string;
     created_by: string;
+    workflow_kind?: "legacy_single_source_discovery" | "training_dataset_discovery";
+    benchmark_mode?: string;
   }) => adminPost<AdminBuild>("/admin/endpoint-builds", payload, "create-build"),
   adminCommand: (
     id: string,
-    action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure",
+    action: "start" | "pause" | "resume" | "cancel" | "retry" | "simulate-failure" | "retry-dataset-specification" | "run-dataset-specification-review" | "revise-endpoint-request",
     version: number,
   ) =>
     adminPost<AdminBuild>(
       `/admin/endpoint-builds/${encodeURIComponent(id)}/${action}`,
       { expected_version: version, actor: "local-admin" },
       action,
+    ),
+  adminRefreshSourceMetadata: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/refresh-source-metadata`,
+      { expected_version: version, actor: "local-admin" },
+      "refresh-source-metadata",
+    ),
+  adminContinueTrainingDataset: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/continue-training-dataset`,
+      { expected_version: version, actor: "local-admin" },
+      "continue-training-dataset",
+    ),
+  adminAuthorizeSourceDiscovery: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/authorize-source-discovery`,
+      {
+        expected_version: version,
+        actor: "local-admin",
+        confirmation: "authorize_reviewed_source_discovery",
+      },
+      "authorize-source-discovery",
+    ),
+  adminRequestDiscoveryRevision: (
+    id: string,
+    version: number,
+    reason: string,
+  ) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/request-discovery-revision`,
+      {
+        expected_version: version,
+        actor: "local-admin",
+        reason,
+        provider_policy_revision: {},
+        modality_policy_revision: {},
+        context_constraint_revision: {},
+      },
+      "request-discovery-revision",
+    ),
+  adminCalculateCombinationCoverage: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/calculate-combination-coverage`,
+      { expected_version: version, actor: "local-admin" },
+      "calculate-combination-coverage",
+    ),
+  adminGenerateAssemblyStrategies: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/generate-assembly-strategies`,
+      { expected_version: version, actor: "local-admin" },
+      "generate-assembly-strategies",
+    ),
+  adminApproveAssemblyStrategy: (
+    id: string,
+    version: number,
+    proposal: Record<string, unknown>,
+  ) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/approve-assembly-strategy`,
+      {
+        expected_version: version,
+        actor: "local-admin",
+        strategy_proposal_id: proposal.proposal_id,
+        approved_modality_aggregation: {
+          source_modalities: proposal.modalities ?? [],
+          operator:
+            (proposal.proposed_label_policy as Record<string, unknown> | undefined)?.operator ===
+            "functional_or"
+              ? "functional_or"
+              : "none",
+          preserve_original_source_records: true,
+          human_approved: true,
+        },
+        approved_context_filters: proposal.proposed_context ?? {},
+        approved_dose_time_rules: {
+          require_source_backed_values: true,
+          preserve_missingness: true,
+        },
+        approved_label_policy: proposal.proposed_label_policy ?? {},
+        exclusion_rules: proposal.exclusions ?? [],
+        required_extraction_fields: [
+          "canonical_compound_identifier",
+          "source_activity_record",
+          "transcriptomic_signature_identifier",
+          "experimental_context",
+          "provenance",
+        ],
+      },
+      `approve-assembly-strategy-${String(proposal.proposal_id)}`,
+    ),
+  adminRejectAssemblyStrategies: (id: string, version: number, reason: string) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/reject-assembly-strategies`,
+      { expected_version: version, actor: "local-admin", reason },
+      "reject-assembly-strategies",
+    ),
+  adminRunApprovedAssembly: (
+    id: string,
+    version: number,
+    offlineFixtureId: "tr_receptor" | "dna_damage",
+  ) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/run-approved-assembly`,
+      {
+        expected_version: version,
+        actor: "local-admin",
+        offline_fixture_id: offlineFixtureId,
+      },
+      "run-approved-assembly",
+    ),
+  adminApproveDataset: (id: string, version: number, rationale: string) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/approve-dataset`,
+      { expected_version: version, actor: "local-admin", rationale },
+      "approve-dataset",
+    ),
+  adminReviewDatasetRevision: (
+    id: string,
+    version: number,
+    decision: "rejected" | "revision_requested",
+    rationale: string,
+  ) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/review-dataset-revision`,
+      { expected_version: version, actor: "local-admin", decision, rationale },
+      `review-dataset-${decision}`,
+    ),
+  adminRunBenchmark: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/run-benchmark`,
+      { expected_version: version, actor: "local-admin" },
+      "run-benchmark",
+    ),
+  adminSelectAndValidateModel: (
+    id: string,
+    version: number,
+    candidateId: string,
+    rationale: string,
+  ) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/select-and-validate-model`,
+      {
+        expected_version: version,
+        actor: "local-admin",
+        candidate_id: candidateId,
+        decision_threshold: 0.5,
+        rationale,
+      },
+      `select-and-validate-${candidateId}`,
+    ),
+  adminReviewModels: (
+    id: string,
+    version: number,
+    decision: "reject_all_models" | "request_new_benchmark",
+    rationale: string,
+  ) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/review-models`,
+      { expected_version: version, actor: "local-admin", decision, rationale },
+      `review-models-${decision}`,
+    ),
+  adminPublishEndpoint: (id: string, version: number) =>
+    adminPost<AdminBuild>(
+      `/admin/endpoint-builds/${encodeURIComponent(id)}/publish-endpoint`,
+      { expected_version: version, actor: "local-admin" },
+      "publish-endpoint",
     ),
   adminTimeline: (id: string) =>
     adminGet<AdminTimelineEvent[]>(`/admin/endpoint-builds/${encodeURIComponent(id)}/timeline`),
