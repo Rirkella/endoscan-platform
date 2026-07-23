@@ -97,6 +97,8 @@ def test_fresh_database_migrates_with_wal_foreign_keys_and_all_tables(tmp_path) 
         "human_decisions",
         "workflow_errors",
         "source_response_cache",
+        "scientific_source_request_budgets",
+        "scientific_source_request_attempts",
         "training_dataset_workflows",
         "alembic_version",
     }.issubset(tables)

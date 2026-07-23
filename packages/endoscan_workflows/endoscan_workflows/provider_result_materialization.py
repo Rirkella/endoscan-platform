@@ -446,7 +446,11 @@ def _identity_sources(
     ]
 
 
-def _transcriptomic_sources(connection: sqlite3.Connection) -> list[CompactProviderSource]:
+def _transcriptomic_sources(
+    connection: sqlite3.Connection,
+    *,
+    provider: str,
+) -> list[CompactProviderSource]:
     if "transcriptomic_records" not in _tables(connection):
         return []
     identifiers = _all_distinct_values(
@@ -504,11 +508,46 @@ def _transcriptomic_sources(connection: sqlite3.Connection) -> list[CompactProvi
             """,
             parameters,
         )
+        doses = _distinct_values(
+            connection,
+            """
+            SELECT DISTINCT dose FROM transcriptomic_records
+            WHERE accession=? OR source_identifier=? ORDER BY dose
+            """,
+            parameters,
+        )
+        exposure_times = _distinct_values(
+            connection,
+            """
+            SELECT DISTINCT exposure_time FROM transcriptomic_records
+            WHERE accession=? OR source_identifier=? ORDER BY exposure_time
+            """,
+            parameters,
+        )
+        stable_compound_ids = _all_distinct_values(
+            connection,
+            """
+            SELECT DISTINCT compound_identifier FROM transcriptomic_records
+            WHERE (accession=? OR source_identifier=?)
+              AND compound_identifier IS NOT NULL
+              AND TRIM(compound_identifier) <> ''
+            ORDER BY compound_identifier
+            """,
+            parameters,
+        )
         compound_count = _count(
             connection,
             """
             SELECT COUNT(DISTINCT compound_identifier) FROM transcriptomic_records
             WHERE (accession=? OR source_identifier=?) AND compound_identifier IS NOT NULL
+            """,
+            parameters,
+        )
+        verified_perturbation_count = _count(
+            connection,
+            """
+            SELECT COUNT(*) FROM transcriptomic_records
+            WHERE (accession=? OR source_identifier=?) AND perturbation_verified=1
             """,
             parameters,
         )
@@ -539,6 +578,38 @@ def _transcriptomic_sources(connection: sqlite3.Connection) -> list[CompactProvi
             missing.append("stable_compound_identifier")
         if not matrix_locator_count:
             missing.append("processed_matrix_locator")
+        if not models:
+            missing.append("cell_or_tissue_model")
+        if not doses:
+            missing.append("dose")
+        if not exposure_times:
+            missing.append("exposure_duration")
+        if not verified_perturbation_count:
+            missing.append("verified_chemical_perturbation")
+        source_class = (
+            "geo_supplemental"
+            if provider == "ncbi-geo"
+            else "registered_perturbational_transcriptomics"
+        )
+        treatment_design_verified = outcome_counts.get("verified_compound_perturbation", 0) > 0
+        joinability_eligible = all(
+            (
+                bool(stable_compound_ids),
+                bool(matrix_locator_count),
+                bool(models),
+                bool(doses),
+                bool(exposure_times),
+                bool(verified_perturbation_count),
+                treatment_design_verified if provider == "ncbi-geo" else True,
+            )
+        )
+        exclusion_reason = None
+        if not joinability_eligible:
+            exclusion_reason = (
+                "Supplemental transcriptomic evidence is not assembly-eligible: "
+                + ", ".join(missing or ["treatment/control design not verified"])
+                + "."
+            )
         values.append(
             CompactProviderSource(
                 source_identifier=identifier,
@@ -552,21 +623,41 @@ def _transcriptomic_sources(connection: sqlite3.Connection) -> list[CompactProvi
                     "biological_models": models,
                     "processing_levels": processing_levels,
                     "processed_matrix_available": matrix_locator_count > 0,
+                    "transcriptomic_source_class": source_class,
+                    "stable_compound_ids": stable_compound_ids,
+                    "stable_identity_bridge_available": bool(stable_compound_ids),
+                    "treatment_control_design_verified": treatment_design_verified,
+                    "expression_extraction_path": (
+                        "approved_processed_matrix_locator"
+                        if matrix_locator_count
+                        else "unavailable"
+                    ),
+                    "joinability_eligible": joinability_eligible,
                     "row_level_data_embedded": False,
                 },
                 compound_index_available=compound_count > 0,
                 label_or_activity_fields_available=False,
                 organism=organisms[0] if len(organisms) == 1 else None,
-                experimental_context={"biological_models": models},
+                experimental_context={
+                    "cell": models,
+                    "dose": doses,
+                    "time": exposure_times,
+                    "biological_models": models,
+                },
                 completeness_status=(
-                    HydrationCompleteness.COMPLETE if not missing else HydrationCompleteness.PARTIAL
+                    HydrationCompleteness.COMPLETE
+                    if joinability_eligible
+                    else HydrationCompleteness.SCIENTIFICALLY_UNUSABLE
                 ),
                 explicit_missing_fields=missing,
+                exclusion_reason=exclusion_reason,
                 raw_artifact_ids=raw_ids,
                 coverage_summary={
                     "metadata_rows": record_count,
+                    "profile_count": record_count,
                     "compound_identifier_count": compound_count,
                     "processed_matrix_locator_count": matrix_locator_count,
+                    "verified_perturbation_count": verified_perturbation_count,
                     "raw_artifact_count": raw_artifact_count,
                 },
             )
@@ -666,7 +757,7 @@ def compact_provider_dataset(
         if evidence_role is EvidenceRole.IDENTITY:
             return _identity_sources(connection, release_id=release_id)
         if evidence_role is EvidenceRole.TRANSCRIPTOMIC:
-            return _transcriptomic_sources(connection)
+            return _transcriptomic_sources(connection, provider=provider)
         if evidence_role is EvidenceRole.SUPPORTING_METADATA:
             return _supporting_sources(connection)
     raise ValueError(f"Unsupported provider evidence role: {evidence_role.value}")

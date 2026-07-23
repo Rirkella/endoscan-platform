@@ -1558,15 +1558,12 @@ def test_completed_legacy_pubchem_result_is_compacted_without_provider_reexecuti
     legacy_ledger = ledger.model_copy(
         update={
             "records": [
-                legacy_record if item.task_id == record.task_id else item
-                for item in ledger.records
+                legacy_record if item.task_id == record.task_id else item for item in ledger.records
             ]
         }
     )
     reconciled = executor._materialized_ledger(legacy_ledger, materializations)
-    reconciled_record = next(
-        item for item in reconciled.records if item.task_id == record.task_id
-    )
+    reconciled_record = next(item for item in reconciled.records if item.task_id == record.task_id)
     assert reconciled_record.provider_unique_record_count > 0
     assert reconciled_record.compact_source_candidate_count == len(compacted.candidates)
     assert reconciled_record.unique_candidate_count == len(compacted.candidates)

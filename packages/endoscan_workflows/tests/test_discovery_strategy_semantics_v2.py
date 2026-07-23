@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -54,8 +55,10 @@ from endoscan_workflows.discovery_strategy import (
     validate_candidate_universe,
 )
 from endoscan_workflows.endpoint_lifecycle import (
+    DeterministicAssemblyStrategyAgent,
     LincsSelectiveExpressionExtractor,
     SelectiveExpressionExtractionRequest,
+    StrategyAgentInput,
     calculate_combination_coverage,
 )
 from endoscan_workflows.errors import GuardNotSatisfied, InvalidTransition, WorkflowConflict
@@ -1499,6 +1502,269 @@ def test_coverage_engine_evaluates_all_compact_source_combinations() -> None:
     assert binding.activity_row_count == 470
     assert binding.computation_provenance == [reference]
     assert binding.context_completeness == 1.0
+
+
+class _FixtureArtifactStore:
+    def __init__(self, paths: dict[str, Path]) -> None:
+        self.paths = paths
+
+    def verified_path(self, artifact_id: str) -> tuple[object, Path]:
+        return object(), self.paths[artifact_id]
+
+
+def test_tr_joinability_uses_stable_bridges_and_blocks_unusable_transcriptomics(
+    tmp_path: Path,
+) -> None:
+    activity_path = tmp_path / "activity.sqlite"
+    with sqlite3.connect(activity_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE activity_records (
+                assay_identifier TEXT, compound_identifier TEXT, cid TEXT,
+                activity_call TEXT
+            );
+            CREATE TABLE compound_index (
+                compound_identifier TEXT, cid TEXT, sid TEXT, inchikey TEXT
+            );
+            """
+        )
+        connection.executemany(
+            "INSERT INTO compound_index VALUES (?,?,?,?)",
+            [
+                ("DTXSID-A", "101", None, None),
+                ("DTXSID-B", "102", None, None),
+                ("DTXSID-C", "103", None, None),
+                ("DTXSID-D", "104", None, None),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO activity_records VALUES (?,?,?,?)",
+            [
+                ("BIND", "DTXSID-A", None, "active"),
+                ("BIND", "DTXSID-B", None, "inactive"),
+                ("AGON", "DTXSID-B", None, "active"),
+                ("AGON", "DTXSID-C", None, "inactive"),
+                ("ANTAG", "DTXSID-C", None, "active"),
+                ("ANTAG", "DTXSID-D", None, "inactive"),
+            ],
+        )
+
+    perturbagen_path = tmp_path / "pert-info.sqlite"
+    with sqlite3.connect(perturbagen_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE records (
+                pert_id TEXT, pubchem_cid TEXT, inchikey TEXT
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO records VALUES (?,?,?)",
+            [
+                ("BRD-A", "CID:101", None),
+                ("BRD-B", "CID:102", None),
+                ("BRD-C", "CID:103", None),
+                ("BRD-X", "CID:999", None),
+            ],
+        )
+
+    signature_path = tmp_path / "sig-info.sqlite"
+    with sqlite3.connect(signature_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE records (
+                pert_id TEXT, cell_id TEXT, dose TEXT, exposure_time TEXT,
+                measured_chemical_perturbation INTEGER, row_status TEXT
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO records VALUES (?,?,?,?,?,?)",
+            [
+                ("BRD-A", "MCF7", "1 uM", "24 h", 1, "valid"),
+                ("BRD-B", "MCF7", "1 uM", "24 h", 1, "valid"),
+                ("BRD-C", "A549", "10 uM", "6 h", 1, "valid"),
+                ("BRD-X", "A549", "10 uM", "6 h", 1, "valid"),
+            ],
+        )
+
+    geo_path = tmp_path / "geo.sqlite"
+    with sqlite3.connect(geo_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE transcriptomic_records (
+                accession TEXT, source_identifier TEXT, compound_identifier TEXT,
+                biological_model TEXT, dose TEXT, exposure_time TEXT
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO transcriptomic_records VALUES (?,?,?,?,?,?)",
+            ("GSE12345", "GSE12345", None, "human hepatocytes", "1 uM", "24 h"),
+        )
+
+    references = {
+        name: ArtifactReference(
+            artifact_id=name,
+            sha256=hashlib.sha256(name.encode()).hexdigest(),
+            artifact_type="provider_rows",
+        )
+        for name in ("activity-db", "pert-info", "sig-info", "geo-db")
+    }
+    activity_sources = [
+        HydratedSource(
+            hydrated_source_id=f"activity-{modality}",
+            source_candidate_id=f"candidate-{modality}",
+            provider="toxcast" if modality != "agonism" else "tox21",
+            source_identifier=f"AID:{assay}",
+            evidence_role=EvidenceRole.ACTIVITY,
+            modality=modality,
+            verified_metadata={},
+            compound_index_available=True,
+            label_or_activity_fields_available=True,
+            completeness_status=HydrationCompleteness.COMPLETE,
+            evidence_artifacts=[references["activity-db"]],
+        )
+        for modality, assay in (
+            ("binding", "BIND"),
+            ("agonism", "AGON"),
+            ("antagonism", "ANTAG"),
+        )
+    ]
+    lincs_metadata = {
+        "transcriptomic_source_class": "primary_lincs_l1000",
+        "joinability_eligible": True,
+        "stable_identity_bridge_available": True,
+        "expression_extraction_path": "registered_post_approval_level5_gctx",
+    }
+    transcriptomic_sources = [
+        HydratedSource(
+            hydrated_source_id="transcriptomic-lincs",
+            source_candidate_id="candidate-lincs",
+            provider="lincs-l1000",
+            source_identifier="LINCS-2020",
+            evidence_role=EvidenceRole.TRANSCRIPTOMIC,
+            verified_metadata=lincs_metadata,
+            compound_index_available=True,
+            label_or_activity_fields_available=False,
+            completeness_status=HydrationCompleteness.COMPLETE,
+            evidence_artifacts=[references["pert-info"], references["sig-info"]],
+        ),
+        HydratedSource(
+            hydrated_source_id="transcriptomic-no-expression",
+            source_candidate_id="candidate-no-expression",
+            provider="registered-transcriptomics",
+            source_identifier="NO-EXPRESSION",
+            evidence_role=EvidenceRole.TRANSCRIPTOMIC,
+            verified_metadata={
+                **lincs_metadata,
+                "expression_extraction_path": "unavailable",
+            },
+            compound_index_available=True,
+            label_or_activity_fields_available=False,
+            completeness_status=HydrationCompleteness.PARTIAL,
+            evidence_artifacts=[references["pert-info"], references["sig-info"]],
+        ),
+        HydratedSource(
+            hydrated_source_id="transcriptomic-geo",
+            source_candidate_id="candidate-geo",
+            provider="ncbi-geo",
+            source_identifier="GSE12345",
+            evidence_role=EvidenceRole.TRANSCRIPTOMIC,
+            verified_metadata={
+                "transcriptomic_source_class": "geo_supplemental",
+                "joinability_eligible": False,
+                "stable_identity_bridge_available": False,
+                "expression_extraction_path": "approved_processed_matrix_locator",
+            },
+            compound_index_available=False,
+            label_or_activity_fields_available=False,
+            experimental_context={
+                "cell": ["human hepatocytes"],
+                "dose": ["1 uM"],
+                "time": ["24 h"],
+            },
+            completeness_status=HydrationCompleteness.SCIENTIFICALLY_UNUSABLE,
+            explicit_missing_fields=["stable_compound_identifier"],
+            exclusion_reason="Supplemental GEO study lacks a stable compound bridge.",
+            evidence_artifacts=[references["geo-db"]],
+        ),
+    ]
+    sources = HydratedSourceSet(
+        workflow_id="workflow-tr-joinability",
+        discovery_round=1,
+        sources=[*activity_sources, *transcriptomic_sources],
+    )
+    store = _FixtureArtifactStore(
+        {
+            "activity-db": activity_path,
+            "pert-info": perturbagen_path,
+            "sig-info": signature_path,
+            "geo-db": geo_path,
+        }
+    )
+
+    coverage = calculate_combination_coverage(
+        "workflow-tr-joinability",
+        1,
+        sources,
+        artifact_store=store,  # type: ignore[arg-type]
+    )
+
+    lincs = [
+        item
+        for item in coverage.combinations
+        if item.transcriptomic_source_id == "transcriptomic-lincs"
+    ]
+    assert {item.requested_modality: item.overlap_count for item in lincs} == {
+        "binding": 2,
+        "agonism": 2,
+        "antagonism": 1,
+    }
+    assert all(item.expected_assembled_sample_count > 0 for item in lincs)
+    assert all(item.context_completeness == 1.0 for item in lincs)
+    assert all(not item.quality_flags for item in lincs)
+    assert {item.requested_modality: item.class_balance for item in lincs} == {
+        "binding": {"active": 1.0, "inactive": 1.0, "ambiguous": 0.0},
+        "agonism": {"active": 1.0, "inactive": 1.0, "ambiguous": 0.0},
+        "antagonism": {"active": 1.0, "inactive": 0.0, "ambiguous": 0.0},
+    }
+    geo = [
+        item
+        for item in coverage.combinations
+        if item.transcriptomic_source_id == "transcriptomic-geo"
+    ]
+    assert all(item.overlap_count == 0 for item in geo)
+    assert all(
+        "transcriptomic_source_not_joinability_eligible" in item.quality_flags for item in geo
+    )
+    missing_expression = [
+        item
+        for item in coverage.combinations
+        if item.transcriptomic_source_id == "transcriptomic-no-expression"
+    ]
+    assert all(item.overlap_count > 0 for item in missing_expression)
+    assert all(
+        "expression_extraction_path_unavailable" in item.quality_flags
+        for item in missing_expression
+    )
+
+    proposals = DeterministicAssemblyStrategyAgent().generate(
+        StrategyAgentInput(
+            workflow_id="workflow-tr-joinability",
+            approved_endpoint_specification={"target": "thyroid hormone receptor"},
+            hydrated_sources=sources,
+            coverage=coverage,
+            allowed_scientific_policies=["source_backed_activity_call"],
+            quality_constraints=["stable compound identifiers required"],
+        )
+    )
+    assert {
+        proposal.modalities[0]
+        for proposal in proposals.proposals
+        if proposal.proposal_status is ProposalStatus.VIABLE
+    } == {"binding", "agonism", "antagonism"}
+    assert all(len(proposal.modalities) == 1 for proposal in proposals.proposals)
 
 
 def test_offline_demo_replay_is_idempotent_and_artifact_stable(tmp_path) -> None:

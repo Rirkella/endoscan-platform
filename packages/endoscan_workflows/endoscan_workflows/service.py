@@ -67,6 +67,7 @@ from .discovery_strategy import (
     DiscoveryRevisionRequest,
     HumanApprovalRecord,
     HydratedSourceSet,
+    ProposalStatus,
     SourceCandidateSet,
     StrategyProposalSet,
     StrategySetRejection,
@@ -2037,6 +2038,15 @@ class WorkflowService:
                 proposals,
                 allowed_scientific_policies=set(request.allowed_scientific_policies),
             )
+            if not any(
+                proposal.proposal_status is ProposalStatus.VIABLE
+                for proposal in proposals.proposals
+            ):
+                raise GuardNotSatisfied(
+                    "No assembly strategy is scientifically reviewable; stable overlap, "
+                    "biological context, labels, or an approved expression-extraction path "
+                    "is still missing."
+                )
             artifact = self._put_semantics_v2_document(
                 session,
                 workflow_id=workflow_id,
@@ -2100,7 +2110,12 @@ class WorkflowService:
             hydrated = HydratedSourceSet.model_validate(
                 _load_training_document(row.hydrated_sources_json)
             )
-            coverage = calculate_combination_coverage(workflow_id, row.discovery_round, hydrated)
+            coverage = calculate_combination_coverage(
+                workflow_id,
+                row.discovery_round,
+                hydrated,
+                artifact_store=self.artifacts,
+            )
             validate_coverage_universe(hydrated, coverage)
             artifact = self._put_semantics_v2_document(
                 session,
@@ -4622,6 +4637,7 @@ class WorkflowService:
                 if row.source_fragments_json
                 else []
             )
+            discovery_round = row.discovery_round
         missing_prerequisites = self._source_discovery_missing_prerequisites(
             definition.agent_name, prior_fragments
         )
@@ -4759,6 +4775,10 @@ class WorkflowService:
                     "remaining_global_scientific_source_requests": remaining_global_budget[
                         "scientific_source_requests"
                     ],
+                    "maximum_global_scientific_source_requests": (
+                        self.agent_configuration.controlled_source_discovery.global_maximum_source_requests
+                    ),
+                    "discovery_round": discovery_round,
                 }
             }
         )

@@ -15,6 +15,11 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 import httpx
 
 from .contracts import SourceToolDiagnostic
+from .source_governor import (
+    ScientificSourceBudgetExhausted,
+    ScientificSourceExecutionCancelled,
+    current_source_request_context,
+)
 
 APPROVED_SOURCE_HOSTS = frozenset(
     {
@@ -206,7 +211,17 @@ class ScientificSourceClient:
         attempt_diagnostics: list[SourceToolDiagnostic] = []
         for attempt_index in range(allowed_attempts):
             attempt_number = attempt_index + 1
+            self._require_active_request_context(
+                tool_name=tool_name,
+                url=url,
+                attempt_number=attempt_number,
+            )
             self._rate_limit()
+            self._require_active_request_context(
+                tool_name=tool_name,
+                url=url,
+                attempt_number=attempt_number,
+            )
             started = time.monotonic()
             try:
                 response, redirect_count = self._get_with_approved_redirects(
@@ -481,10 +496,13 @@ class ScientificSourceClient:
         current_headers = headers
         credential_host = (urlparse(url).hostname or "").lower().rstrip(".")
         for redirect_count in range(self.maximum_redirects + 1):
-            response = self.client.get(
+            response = self._governed_http_get(
                 current_url,
                 params=current_params,
                 headers=current_headers,
+                tool_name=tool_name,
+                attempt_number=attempt_number,
+                started=started,
             )
             if not response.is_redirect:
                 return response, redirect_count
@@ -574,6 +592,99 @@ class ScientificSourceClient:
                 exception_class="SourcePolicyError",
             ),
         )
+
+    def _require_active_request_context(
+        self,
+        *,
+        tool_name: str,
+        url: str,
+        attempt_number: int,
+    ) -> None:
+        context = current_source_request_context()
+        if context is None or not context.cancellation.cancelled:
+            return
+        context.governor.record_prevented(
+            workflow_id=context.workflow_id,
+            discovery_round=context.discovery_round,
+            maximum_requests=context.maximum_requests,
+            task_id=context.task_id,
+            tool_name=tool_name,
+            url=url,
+            reason=context.cancellation.reason or "task_cancelled",
+        )
+        raise SourcePolicyError(
+            "Scientific-source transport was prevented because its task was cancelled.",
+            diagnostic=self._diagnostic(
+                tool_name=tool_name,
+                url=url,
+                category="request_prevented_by_cancellation",
+                retryable=False,
+                attempt_number=attempt_number,
+                exception_class="ScientificSourceExecutionCancelled",
+            ),
+        )
+
+    def _governed_http_get(
+        self,
+        url: str,
+        *,
+        params: dict[str, str | int] | None,
+        headers: dict[str, str] | None,
+        tool_name: str,
+        attempt_number: int,
+        started: float,
+    ) -> httpx.Response:
+        context = current_source_request_context()
+        attempt_id: str | None = None
+        if context is not None:
+            try:
+                attempt_id = context.before_transport(
+                    tool_name=tool_name,
+                    url=url,
+                    params=params,
+                )
+            except ScientificSourceBudgetExhausted as exc:
+                raise SourcePolicyError(
+                    str(exc),
+                    diagnostic=self._diagnostic(
+                        tool_name=tool_name,
+                        url=url,
+                        category="global_request_budget_exhausted",
+                        retryable=False,
+                        attempt_number=attempt_number,
+                        duration_ms=self._elapsed_ms(started),
+                        exception_class=type(exc).__name__,
+                    ),
+                ) from exc
+            except ScientificSourceExecutionCancelled as exc:
+                raise SourcePolicyError(
+                    str(exc),
+                    diagnostic=self._diagnostic(
+                        tool_name=tool_name,
+                        url=url,
+                        category="request_prevented_by_cancellation",
+                        retryable=False,
+                        attempt_number=attempt_number,
+                        duration_ms=self._elapsed_ms(started),
+                        exception_class=type(exc).__name__,
+                    ),
+                ) from exc
+        try:
+            response = self.client.get(url, params=params, headers=headers)
+        except Exception as exc:
+            if context is not None and attempt_id is not None:
+                context.governor.mark_failed(
+                    attempt_id,
+                    error_category=type(exc).__name__,
+                )
+            raise
+        if context is not None and attempt_id is not None:
+            context.governor.mark_completed(
+                attempt_id,
+                http_status=response.status_code,
+                final_approved_host=(response.url.host or "").lower().rstrip(".") or None,
+            )
+        return response
 
     @staticmethod
     def _elapsed_ms(started: float) -> int:

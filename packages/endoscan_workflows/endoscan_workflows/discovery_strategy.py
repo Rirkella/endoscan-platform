@@ -298,6 +298,33 @@ class DiscoveryExecutionRecord(ImmutableV2Contract):
     logical_tool_call_count: int = Field(default=0, ge=0)
     scientific_source_request_count: int = Field(default=0, ge=0)
     transport_attempt_count: int = Field(default=0, ge=0)
+    cache_hit_count: int = Field(default=0, ge=0)
+    blocked_request_count: int = Field(default=0, ge=0)
+    requests_prevented_by_cancellation: int = Field(default=0, ge=0)
+
+
+class GlobalScientificSourceRequestAccounting(ImmutableV2Contract):
+    allowed_global_request_budget: int = Field(ge=0)
+    reserved_requests: int = Field(ge=0)
+    completed_transport_attempts: int = Field(ge=0)
+    failed_transport_attempts: int = Field(ge=0)
+    cache_hits: int = Field(ge=0)
+    blocked_requests_after_budget_exhaustion: int = Field(ge=0)
+    requests_prevented_by_cancellation: int = Field(ge=0)
+    remaining_requests: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_request_accounting(self) -> GlobalScientificSourceRequestAccounting:
+        if self.reserved_requests > self.allowed_global_request_budget:
+            raise ValueError("reserved scientific-source requests exceed the global budget")
+        if self.remaining_requests != (self.allowed_global_request_budget - self.reserved_requests):
+            raise ValueError("remaining scientific-source request budget is inconsistent")
+        if (
+            self.completed_transport_attempts + self.failed_transport_attempts
+            > self.reserved_requests
+        ):
+            raise ValueError("terminal transport attempts exceed reserved requests")
+        return self
 
 
 class DiscoveryExecutionLedger(ImmutableV2Contract):
@@ -305,6 +332,7 @@ class DiscoveryExecutionLedger(ImmutableV2Contract):
     discovery_round: int = Field(ge=0)
     plan_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
     records: list[DiscoveryExecutionRecord] = Field(min_length=1, max_length=500)
+    global_request_accounting: GlobalScientificSourceRequestAccounting | None = None
 
     @model_validator(mode="after")
     def unique_tasks(self) -> DiscoveryExecutionLedger:

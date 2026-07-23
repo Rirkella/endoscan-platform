@@ -7,6 +7,8 @@ and models are represented by content-addressed references, never inline.
 from __future__ import annotations
 
 import json
+import re
+import sqlite3
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -82,6 +84,18 @@ class DeterministicAssemblyStrategyAgent:
             policy = "source_backed_activity_call"
             if policy not in request.allowed_scientific_policies:
                 continue
+            blocking_flags = {
+                "no_stable_identifier_overlap",
+                "transcriptomic_source_not_joinability_eligible",
+                "expression_extraction_path_unavailable",
+                "incomplete_transcriptomic_context",
+                "activity_labels_unavailable",
+            }
+            reviewable = (
+                item.overlap_count > 0
+                and item.expected_assembled_sample_count > 0
+                and not (set(item.quality_flags) & blocking_flags)
+            )
             proposals.append(
                 StrategyProposal(
                     proposal_id=(
@@ -109,7 +123,7 @@ class DeterministicAssemblyStrategyAgent:
                     exclusions=["Ambiguous labels", "Unresolved compound identifiers"],
                     provenance_references=item.computation_provenance,
                     proposal_status=(
-                        ProposalStatus.VIABLE if item.overlap_count else ProposalStatus.BLOCKED
+                        ProposalStatus.VIABLE if reviewable else ProposalStatus.BLOCKED
                     ),
                     context_rules=item.context,
                     quality_constraints=request.quality_constraints,
@@ -133,13 +147,243 @@ def _stable_compound_ids(metadata: dict[str, Any]) -> set[str]:
     values = metadata.get("stable_compound_ids", metadata.get("compound_ids", []))
     if not isinstance(values, list):
         return set()
-    return {str(value).strip() for value in values if str(value).strip()}
+    return {
+        normalized for value in values if (normalized := _canonical_identifier(value)) is not None
+    }
+
+
+def _canonical_identifier(value: Any) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return None
+    if re.fullmatch(r"(?:CID:)?[1-9][0-9]{0,11}", text, re.IGNORECASE):
+        return f"CID:{text.split(':')[-1]}"
+    if re.fullmatch(r"[A-Z]{14}-[A-Z]{10}-[A-Z]", text.upper()):
+        return text.upper()
+    return text.upper()
+
+
+def _summary_value(summary: dict[str, Any], *keys: str) -> int:
+    for key in keys:
+        value = summary.get(key)
+        if isinstance(value, int):
+            return value
+    by_task = summary.get("by_task")
+    if isinstance(by_task, dict):
+        total = 0
+        found = False
+        for task_summary in by_task.values():
+            if not isinstance(task_summary, dict):
+                continue
+            for key in keys:
+                value = task_summary.get(key)
+                if isinstance(value, int):
+                    total += value
+                    found = True
+                    break
+        if found:
+            return total
+    return 0
+
+
+def _sqlite_artifacts(
+    source: Any,
+    artifact_store: LocalArtifactStore | None,
+) -> list[Path]:
+    if artifact_store is None:
+        return []
+    paths: list[Path] = []
+    for reference in source.evidence_artifacts:
+        try:
+            _, path = artifact_store.verified_path(reference.artifact_id)
+            with path.open("rb") as handle:
+                if handle.read(16) == b"SQLite format 3\x00":
+                    paths.append(path)
+        except (KeyError, OSError, ValueError):
+            continue
+    return paths
+
+
+def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")').fetchall()}
+
+
+def _identity_aliases(
+    hydrated_sources: HydratedSourceSet,
+    artifact_store: LocalArtifactStore | None,
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    visited: set[Path] = set()
+    for source in hydrated_sources.sources:
+        for path in _sqlite_artifacts(source, artifact_store):
+            if path in visited:
+                continue
+            visited.add(path)
+            with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+                if "compound_index" in tables:
+                    columns = _columns(connection, "compound_index")
+                    fields = [
+                        name
+                        for name in ("compound_identifier", "cid", "sid", "inchikey")
+                        if name in columns
+                    ]
+                    if fields:
+                        sql = "SELECT " + ", ".join(fields) + " FROM compound_index"
+                        for row in connection.execute(sql):
+                            normalized = [
+                                item
+                                for value in row
+                                if (item := _canonical_identifier(value)) is not None
+                            ]
+                            canonical = next(
+                                (item for item in normalized if item.startswith("CID:")),
+                                next(
+                                    (
+                                        item
+                                        for item in normalized
+                                        if re.fullmatch(r"[A-Z]{14}-[A-Z]{10}-[A-Z]", item)
+                                    ),
+                                    normalized[0] if normalized else None,
+                                ),
+                            )
+                            if canonical:
+                                aliases.update({item: canonical for item in normalized})
+                if "records" in tables:
+                    columns = _columns(connection, "records")
+                    if {"pert_id", "pubchem_cid", "inchikey"}.issubset(columns):
+                        for row in connection.execute(
+                            "SELECT pert_id, pubchem_cid, inchikey FROM records"
+                        ):
+                            normalized = [
+                                item
+                                for value in row
+                                if (item := _canonical_identifier(value)) is not None
+                            ]
+                            canonical = next(
+                                (item for item in normalized if item.startswith("CID:")),
+                                next(
+                                    (
+                                        item
+                                        for item in normalized
+                                        if re.fullmatch(r"[A-Z]{14}-[A-Z]{10}-[A-Z]", item)
+                                    ),
+                                    normalized[0] if normalized else None,
+                                ),
+                            )
+                            if canonical:
+                                aliases.update({item: canonical for item in normalized})
+    return aliases
+
+
+def _resolved_identifier(value: Any, aliases: dict[str, str]) -> str | None:
+    normalized = _canonical_identifier(value)
+    if normalized is None:
+        return None
+    return aliases.get(normalized, normalized)
+
+
+def _activity_evidence(
+    source: Any,
+    artifact_store: LocalArtifactStore | None,
+    aliases: dict[str, str],
+) -> tuple[set[str], list[tuple[str, str | None]]]:
+    identifiers = {
+        aliases.get(item, item) for item in _stable_compound_ids(source.verified_metadata)
+    }
+    rows: list[tuple[str, str | None]] = []
+    source_identifier = source.source_identifier.split(":", 1)[-1]
+    for path in _sqlite_artifacts(source, artifact_store):
+        with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+            tables = {
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            if "activity_records" not in tables:
+                continue
+            columns = _columns(connection, "activity_records")
+            if not {"assay_identifier", "compound_identifier"}.issubset(columns):
+                continue
+            cid = "cid" if "cid" in columns else "NULL"
+            call = "activity_call" if "activity_call" in columns else "NULL"
+            sql = (
+                f"SELECT compound_identifier, {cid}, {call} FROM activity_records "
+                "WHERE assay_identifier IN (?, ?)"
+            )
+            for compound_identifier, pubchem_cid, activity_call in connection.execute(
+                sql, (source_identifier, source.source_identifier)
+            ):
+                stable = _resolved_identifier(pubchem_cid or compound_identifier, aliases)
+                if stable is None:
+                    continue
+                identifiers.add(stable)
+                rows.append((stable, str(activity_call).strip().lower() if activity_call else None))
+    return identifiers, rows
+
+
+def _transcriptomic_evidence(
+    source: Any,
+    artifact_store: LocalArtifactStore | None,
+    aliases: dict[str, str],
+) -> tuple[set[str], list[tuple[str, str | None, str | None, str | None]]]:
+    identifiers = {
+        aliases.get(item, item) for item in _stable_compound_ids(source.verified_metadata)
+    }
+    profiles: list[tuple[str, str | None, str | None, str | None]] = []
+    for path in _sqlite_artifacts(source, artifact_store):
+        with sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True) as connection:
+            tables = {
+                str(row[0])
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            if "transcriptomic_records" in tables:
+                sql = """
+                    SELECT compound_identifier, biological_model, dose, exposure_time
+                    FROM transcriptomic_records
+                    WHERE (accession=? OR source_identifier=?)
+                      AND compound_identifier IS NOT NULL
+                """
+                for compound, cell, dose, exposure_time in connection.execute(
+                    sql, (source.source_identifier, source.source_identifier)
+                ):
+                    stable = _resolved_identifier(compound, aliases)
+                    if stable is not None:
+                        identifiers.add(stable)
+                        profiles.append((stable, cell, dose, exposure_time))
+            if "records" not in tables:
+                continue
+            columns = _columns(connection, "records")
+            if {
+                "pert_id",
+                "cell_id",
+                "dose",
+                "exposure_time",
+                "measured_chemical_perturbation",
+            }.issubset(columns):
+                for pert_id, cell, dose, exposure_time in connection.execute(
+                    """
+                    SELECT pert_id, cell_id, dose, exposure_time FROM records
+                    WHERE measured_chemical_perturbation=1 AND row_status='valid'
+                    """
+                ):
+                    stable = _resolved_identifier(pert_id, aliases)
+                    if stable is not None:
+                        identifiers.add(stable)
+                        profiles.append((stable, cell, dose, exposure_time))
+    return identifiers, profiles
 
 
 def calculate_combination_coverage(
     workflow_id: str,
     discovery_round: int,
     hydrated_sources: HydratedSourceSet,
+    *,
+    artifact_store: LocalArtifactStore | None = None,
 ) -> CombinationCoverageSet:
     """Evaluate every activity/transcriptomic source pair without inventing labels.
 
@@ -163,15 +407,29 @@ def calculate_combination_coverage(
         ),
         key=lambda source: source.hydrated_source_id,
     )
+    aliases = _identity_aliases(hydrated_sources, artifact_store)
     combinations: list[CombinationCoverage] = []
     for activity in activity_sources:
-        activity_ids = _stable_compound_ids(activity.verified_metadata)
+        activity_ids, activity_rows = _activity_evidence(activity, artifact_store, aliases)
         for transcriptomic in transcriptomic_sources:
-            transcriptomic_ids = _stable_compound_ids(transcriptomic.verified_metadata)
+            transcriptomic_ids, transcriptomic_profiles = _transcriptomic_evidence(
+                transcriptomic, artifact_store, aliases
+            )
             overlap = activity_ids & transcriptomic_ids
             activity_summary = activity.coverage_summary
             transcriptomic_summary = transcriptomic.coverage_summary
-            context = transcriptomic.experimental_context
+            overlap_profiles = [
+                profile for profile in transcriptomic_profiles if profile[0] in overlap
+            ]
+            context = dict(transcriptomic.experimental_context)
+            if overlap_profiles:
+                context.update(
+                    {
+                        "cell": sorted({item[1] for item in overlap_profiles if item[1]}),
+                        "dose": sorted({item[2] for item in overlap_profiles if item[2]}),
+                        "time": sorted({item[3] for item in overlap_profiles if item[3]}),
+                    }
+                )
             refs = {
                 (reference.artifact_id, reference.sha256): reference
                 for reference in [
@@ -182,15 +440,35 @@ def calculate_combination_coverage(
             missing: dict[str, int] = {}
             for field in ("cell", "dose", "time"):
                 if not context.get(field):
-                    missing[field] = int(transcriptomic_summary.get("profile_count", 0))
-            active = activity_summary.get("active_count")
-            inactive = activity_summary.get("inactive_count")
-            ambiguous = activity_summary.get("ambiguous_count")
+                    missing[field] = _summary_value(
+                        transcriptomic_summary, "profile_count", "metadata_rows"
+                    )
+            joined_activity_rows = [row for row in activity_rows if row[0] in overlap]
+            active = sum(row[1] == "active" for row in joined_activity_rows)
+            inactive = sum(row[1] == "inactive" for row in joined_activity_rows)
+            ambiguous = sum(row[1] not in {"active", "inactive"} for row in joined_activity_rows)
+            if not activity_rows:
+                active = _summary_value(activity_summary, "active_count")
+                inactive = _summary_value(activity_summary, "inactive_count")
+                ambiguous = _summary_value(activity_summary, "ambiguous_count")
             identifier_universe = activity_ids | transcriptomic_ids
             stable_coverage = (
                 len(overlap) / len(identifier_universe) if identifier_universe else 0.0
             )
             modality = activity.modality or "unspecified"
+            eligibility = transcriptomic.verified_metadata.get("joinability_eligible")
+            expression_path = transcriptomic.verified_metadata.get("expression_extraction_path")
+            quality_flags: list[str] = []
+            if not overlap:
+                quality_flags.append("no_stable_identifier_overlap")
+            if eligibility is not True:
+                quality_flags.append("transcriptomic_source_not_joinability_eligible")
+            if expression_path in {None, "", "unavailable"}:
+                quality_flags.append("expression_extraction_path_unavailable")
+            if any(not context.get(field) for field in ("cell", "dose", "time")):
+                quality_flags.append("incomplete_transcriptomic_context")
+            if not activity.label_or_activity_fields_available:
+                quality_flags.append("activity_labels_unavailable")
             coverage_id = (
                 "coverage-"
                 + deterministic_fingerprint(
@@ -242,16 +520,17 @@ def calculate_combination_coverage(
                             "inactive": inactive,
                             "ambiguous": ambiguous,
                         }.items()
-                        if isinstance(value, int)
                     },
                     missing_metadata=missing,
-                    quality_flags=([] if overlap else ["no_stable_identifier_overlap"]),
-                    conflicting_label_count=int(activity_summary.get("conflicting_label_count", 0)),
+                    quality_flags=quality_flags,
+                    conflicting_label_count=_summary_value(
+                        activity_summary, "conflicting_label_count"
+                    ),
                     context_completeness=(
                         sum(bool(context.get(field)) for field in ("cell", "dose", "time")) / 3
                     ),
-                    expected_assembled_sample_count=int(
-                        transcriptomic_summary.get("overlap_profile_count", len(overlap))
+                    expected_assembled_sample_count=(
+                        len(overlap_profiles) if overlap_profiles else len(overlap)
                     ),
                     expected_unique_compound_count=len(overlap),
                 )

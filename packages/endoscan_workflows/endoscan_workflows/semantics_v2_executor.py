@@ -33,6 +33,7 @@ from .discovery_strategy import (
     DiscoveryExecutionRecord,
     DiscoveryPlan,
     DiscoveryTaskStatus,
+    GlobalScientificSourceRequestAccounting,
     HydratedSource,
     HydratedSourceSet,
     HydrationCompleteness,
@@ -67,6 +68,7 @@ from .repository import (
     utc_text,
     versioned_payload,
 )
+from .source_governor import ScientificSourceRequestGovernor
 from .tools import ToolRegistry
 
 MAXIMUM_INLINE_DISCOVERY_RECORDS = 20_000
@@ -160,10 +162,13 @@ class SemanticsV2DiscoveryExecutor:
         database: WorkflowDatabase,
         artifacts: LocalArtifactStore,
         tool_registry: ToolRegistry,
+        *,
+        source_request_governor: ScientificSourceRequestGovernor | None = None,
     ) -> None:
         self.database = database
         self.artifacts = artifacts
         self.tool_registry = tool_registry
+        self.source_request_governor = source_request_governor
 
     @staticmethod
     def _task_result_name(round_number: int, task_id: str) -> str:
@@ -723,6 +728,7 @@ class SemanticsV2DiscoveryExecutor:
             if item.raw_artifact is not None
         ]
         verified_metadata: dict[str, Any]
+        context: dict[str, Any]
         source_version = execution.task.source_version
         complete = execution.completion_proof.completed
         if isinstance(output, LincsStreamingRetrievalOutput):
@@ -752,6 +758,15 @@ class SemanticsV2DiscoveryExecutor:
                     for item in manifest.role_artifacts
                 },
                 "expression_values_retrieved": False,
+                "transcriptomic_source_class": "primary_lincs_l1000",
+                "stable_identity_bridge_available": (
+                    manifest.role("pert_info").included_row_count > 0
+                ),
+                "expression_extraction_path": "registered_post_approval_level5_gctx",
+                "joinability_eligible": (
+                    manifest.role("pert_info").included_row_count > 0
+                    and manifest.role("sig_info").included_row_count > 0
+                ),
             }
             compound_index_available = manifest.role("pert_info").included_row_count > 0
             context = {
@@ -762,6 +777,27 @@ class SemanticsV2DiscoveryExecutor:
             metadata = output.metadata
             if metadata is None:
                 return record, [], [], _deduplicated_references(evidence)
+            perturbagens_by_id = {
+                item.pert_id: item for item in metadata.perturbagens if item.pert_id
+            }
+            measured_perturbagen_ids = {
+                item.pert_id
+                for item in metadata.signatures
+                if item.pert_id and item.measured_chemical_perturbation
+            }
+            stable_compound_ids = sorted(
+                {
+                    value
+                    for pert_id in measured_perturbagen_ids
+                    if (perturbagen := perturbagens_by_id.get(pert_id)) is not None
+                    for value in (
+                        perturbagen.pubchem_cid,
+                        perturbagen.inchikey,
+                        perturbagen.pert_id,
+                    )
+                    if value
+                }
+            )
             verified_metadata = {
                 "release_id": metadata.release_id,
                 "source_release": metadata.source_release,
@@ -771,11 +807,28 @@ class SemanticsV2DiscoveryExecutor:
                 "cell_count": len(metadata.cells),
                 "gene_count": len(metadata.genes),
                 "expression_values_retrieved": False,
+                "transcriptomic_source_class": "primary_lincs_l1000",
+                "stable_compound_ids": stable_compound_ids,
+                "stable_identity_bridge_available": any(
+                    (
+                        perturbagens_by_id[pert_id].pubchem_cid
+                        or perturbagens_by_id[pert_id].inchikey
+                    )
+                    for pert_id in measured_perturbagen_ids
+                    if pert_id in perturbagens_by_id
+                ),
+                "expression_extraction_path": "registered_post_approval_level5_gctx",
+                "joinability_eligible": bool(metadata.perturbagens and metadata.signatures),
             }
             compound_index_available = bool(metadata.perturbagens)
             context = {
                 "signature_metadata_rows": len(metadata.signatures),
                 "cell_metadata_rows": len(metadata.cells),
+                "cell": sorted({item.cell_id for item in metadata.signatures if item.cell_id}),
+                "dose": sorted({item.dose for item in metadata.signatures if item.dose}),
+                "time": sorted(
+                    {item.exposure_time for item in metadata.signatures if item.exposure_time}
+                ),
             }
         if not complete:
             return record, [], [], _deduplicated_references(evidence)
@@ -827,8 +880,24 @@ class SemanticsV2DiscoveryExecutor:
             source_version=source_version,
             licence_and_provenance=list(execution.task.licence_and_provenance),
             completeness_status=HydrationCompleteness.COMPLETE,
-            explicit_missing_fields=[],
-            coverage_summary={"by_task": {task.task_id: context}},
+            explicit_missing_fields=(
+                []
+                if verified_metadata["joinability_eligible"]
+                else ["stable_perturbagen_index_or_signature_metadata"]
+            ),
+            exclusion_reason=(
+                None
+                if verified_metadata["joinability_eligible"]
+                else "LINCS metadata lacks a joinable perturbagen/signature index."
+            ),
+            coverage_summary={
+                "by_task": {
+                    task.task_id: {
+                        **context,
+                        "profile_count": context["signature_metadata_rows"],
+                    }
+                }
+            },
             evidence_artifacts=_deduplicated_references(evidence),
         )
         return record, [candidate], [hydrated], _deduplicated_references(evidence)
@@ -1176,6 +1245,10 @@ class SemanticsV2DiscoveryExecutor:
                     "agent_role": "semantics-v2-discovery-executor",
                     "discovery_task_id": task.task_id,
                     "provider": task.provider,
+                    "discovery_round": plan.discovery_round,
+                    "maximum_global_scientific_source_requests": (
+                        plan.scientific_and_execution_budgets.maximum_scientific_source_requests
+                    ),
                 },
                 idempotency_key=(f"semantics-v2:{plan.discovery_round}:{task.task_id}:provider"),
             )
@@ -1238,8 +1311,28 @@ class SemanticsV2DiscoveryExecutor:
         workflow_id: str,
         materialization: DiscoveryTaskMaterialization,
     ) -> ArtifactReference:
+        record = materialization.ledger_record
+        if self.source_request_governor is not None:
+            accounting = self.source_request_governor.accounting(
+                workflow_id,
+                materialization.discovery_round,
+                task_id=record.task_id,
+            )
+            if accounting is not None:
+                record = record.model_copy(
+                    update={
+                        "scientific_source_request_count": accounting.reserved_requests,
+                        "transport_attempt_count": accounting.reserved_requests,
+                        "cache_hit_count": accounting.cache_hits,
+                        "blocked_request_count": accounting.blocked_requests,
+                        "requests_prevented_by_cancellation": (
+                            accounting.prevented_by_cancellation
+                        ),
+                    }
+                )
+                materialization = materialization.model_copy(update={"ledger_record": record})
         result_artifact = self._persist_task_result(materialization)
-        record = materialization.ledger_record.model_copy(
+        record = record.model_copy(
             update={
                 "source_response_artifacts": _deduplicated_references(
                     [
@@ -1269,9 +1362,7 @@ class SemanticsV2DiscoveryExecutor:
             if compact is not None:
                 materialization, _reference_value = compact
                 if materialization.ledger_record.status != record.status:
-                    raise WorkflowConflict(
-                        "Compact materialization and execution ledger diverged."
-                    )
+                    raise WorkflowConflict("Compact materialization and execution ledger diverged.")
                 values.append(materialization)
                 continue
             loaded = self._load_task_result(workflow_id, plan.discovery_round, record.task_id)
@@ -1331,8 +1422,8 @@ class SemanticsV2DiscoveryExecutor:
             values.append(materialization)
         return values
 
-    @staticmethod
     def _materialized_ledger(
+        self,
         ledger: DiscoveryExecutionLedger,
         materializations: list[DiscoveryTaskMaterialization],
     ) -> DiscoveryExecutionLedger:
@@ -1352,9 +1443,7 @@ class SemanticsV2DiscoveryExecutor:
                     update={
                         "raw_record_count": materialized.raw_record_count,
                         "normalized_record_count": materialized.normalized_record_count,
-                        "provider_unique_record_count": (
-                            materialized.provider_unique_record_count
-                        ),
+                        "provider_unique_record_count": (materialized.provider_unique_record_count),
                         "compact_source_candidate_count": (
                             materialized.compact_source_candidate_count
                         ),
@@ -1381,7 +1470,29 @@ class SemanticsV2DiscoveryExecutor:
                     }
                 )
             )
-        return ledger.model_copy(update={"records": records})
+        global_accounting = ledger.global_request_accounting
+        if self.source_request_governor is not None:
+            accounting = self.source_request_governor.reconcile(
+                ledger.workflow_id,
+                ledger.discovery_round,
+            )
+            if accounting is not None:
+                global_accounting = GlobalScientificSourceRequestAccounting(
+                    allowed_global_request_budget=accounting.maximum_requests,
+                    reserved_requests=accounting.reserved_requests,
+                    completed_transport_attempts=accounting.completed_transport_attempts,
+                    failed_transport_attempts=accounting.failed_transport_attempts,
+                    cache_hits=accounting.cache_hits,
+                    blocked_requests_after_budget_exhaustion=accounting.blocked_requests,
+                    requests_prevented_by_cancellation=(accounting.prevented_by_cancellation),
+                    remaining_requests=accounting.remaining_requests,
+                )
+        return ledger.model_copy(
+            update={
+                "records": records,
+                "global_request_accounting": global_accounting,
+            }
+        )
 
     def _persist_materialized_ledger(
         self,
@@ -1395,9 +1506,7 @@ class SemanticsV2DiscoveryExecutor:
         if reconciled == original:
             return None
         validate_execution_ledger(plan, reconciled)
-        serialized = canonical_json(
-            versioned_payload(document=reconciled.model_dump(mode="json"))
-        )
+        serialized = canonical_json(versioned_payload(document=reconciled.model_dump(mode="json")))
         with self.database.session() as session:
             build = require_build(session, workflow_id)
             row = session.get(TrainingDatasetWorkflowRow, workflow_id)
@@ -1728,19 +1837,11 @@ class SemanticsV2DiscoveryExecutor:
             completed_no_candidate_task_ids=self._status_ids(
                 materialized_ledger, {DiscoveryTaskStatus.COMPLETED_NO_CANDIDATES}
             ),
-            running_task_ids=self._status_ids(
-                materialized_ledger, {DiscoveryTaskStatus.RUNNING}
-            ),
-            pending_task_ids=self._status_ids(
-                materialized_ledger, {DiscoveryTaskStatus.PENDING}
-            ),
-            missing_provider_modality_dimensions=self._missing_dimensions(
-                materialized_ledger
-            ),
+            running_task_ids=self._status_ids(materialized_ledger, {DiscoveryTaskStatus.RUNNING}),
+            pending_task_ids=self._status_ids(materialized_ledger, {DiscoveryTaskStatus.PENDING}),
+            missing_provider_modality_dimensions=self._missing_dimensions(materialized_ledger),
             provider_dataset_artifacts=dataset_refs,
-            raw_record_count=sum(
-                item.raw_record_count for item in materialized_ledger.records
-            ),
+            raw_record_count=sum(item.raw_record_count for item in materialized_ledger.records),
             normalized_record_count=sum(
                 item.normalized_record_count for item in materialized_ledger.records
             ),
@@ -1748,9 +1849,7 @@ class SemanticsV2DiscoveryExecutor:
                 item.provider_unique_record_count for item in materialized_ledger.records
             ),
             compact_source_candidate_count=len(candidates),
-            retained_row_count=sum(
-                item.retained_row_count for item in materialized_ledger.records
-            ),
+            retained_row_count=sum(item.retained_row_count for item in materialized_ledger.records),
         )
         validate_candidate_universe(materialized_ledger, candidate_set)
         artifact = self._persist_final_document(
