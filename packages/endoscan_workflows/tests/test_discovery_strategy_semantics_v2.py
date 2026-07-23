@@ -62,7 +62,7 @@ from endoscan_workflows.endpoint_lifecycle import (
     calculate_combination_coverage,
 )
 from endoscan_workflows.errors import GuardNotSatisfied, InvalidTransition, WorkflowConflict
-from endoscan_workflows.models import TrainingDatasetWorkflowRow
+from endoscan_workflows.models import EndpointBuildRow, TrainingDatasetWorkflowRow
 from endoscan_workflows.offline_demo import (
     build_offline_assembly_input,
     execute_offline_demo,
@@ -1065,6 +1065,52 @@ def test_semantics_v2_end_to_end_preserves_universe_and_approves_one_recipe(
         (item.id, item.sha256) for item in store.list_artifacts(approved.id)
     ] == artifacts_before
     assert len(service.timeline(approved.id)) == events_before
+
+
+def test_zero_candidate_coverage_uses_the_configured_artifact_store(
+    workflow_runtime, tmp_path
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    _write_fixture_registry(service, tmp_path)
+    approved = _start_approved_broad_build(service)
+    planned = service.continue_training_dataset_workflow(
+        approved.id,
+        expected_version=approved.version,
+        actor="test-admin",
+        idempotency_key="zero-candidate-coverage:plan",
+    )
+    authorized = service.authorize_semantics_v2_discovery(
+        approved.id,
+        expected_version=planned.version,
+        actor="test-admin",
+        idempotency_key="zero-candidate-coverage:authorize",
+    )
+    hydrated = HydratedSourceSet(
+        workflow_id=approved.id,
+        discovery_round=0,
+        sources=[],
+    )
+    with database.session() as session:
+        workflow = session.get(TrainingDatasetWorkflowRow, approved.id)
+        build = session.get(EndpointBuildRow, approved.id)
+        assert workflow is not None
+        assert build is not None
+        workflow.hydrated_sources_json = hydrated.model_dump_json()
+        build.current_stage = WorkflowState.COMPUTING_COMBINATION_COVERAGE.value
+
+    result = service.calculate_semantics_v2_coverage(
+        approved.id,
+        expected_version=authorized.version,
+        actor="deterministic-orchestrator",
+        idempotency_key="zero-candidate-coverage:calculate",
+    )
+
+    assert result.current_stage is WorkflowState.GENERATING_ASSEMBLY_STRATEGIES
+    workflow = service.training_dataset_workflow(approved.id)
+    assert workflow["combination_coverage"]["combinations"] == []
+    coverage_artifact = store.find_by_logical_name(approved.id, "combination-coverage-round-0.json")
+    assert coverage_artifact is not None
+    assert store.verify(coverage_artifact.id)
 
 
 def test_revision_and_rejection_create_new_round_without_overwriting_prior_artifacts(

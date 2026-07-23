@@ -2114,7 +2114,7 @@ class WorkflowService:
                 workflow_id,
                 row.discovery_round,
                 hydrated,
-                artifact_store=self.artifacts,
+                artifact_store=self.artifact_store,
             )
             validate_coverage_universe(hydrated, coverage)
             artifact = self._put_semantics_v2_document(
