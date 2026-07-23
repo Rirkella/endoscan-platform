@@ -256,6 +256,12 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         else None
     )
     preapproval_manifest_path = root / "registry" / "data" / "preapproval_provider_releases.json"
+    public_provider_cache_root = Path(
+        os.environ.get(
+            "ENDOSCAN_PROVIDER_CACHE_ROOT",
+            str(root / ".endoscan" / "provider-cache"),
+        )
+    )
     preapproval_provider_layer = (
         PreapprovalProviderLayer(
             PreapprovalMetadataProvider(
@@ -272,14 +278,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
                         )
                     ),
                 ),
-                public_provider_cache_root=(
-                    Path(
-                        os.environ.get(
-                            "ENDOSCAN_PROVIDER_CACHE_ROOT",
-                            str(root / ".endoscan" / "provider-cache"),
-                        )
-                    )
-                ),
+                public_provider_cache_root=public_provider_cache_root,
             )
         )
         if preapproval_manifest_path.is_file()
@@ -298,6 +297,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         artifact_store,
         tool_registry,
         source_request_governor=source_request_governor,
+        public_provider_cache_root=public_provider_cache_root,
     )
     provider_registry = ProviderRegistry()
     provider_registry.register("offline_fixture", DeterministicOfflineProvider)

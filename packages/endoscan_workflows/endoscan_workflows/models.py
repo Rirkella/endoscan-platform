@@ -108,226 +108,36 @@ class ArtifactRow(Base):
     workflow_id: Mapped[str] = mapped_column(
         ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
     )
-    step_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_steps.id"), index=True)
-    sha256: Mapped[str] = mapped_column(String(64), index=True)
-    size_bytes: Mapped[int] = mapped_column(Integer)
-    mime_type: Mapped[str] = mapped_column(String(160))
-    artifact_type: Mapped[str] = mapped_column(String(120), index=True)
-    logical_name: Mapped[str] = mapped_column(String(160))
-    storage_key: Mapped[str] = mapped_column(String(200))
-    producer: Mapped[str] = mapped_column(String(160))
-    original_source: Mapped[str | None] = mapped_column(String(1000))
-    metadata_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(String(40))
+    …124438 tokens truncated…bounded_smoke",
+                maximum_hydration_candidates=10,
+            ),
+            _invocation(workflow_id, provider_name),
+        )
+        assert replay.cache_only_replay
+        assert not replay.normalization_ran
+        assert replay.dataset_manifest.bundle_fingerprint == cold_fingerprints[provider_name]
+    assert transport.calls == cold_calls
 
 
-class AgentRunRow(Base):
-    __tablename__ = "agent_runs"
-
-    id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    workflow_id: Mapped[str] = mapped_column(
-        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
-    )
-    step_id: Mapped[str] = mapped_column(ForeignKey("workflow_steps.id"), index=True)
-    agent_name: Mapped[str] = mapped_column(String(120))
-    agent_version: Mapped[str] = mapped_column(String(40))
-    provider: Mapped[str] = mapped_column(String(80))
-    model_identifier: Mapped[str] = mapped_column(String(160))
-    instruction_version: Mapped[str] = mapped_column(String(40))
-    input_hash: Mapped[str] = mapped_column(String(64))
-    status: Mapped[str] = mapped_column(String(40), index=True)
-    request_json: Mapped[str] = mapped_column(Text)
-    result_json: Mapped[str | None] = mapped_column(Text)
-    trace_json: Mapped[str] = mapped_column(Text)
-    usage_json: Mapped[str] = mapped_column(Text)
-    turns: Mapped[int] = mapped_column(Integer, default=0)
-    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[str] = mapped_column(String(40))
-    completed_at: Mapped[str | None] = mapped_column(String(40))
-
-
-class ToolCallRow(Base):
-    __tablename__ = "tool_calls"
-    __table_args__ = (
-        UniqueConstraint("agent_run_id", "idempotency_key"),
-        UniqueConstraint(
-            "workflow_id", "tool_name", "idempotency_key", name="uq_tool_logical_call"
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    workflow_id: Mapped[str] = mapped_column(
-        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
-    )
-    agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"), index=True)
-    tool_name: Mapped[str] = mapped_column(String(80), index=True)
-    tool_version: Mapped[str] = mapped_column(String(40))
-    permission_scope_json: Mapped[str] = mapped_column(Text)
-    arguments_json: Mapped[str] = mapped_column(Text)
-    result_json: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(40))
-    idempotency_key: Mapped[str] = mapped_column(String(160))
-    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[str] = mapped_column(String(40))
-    completed_at: Mapped[str | None] = mapped_column(String(40))
-
-
-class HumanDecisionRow(Base):
-    __tablename__ = "human_decisions"
-
-    id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    workflow_id: Mapped[str] = mapped_column(
-        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
-    )
-    approval_id: Mapped[str] = mapped_column(ForeignKey("approvals.id"), index=True)
-    reviewer_id: Mapped[str] = mapped_column(String(120))
-    decision: Mapped[str] = mapped_column(String(64))
-    payload_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(String(40))
-
-
-class WorkflowErrorRow(Base):
-    __tablename__ = "workflow_errors"
-
-    id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    workflow_id: Mapped[str] = mapped_column(
-        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
-    )
-    step_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_steps.id"))
-    agent_run_id: Mapped[str | None] = mapped_column(ForeignKey("agent_runs.id"))
-    tool_call_id: Mapped[str | None] = mapped_column(ForeignKey("tool_calls.id"))
-    code: Mapped[str] = mapped_column(String(120), index=True)
-    category: Mapped[str] = mapped_column(String(80))
-    retryable: Mapped[int] = mapped_column(Integer, default=0)
-    safe_message: Mapped[str] = mapped_column(Text)
-    detail_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(String(40))
-
-
-class SourceCacheRow(Base):
-    __tablename__ = "source_response_cache"
-
-    cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    tool_name: Mapped[str] = mapped_column(String(80), index=True)
-    normalized_arguments_json: Mapped[str] = mapped_column(Text)
-    policy_version: Mapped[str] = mapped_column(String(40))
-    source_version: Mapped[str | None] = mapped_column(String(120))
-    source_url: Mapped[str] = mapped_column(String(1000))
-    http_metadata_json: Mapped[str] = mapped_column(Text)
-    content_hash: Mapped[str] = mapped_column(String(64), index=True)
-    parsed_output_json: Mapped[str] = mapped_column(Text)
-    raw_artifact_id: Mapped[str] = mapped_column(ForeignKey("artifacts.id"), index=True)
-    retrieved_at: Mapped[str] = mapped_column(String(40))
-    expires_at: Mapped[str] = mapped_column(String(40), index=True)
-
-
-class ScientificSourceRequestBudgetRow(Base):
-    """One immutable-capacity request budget shared by every task in a discovery round."""
-
-    __tablename__ = "scientific_source_request_budgets"
-    __table_args__ = (
-        UniqueConstraint(
-            "workflow_id",
-            "discovery_round",
-            name="uq_scientific_source_budget_workflow_round",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    workflow_id: Mapped[str] = mapped_column(
-        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
-    )
-    discovery_round: Mapped[int] = mapped_column(Integer)
-    maximum_requests: Mapped[int] = mapped_column(Integer)
-    reserved_requests: Mapped[int] = mapped_column(Integer, default=0)
-    completed_transport_attempts: Mapped[int] = mapped_column(Integer, default=0)
-    failed_transport_attempts: Mapped[int] = mapped_column(Integer, default=0)
-    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
-    blocked_requests: Mapped[int] = mapped_column(Integer, default=0)
-    prevented_by_cancellation: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[str] = mapped_column(String(40))
-    updated_at: Mapped[str] = mapped_column(String(40))
-
-
-class ScientificSourceRequestAttemptRow(Base):
-    """Durable request decision recorded before the common scientific transport boundary."""
-
-    __tablename__ = "scientific_source_request_attempts"
-    __table_args__ = (
-        UniqueConstraint(
-            "budget_id",
-            "reservation_sequence",
-            name="uq_scientific_source_budget_reservation",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    budget_id: Mapped[str] = mapped_column(
-        ForeignKey("scientific_source_request_budgets.id", ondelete="CASCADE"), index=True
-    )
-    workflow_id: Mapped[str] = mapped_column(
-        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
-    )
-    discovery_round: Mapped[int] = mapped_column(Integer)
-    task_id: Mapped[str] = mapped_column(String(160), index=True)
-    tool_name: Mapped[str] = mapped_column(String(80), index=True)
-    reservation_sequence: Mapped[int | None] = mapped_column(Integer)
-    request_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
-    source_host: Mapped[str] = mapped_column(String(253))
-    safe_url_path: Mapped[str] = mapped_column(String(500))
-    outcome: Mapped[str] = mapped_column(String(80), index=True)
-    request_left_process: Mapped[int] = mapped_column(Integer, default=0)
-    started_at: Mapped[str | None] = mapped_column(String(40))
-    completed_at: Mapped[str | None] = mapped_column(String(40))
-    http_status: Mapped[int | None] = mapped_column(Integer)
-    final_approved_host: Mapped[str | None] = mapped_column(String(253))
-    error_category: Mapped[str | None] = mapped_column(String(120))
-    created_at: Mapped[str] = mapped_column(String(40))
-
-
-class TrainingDatasetWorkflowRow(Base):
-    """Mutable latest-document pointers; every durable decision remains an artifact/event."""
-
-    __tablename__ = "training_dataset_workflows"
-
-    workflow_id: Mapped[str] = mapped_column(
-        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), primary_key=True
-    )
-    contract_version: Mapped[str] = mapped_column(String(40), default="1.0.0")
-    workflow_semantics_version: Mapped[str] = mapped_column(String(40), default="1.0.0")
-    benchmark_mode: Mapped[str] = mapped_column(String(120), index=True)
-    initial_context_json: Mapped[str] = mapped_column(Text)
-    endpoint_discovery_scope_json: Mapped[str | None] = mapped_column(Text)
-    specification_draft_json: Mapped[str | None] = mapped_column(Text)
-    specification_outcome_json: Mapped[str | None] = mapped_column(Text)
-    specification_semantic_validation_json: Mapped[str | None] = mapped_column(Text)
-    specification_compilation_outcome_json: Mapped[str | None] = mapped_column(Text)
-    specification_review_record_json: Mapped[str | None] = mapped_column(Text)
-    specification_json: Mapped[str | None] = mapped_column(Text)
-    component_requirements_json: Mapped[str | None] = mapped_column(Text)
-    source_discovery_authorization_json: Mapped[str | None] = mapped_column(Text)
-    source_discovery_budget_json: Mapped[str | None] = mapped_column(Text)
-    source_observations_json: Mapped[str | None] = mapped_column(Text)
-    source_fragments_json: Mapped[str | None] = mapped_column(Text)
-    source_inventory_json: Mapped[str | None] = mapped_column(Text)
-    capability_matrix_json: Mapped[str | None] = mapped_column(Text)
-    assembly_strategies_json: Mapped[str | None] = mapped_column(Text)
-    joinability_diagnostics_json: Mapped[str | None] = mapped_column(Text)
-    gap_report_json: Mapped[str | None] = mapped_column(Text)
-    preparation_plan_json: Mapped[str | None] = mapped_column(Text)
-    assembly_review_json: Mapped[str | None] = mapped_column(Text)
-    discovery_plan_json: Mapped[str | None] = mapped_column(Text)
-    discovery_execution_ledger_json: Mapped[str | None] = mapped_column(Text)
-    source_candidates_json: Mapped[str | None] = mapped_column(Text)
-    hydrated_sources_json: Mapped[str | None] = mapped_column(Text)
-    combination_coverage_json: Mapped[str | None] = mapped_column(Text)
-    strategy_proposals_json: Mapped[str | None] = mapped_column(Text)
-    assembly_recipe_json: Mapped[str | None] = mapped_column(Text)
-    provider_capability_findings_json: Mapped[str | None] = mapped_column(Text)
-    strategy_set_rejection_json: Mapped[str | None] = mapped_column(Text)
-    discovery_round: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[str] = mapped_column(String(40))
-    updated_at: Mapped[str] = mapped_column(String(40))
-
-
-Index("ix_build_status_updated", EndpointBuildRow.status, EndpointBuildRow.updated_at)
+def test_registered_capabilities_match_live_validated_readiness() -> None:
+    registry = load_operational_capability_registry(REPO_ROOT)
+    expected = {
+        "lincs-l1000",
+        "toxcast",
+        "tox21",
+        "pubchem-bioassay",
+        "pubchem-compound",
+        "ncbi-geo",
+        "ncbi-supporting-metadata",
+    }
+    assert expected <= {item.provider for item in registry.providers}
+    for provider in expected:
+        profile: ProviderOperationalProfile = registry.by_provider(provider)
+        for declaration in profile.capabilities:
+            if declaration.capability is OperationalCapability.HEAVY_EXPRESSION_EXTRACTION:
+                assert not declaration.satisfies_preapproval_requirement
+            else:
+                assert declaration.satisfies_preapproval_requirement, (
+                    provider,
+                    declaration.capability,
+                )

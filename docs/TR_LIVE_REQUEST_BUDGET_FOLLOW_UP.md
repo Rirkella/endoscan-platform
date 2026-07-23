@@ -83,3 +83,78 @@ combination coverage, and the current strategy proposal generator are
 intentionally deterministic. The preserved live run recorded zero provider
 generations and zero model turns and must be described as deterministic
 agentic orchestration, not a live LLM-agent run.
+
+## Fair scheduling policy 1.0.0
+
+The 80-request governor remains the final transport authority. A persisted
+build/round scheduler now reserves breadth before any task can use the shared
+remainder. Every reservation, consumption, release, terminal outcome, provider
+cap, source-family cap, and evidence-role cap survives restart and is exposed
+in discovery progress.
+
+The default 80-request policy is:
+
+| Task class | Initial per task | Maximum per task | Family / role cap |
+|---|---:|---:|---:|
+| LINCS L1000 | 12 | 16 | LINCS 16; transcriptomic total 20 |
+| PubChem Compound identity | 10 | 14 | identity 14 |
+| GEO supplemental metadata | 6 | 8 | GEO 8; transcriptomic total 20 |
+| Supporting metadata | 4 | 4 | supporting 4 |
+| PubChem BioAssay, each requested modality | 5 | 8 | PubChem BioAssay 24 |
+| Tox21, each requested modality | 2 | 3 | Tox21 9 |
+| ToxCast, each requested modality | 3 | 3 | ToxCast 9 |
+
+For binding, agonism, and antagonism this reserves 62 requests and leaves an
+18-request shared remainder. Expansion cannot consume another pending task's
+reservation within a provider, source-family, or role cap. Unused allocations
+return to the shared pool only after a deterministic terminal outcome.
+Binding, agonism, and antagonism retain distinct task IDs, observations, and
+coverage results.
+
+Execution is ordered into four joinability-first phases:
+
+1. validate local/provider prerequisites and establish LINCS readiness;
+2. perform shallow, separately bounded activity discovery across modality and
+   provider families;
+3. resolve stable identities and supplemental transcriptomic metadata;
+4. spend the remainder on evidence that can improve a registered join, then
+   compute coverage deterministically.
+
+Paginated outputs persist per-page request count, raw and normalized row
+counts, provider-unique records, new stable identifiers, new compact
+candidates, duplicate count, joinability contribution, and continuation
+token. Two consecutive pages with neither a new compact candidate nor a new
+stable identifier stop pagination before the task ceiling. Cancellation,
+deadline, missing prerequisite, allocation exhaustion, and global budget
+exhaustion also stop before another transport request.
+
+### ToxCast prerequisite
+
+Bounded discovery never downloads the multi-gigabyte invitroDB archive. The
+preflight checks the reviewed v4.3 cache locally and records release,
+fingerprints/checksums, cache-only readiness, and remediation. If the cache is
+absent, all ToxCast modality tasks terminate as prerequisite-blocked with zero
+network requests and release their unused reservations.
+
+After explicit operator approval, the separate preparation command is:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\stage_toxcast_public_cache.py `
+  --cache-root .endoscan\provider-cache `
+  --confirm-large-download
+```
+
+The command performs one reviewed large-download attempt, verifies the
+authoritative archive, and creates the normalized local cache. It is not
+called by tests or discovery.
+
+### Scientific success gate
+
+Retrieval, normalization, stable-ID bridging, and coverage remain
+deterministic. The model may synthesize a typed proposal only from verified
+artifacts; it does not calculate joins or invent identifiers. A proposal is
+reviewable only with non-zero stable overlap and expected rows, one explicit
+activity modality, an explicit transcriptomic source, biological context,
+dose/time evidence or a bounded approved context, and an expression
+availability or approvable extraction path. Zero-row proposals do not advance
+to human strategy review.
