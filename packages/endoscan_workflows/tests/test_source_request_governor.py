@@ -103,6 +103,48 @@ def _invocation(
     )
 
 
+def test_long_pubchem_cid_path_keeps_successful_transport_diagnostic_schema_valid() -> None:
+    physical_requests = 0
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        nonlocal physical_requests
+        physical_requests += 1
+        return httpx.Response(
+            200,
+            json={"PropertyTable": {"Properties": []}},
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+
+    identifiers = ",".join(str(value) for value in range(10_000, 10_100))
+    url = (
+        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/"
+        f"{identifiers}/property/Title,InChIKey,CanonicalSMILES/JSON"
+    )
+    client = ScientificSourceClient(
+        maximum_attempts=1,
+        requests_per_second=10,
+        transport=httpx.MockTransport(transport),
+        sleep=lambda _seconds: None,
+    )
+    try:
+        response = client.get(
+            url,
+            tool_name="pubchem_compound_identity",
+            maximum_attempts=1,
+            accepted_types={"application/json"},
+        )
+    finally:
+        client.close()
+
+    assert physical_requests == 1
+    assert response.status_code == 200
+    assert response.diagnostic is not None
+    assert len(response.diagnostic.safe_url_path) <= 500
+    assert "/sha256-" in response.diagnostic.safe_url_path
+    assert response.diagnostic.source_error_category == "none"
+
+
 def test_concurrent_paginated_providers_share_exact_global_cap(workflow_runtime) -> None:
     database, _store, _providers, _harness, service = workflow_runtime
     workflow_id = _create_workflow(service, "concurrent-cap")

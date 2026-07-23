@@ -34,6 +34,7 @@ from .discovery_strategy import (
     DiscoveryExecutionRecord,
     DiscoveryPlan,
     DiscoveryTaskStatus,
+    EvidenceRole,
     GlobalScientificSourceRequestAccounting,
     HydratedSource,
     HydratedSourceSet,
@@ -766,6 +767,22 @@ class SemanticsV2DiscoveryExecutor:
             matched_source_identifiers = set(output.toxcast_public_activity.matched_aeids)
             modality_by_source = dict(output.toxcast_public_activity.modality_by_aeid)
             provider_summary = output.toxcast_public_activity.coverage.model_dump(mode="json")
+        if task.evidence_role is EvidenceRole.ACTIVITY:
+            proof = output.completion_proof
+            provider_summary.update(
+                {
+                    "activity_data_availability_inspected": (
+                        proof.activity_availability_attempt_count == proof.hydrated_candidate_count
+                    ),
+                    "assay_relationships_inspected": (
+                        proof.relationship_attempt_count == proof.hydrated_candidate_count
+                    ),
+                    "structural_validation_status": ("valid" if proof.completed else "incomplete"),
+                    "shortlisted_assay_ids": proof.shortlisted_candidate_ids,
+                    "excluded_assay_count": proof.excluded_candidate_count,
+                    "candidate_exclusion_reason": proof.candidate_exclusion_reason,
+                }
+            )
         units = compact_provider_dataset(
             path,
             provider=task.provider,
@@ -781,9 +798,29 @@ class SemanticsV2DiscoveryExecutor:
                 "Provider candidate metadata exceeds the versioned SourceCandidateSet bound."
             )
         dataset_refs.append(output.candidates.artifact)
+        structural_raw_ids_by_source: dict[str, set[str]] = {}
+        if task.evidence_role is EvidenceRole.ACTIVITY:
+            for execution in output.page_or_file_execution_preview:
+                for result in execution.page_or_file_results:
+                    if result.raw_artifact is None:
+                        continue
+                    match = re.search(r"aid-([0-9]+)", result.resource_id)
+                    if match is not None:
+                        structural_raw_ids_by_source.setdefault(match.group(1), set()).add(
+                            result.raw_artifact.artifact_id
+                        )
         raw_refs = self._artifact_references(
             workflow_id,
-            {artifact_id for unit in units for artifact_id in unit.raw_artifact_ids},
+            {
+                artifact_id
+                for unit in units
+                for artifact_id in (
+                    *unit.raw_artifact_ids,
+                    *structural_raw_ids_by_source.get(
+                        unit.source_identifier.removeprefix("AID:"), set()
+                    ),
+                )
+            },
         )
         raw_by_id = {item.artifact_id: item for item in raw_refs}
         candidates: list[SourceCandidate] = []
@@ -805,7 +842,14 @@ class SemanticsV2DiscoveryExecutor:
             )
             unit_raw_refs = [
                 raw_by_id[artifact_id]
-                for artifact_id in unit.raw_artifact_ids
+                for artifact_id in sorted(
+                    {
+                        *unit.raw_artifact_ids,
+                        *structural_raw_ids_by_source.get(
+                            unit.source_identifier.removeprefix("AID:"), set()
+                        ),
+                    }
+                )
                 if artifact_id in raw_by_id
             ]
             query_refs = _deduplicated_references(
@@ -1070,7 +1114,7 @@ class SemanticsV2DiscoveryExecutor:
         workflow_id: str,
         plan: DiscoveryPlan,
     ) -> tuple[ArtifactReference | None, int]:
-        identifiers: set[str] = set()
+        identifier_sources: dict[str, set[str]] = {}
         for task in plan.provider_specific_query_tasks:
             loaded = self._load_task_result(workflow_id, plan.discovery_round, task.task_id)
             if loaded is None:
@@ -1095,7 +1139,9 @@ class SemanticsV2DiscoveryExecutor:
                         ):
                             value = str(cid or compound_identifier or "")
                             if CID.fullmatch(value):
-                                identifiers.add(value)
+                                identifier_sources.setdefault(value, set()).add(
+                                    f"{task.evidence_role.value}:{task.provider}"
+                                )
                     if "records" in tables:
                         columns = {
                             str(row[1]) for row in connection.execute("PRAGMA table_info(records)")
@@ -1105,11 +1151,35 @@ class SemanticsV2DiscoveryExecutor:
                                 "SELECT pubchem_cid FROM records WHERE pubchem_cid IS NOT NULL"
                             ):
                                 if CID.fullmatch(str(cid)):
-                                    identifiers.add(str(cid))
-        ordered = sorted(identifiers, key=lambda value: int(value.removeprefix("CID:")))
+                                    value = str(cid)
+                                    identifier_sources.setdefault(value, set()).add(
+                                        f"{task.evidence_role.value}:{task.provider}"
+                                    )
+
+        def priority(value: str) -> tuple[int, int]:
+            roles = identifier_sources[value]
+            has_activity = any(item.startswith("activity:") for item in roles)
+            has_transcriptomic = any(item.startswith("transcriptomic:") for item in roles)
+            rank = 0 if has_activity and has_transcriptomic else 1 if has_activity else 2
+            return rank, int(value.removeprefix("CID:"))
+
+        ordered = sorted(identifier_sources, key=priority)
         if not ordered:
             return None, 0
-        content = ("\n".join(ordered) + "\n").encode()
+        content = (
+            "\n".join(
+                json.dumps(
+                    {
+                        "compound_identifier": value,
+                        "source_partitions": sorted(identifier_sources[value]),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                for value in ordered
+            )
+            + "\n"
+        ).encode()
         descriptor = self.artifacts.put_bytes(
             workflow_id=workflow_id,
             content=content,
@@ -1396,11 +1466,17 @@ class SemanticsV2DiscoveryExecutor:
                 upstream_artifact, upstream_count = self._upstream_identifiers(workflow_id, plan)
                 if upstream_artifact is None:
                     return self._blocked_dependency(workflow_id, plan, running)
+            maximum_hydration_candidates = None
+            if task.provider == "pubchem-bioassay" and allocation is not None:
+                # One search and one summary request are fixed overhead. Every retained
+                # assay then requires compound IDs, activity rows, and relationships.
+                maximum_hydration_candidates = max(1, (allocation.allocated_requests - 2) // 3)
             arguments = compile_provider_metadata_input(
                 task,
                 running,
                 upstream_identifier_artifact=upstream_artifact,
                 upstream_identifier_count=upstream_count,
+                maximum_hydration_candidates=maximum_hydration_candidates,
             ).model_dump(mode="json")
         result = self.tool_registry.invoke(
             ToolInvocation(
@@ -1500,8 +1576,16 @@ class SemanticsV2DiscoveryExecutor:
             if accounting is not None:
                 record = record.model_copy(
                     update={
-                        "scientific_source_request_count": accounting.reserved_requests,
-                        "transport_attempt_count": accounting.reserved_requests,
+                        "request_reservation_count": accounting.reserved_requests,
+                        "scientific_source_request_count": (
+                            accounting.completed_transport_attempts
+                            + accounting.failed_transport_attempts
+                        ),
+                        "transport_attempt_count": (
+                            accounting.completed_transport_attempts
+                            + accounting.failed_transport_attempts
+                        ),
+                        "completed_http_response_count": (accounting.completed_transport_attempts),
                         "cache_hit_count": accounting.cache_hits,
                         "blocked_request_count": accounting.blocked_requests,
                         "requests_prevented_by_cancellation": (
@@ -1661,6 +1745,9 @@ class SemanticsV2DiscoveryExecutor:
                     reserved_requests=accounting.reserved_requests,
                     completed_transport_attempts=accounting.completed_transport_attempts,
                     failed_transport_attempts=accounting.failed_transport_attempts,
+                    local_request_validation_failures=sum(
+                        item.local_request_validation_failure_count for item in records
+                    ),
                     cache_hits=accounting.cache_hits,
                     blocked_requests_after_budget_exhaustion=accounting.blocked_requests,
                     requests_prevented_by_cancellation=(accounting.prevented_by_cancellation),

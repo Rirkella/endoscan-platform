@@ -1661,11 +1661,15 @@ def test_tr_joinability_uses_stable_bridges_and_blocks_unusable_transcriptomics(
         HydratedSource(
             hydrated_source_id=f"activity-{modality}",
             source_candidate_id=f"candidate-{modality}",
-            provider="toxcast" if modality != "agonism" else "tox21",
+            provider="pubchem-bioassay",
             source_identifier=f"AID:{assay}",
             evidence_role=EvidenceRole.ACTIVITY,
             modality=modality,
-            verified_metadata={},
+            verified_metadata={
+                "activity_data_availability_inspected": True,
+                "assay_relationships_inspected": True,
+                "structural_validation_status": "valid",
+            },
             compound_index_available=True,
             label_or_activity_fields_available=True,
             completeness_status=HydrationCompleteness.COMPLETE,

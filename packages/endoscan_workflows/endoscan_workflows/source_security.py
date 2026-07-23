@@ -736,10 +736,14 @@ class ScientificSourceClient:
         developer_message: str | None = None,
     ) -> SourceToolDiagnostic:
         parsed = urlparse(url)
+        safe_path = parsed.path or "/"
+        if len(safe_path) > 500:
+            path_hash = hashlib.sha256(safe_path.encode()).hexdigest()
+            safe_path = f"{safe_path[:425]}.../sha256-{path_hash}"
         return SourceToolDiagnostic(
             tool_name=tool_name,
             source_host=(parsed.hostname or "unknown").lower().rstrip("."),
-            safe_url_path=parsed.path or "/",
+            safe_url_path=safe_path,
             http_status=http_status,
             final_approved_host=final_host,
             redirect_count=redirect_count,
