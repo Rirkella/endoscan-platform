@@ -171,6 +171,19 @@ class ArbitraryCompoundTransport(FixtureTransport):
         }
 
 
+class DuplicateCursorTransport(FixtureTransport):
+    """Return one useful page followed by the same cursor payload indefinitely."""
+
+    def _payload(self, url: str) -> dict:
+        provider = urlparse(url).path.strip("/").split("/")[0]
+        if provider != "ncbi-geo":
+            return super()._payload(url)
+        payload = json.loads(json.dumps(FIXTURE["geo_pages"][0]))
+        payload["next_cursor"] = "duplicate-page"
+        payload["terminal"] = False
+        return payload
+
+
 class LocalPolicyFailureTransport(FixtureTransport):
     def get(self, url: str, **kwargs):
         self.calls.append(url)
@@ -709,6 +722,37 @@ def test_complete_multi_provider_execution_and_cache_replay(workflow_runtime) ->
     assert replay_fingerprints == {
         provider: output.dataset_manifest.bundle_fingerprint for provider, output in outputs.items()
     }
+
+
+def test_cursor_provider_stops_after_two_duplicate_no_yield_pages(workflow_runtime) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    workflow_id = _workflow_id(service)
+    transport = DuplicateCursorTransport()
+    provider = PreapprovalMetadataProvider(
+        _registry(),
+        ProviderTaskExecutor(
+            transport=transport,
+            cache=SourceResponseCache(database),
+            artifacts=store,
+        ),
+    )
+
+    output = provider.execute(
+        "ncbi-geo",
+        ProviderMetadataExecutionInput(
+            ledger_record=_record("ncbi-geo", EvidenceRole.TRANSCRIPTOMIC, 1),
+            release_id="fixture-ncbi-geo-v1",
+            query=ProviderMetadataQuery(biological_target="example receptor"),
+        ),
+        _invocation(workflow_id, "ncbi-geo"),
+    )
+
+    assert len(transport.calls) == 3
+    assert output.completion_proof.safety_truncated
+    assert len(output.pagination_yield) == 3
+    assert output.pagination_yield[0].new_compact_candidates > 0
+    assert [item.new_compact_candidates for item in output.pagination_yield[1:]] == [0, 0]
+    assert all(item.transport_request_count == 1 for item in output.pagination_yield)
 
 
 def test_manifest_allowlist_is_endpoint_scoped_and_local_policy_failure_is_not_transport(

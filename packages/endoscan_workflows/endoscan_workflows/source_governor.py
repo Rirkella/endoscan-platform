@@ -21,6 +21,10 @@ from .models import (
     ScientificSourceRequestBudgetRow,
 )
 from .repository import deterministic_id, utc_text
+from .source_scheduler import (
+    BuildFairRequestScheduler,
+    ScientificSourceTaskAllocationExhausted,
+)
 
 
 class ScientificSourceBudgetExhausted(RuntimeError):
@@ -103,6 +107,7 @@ class ScientificSourceRequestGovernor:
 
     def __init__(self, database: WorkflowDatabase) -> None:
         self.database = database
+        self.scheduler = BuildFairRequestScheduler(database)
 
     @staticmethod
     def _budget_id(workflow_id: str, discovery_round: int) -> str:
@@ -173,6 +178,11 @@ class ScientificSourceRequestGovernor:
         now = utc_text()
         blocked = False
         attempt_id: str | None = None
+        scheduler_consumed = self.scheduler.acquire_if_configured(
+            workflow_id,
+            discovery_round,
+            task_id,
+        )
         with self.database.session() as session:
             sequence = session.execute(
                 update(ScientificSourceRequestBudgetRow)
@@ -244,6 +254,8 @@ class ScientificSourceRequestGovernor:
                     )
                 )
         if blocked:
+            if scheduler_consumed:
+                self.scheduler.release_consumption(workflow_id, discovery_round, task_id)
             raise ScientificSourceBudgetExhausted(
                 "The global scientific-source request budget is exhausted."
             )
@@ -531,6 +543,9 @@ class SourceRequestExecutionContext:
             )
         except ScientificSourceBudgetExhausted:
             self.cancellation.cancel("global_request_budget_exhausted")
+            raise
+        except ScientificSourceTaskAllocationExhausted:
+            self.cancellation.cancel("task_request_allocation_exhausted")
             raise
         if self.cancellation.cancelled:
             self.governor.record_prevented(

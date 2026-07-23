@@ -54,6 +54,7 @@ from .provider_execution import (
     ProviderRetrievalTask,
     ProviderTaskExecutor,
 )
+from .source_governor import current_source_request_context
 from .toxcast_public_activity import (
     TOXCAST_ARCHIVE_SHA256,
     ToxCastActivityNormalizer,
@@ -518,6 +519,20 @@ class ProviderDatasetCompletionProof(ImmutableV2Contract):
     structural_validation_codes: list[str] = Field(default_factory=list, max_length=20)
 
 
+class ProviderPageYieldObservation(ImmutableV2Contract):
+    resource_id: str
+    operation: str
+    transport_request_count: int = Field(ge=0)
+    raw_rows: int = Field(ge=0)
+    normalized_rows: int = Field(ge=0)
+    provider_unique_records: int = Field(ge=0)
+    new_stable_compound_identifiers: int = Field(ge=0)
+    new_compact_candidates: int = Field(ge=0)
+    duplicates: int = Field(ge=0)
+    joinability_contribution: int = Field(ge=0)
+    continuation_token: str | None = None
+
+
 class DiskBackedSourceCandidateSet(ImmutableV2Contract):
     artifact: ArtifactReference
     table_name: Literal["source_candidates"] = "source_candidates"
@@ -600,6 +615,9 @@ class ProviderMetadataExecutionOutput(ImmutableV2Contract):
     )
     toxcast_public_activity: ToxCastPublicActivityCoverage | None = None
     toxcast_public_activity_artifact: ArtifactReference | None = None
+    pagination_yield: list[ProviderPageYieldObservation] = Field(
+        default_factory=list, max_length=10_000
+    )
 
 
 def _artifact_reference(descriptor: Any, artifact_type: str | None = None) -> ArtifactReference:
@@ -2526,6 +2544,127 @@ class PreapprovalMetadataProvider:
             records.extend(_iter_source_records(path, operation_id))
         return records
 
+    @staticmethod
+    def _task_cancelled() -> bool:
+        context = current_source_request_context()
+        return context is not None and context.cancellation.cancelled
+
+    @staticmethod
+    def _stable_identifiers(value: Any) -> set[str]:
+        stable: set[str] = set()
+        stable_keys = {
+            "cid",
+            "pubchem_cid",
+            "inchikey",
+            "inchi_key",
+            "dtxsid",
+            "compound_identifier",
+            "perturbagen_id",
+            "pert_id",
+        }
+
+        def visit(item: Any, key: str | None = None) -> None:
+            if isinstance(item, dict):
+                for child_key, child in item.items():
+                    visit(child, str(child_key).casefold())
+                return
+            if isinstance(item, list):
+                for child in item:
+                    visit(child, key)
+                return
+            if key not in stable_keys or item in (None, ""):
+                return
+            text = str(item).strip()
+            if key in {"cid", "pubchem_cid"} and text.isdigit() and int(text) > 0:
+                stable.add(f"CID:{int(text)}")
+            elif key in {"inchikey", "inchi_key"} and re.fullmatch(
+                r"[A-Z]{14}-[A-Z]{10}-[A-Z]", text.upper()
+            ):
+                stable.add(f"InChIKey:{text.upper()}")
+            elif key == "dtxsid" and re.fullmatch(r"DTXSID[0-9]{7,12}", text.upper()):
+                stable.add(text.upper())
+            elif key == "compound_identifier":
+                if re.fullmatch(r"CID:[1-9][0-9]*", text, re.IGNORECASE):
+                    stable.add(f"CID:{int(text.split(':', maxsplit=1)[1])}")
+                elif re.fullmatch(r"(?:INCHIKEY:)?[A-Z]{14}-[A-Z]{10}-[A-Z]", text.upper()):
+                    stable.add(f"InChIKey:{text.upper().removeprefix('INCHIKEY:')}")
+                elif re.fullmatch(r"DTXSID[0-9]{7,12}", text.upper()):
+                    stable.add(text.upper())
+            elif key in {"perturbagen_id", "pert_id"}:
+                stable.add(f"PERT:{text}")
+
+        visit(value)
+        return stable
+
+    def _pagination_yield(
+        self,
+        manifest: PreapprovalProviderReleaseManifest,
+        executions: list[ProviderExecutionOutcome],
+    ) -> list[ProviderPageYieldObservation]:
+        observations: list[ProviderPageYieldObservation] = []
+        template_by_role = {item.logical_role: item for item in manifest.resources}
+        seen_stable: set[str] = set()
+        seen_candidates: set[str] = set()
+        for execution in executions:
+            for result in execution.page_or_file_results:
+                normalized = execution.normalized_resources.get(result.resource_id, {})
+                records: list[dict[str, Any]] = []
+                if result.raw_artifact is not None:
+                    _, path = self.artifacts.verified_path(result.raw_artifact.artifact_id)
+                    template = template_by_role[result.logical_role]
+                    records = list(_iter_source_records(path, template.operation_id))
+                stable = self._stable_identifiers([normalized, records])
+                candidate_values = {
+                    str(item)
+                    for item in [
+                        *(
+                            value
+                            for key in ("candidate_ids", "identifiers", "accessions")
+                            for value in (
+                                normalized.get(key, [])
+                                if isinstance(normalized, dict)
+                                and isinstance(normalized.get(key), list)
+                                else []
+                            )
+                        ),
+                        *(
+                            row.get("source_identifier")
+                            for row in records
+                            if row.get("source_identifier") not in (None, "")
+                        ),
+                    ]
+                    if isinstance(item, str | int)
+                }
+                new_stable = stable - seen_stable
+                new_candidates = candidate_values - seen_candidates
+                seen_stable.update(stable)
+                seen_candidates.update(candidate_values)
+                raw_rows = result.parsed_record_count
+                unique = len(stable | candidate_values)
+                observations.append(
+                    ProviderPageYieldObservation(
+                        resource_id=result.resource_id,
+                        operation=result.logical_role,
+                        transport_request_count=sum(
+                            int(item.request_left_process) for item in result.transport_attempts
+                        ),
+                        raw_rows=raw_rows,
+                        normalized_rows=raw_rows,
+                        provider_unique_records=unique,
+                        new_stable_compound_identifiers=len(new_stable),
+                        new_compact_candidates=len(new_candidates),
+                        duplicates=max(raw_rows - unique, 0),
+                        joinability_contribution=len(new_stable),
+                        continuation_token=(
+                            str(normalized.get("next_cursor"))
+                            if isinstance(normalized, dict)
+                            and normalized.get("next_cursor") not in (None, "")
+                            else None
+                        ),
+                    )
+                )
+        return observations
+
     def _cached_toxcast_normalization(self) -> ToxCastNormalizationResult | None:
         if self.public_provider_cache_root is None:
             return None
@@ -2891,6 +3030,9 @@ class PreapprovalMetadataProvider:
         cursor: str | None = None
         cursor_exhausted = False
         search_safety_truncated = False
+        seen_search_candidates: set[str] = set()
+        seen_search_stable_identifiers: set[str] = set()
+        consecutive_no_yield_pages = 0
         for page in range(1, manifest.maximum_pages + 1):
             outcome = self._execute_resource(
                 manifest=manifest,
@@ -2906,11 +3048,31 @@ class PreapprovalMetadataProvider:
             )
             executions.append(outcome)
             ledger = outcome.ledger_record
+            if self._task_cancelled():
+                search_safety_truncated = True
+                break
             compact = next(iter(outcome.normalized_resources.values()), {})
+            page_candidates = set(self._candidate_ids(manifest, [outcome]))
+            new_candidates = page_candidates - seen_search_candidates
+            page_stable_identifiers = self._stable_identifiers(
+                [
+                    compact,
+                    self._records_from_execution(outcome, search_template.operation_id),
+                ]
+            )
+            new_stable_identifiers = page_stable_identifiers - seen_search_stable_identifiers
+            seen_search_candidates.update(page_candidates)
+            seen_search_stable_identifiers.update(page_stable_identifiers)
+            consecutive_no_yield_pages = (
+                0 if new_candidates or new_stable_identifiers else consecutive_no_yield_pages + 1
+            )
             next_cursor = _text(compact.get("next_cursor"))
             terminal = bool(compact.get("terminal", not next_cursor))
             if terminal and not next_cursor:
                 cursor_exhausted = True
+                break
+            if consecutive_no_yield_pages >= 2:
+                search_safety_truncated = True
                 break
             cursor = next_cursor or str(page * (manifest.page_size or 1))
         else:
@@ -2953,6 +3115,9 @@ class PreapprovalMetadataProvider:
             summary_record_count += sum(
                 item.parsed_record_count for item in outcome.page_or_file_results
             )
+            if self._task_cancelled():
+                hydration_safety_truncated = True
+                break
 
         activity_attempts = 0
         relationship_attempts = 0
@@ -2987,6 +3152,11 @@ class PreapprovalMetadataProvider:
                         activity_attempts += 1
                     elif expansion is ProviderExpansionMode.CANDIDATE_RELATIONSHIPS:
                         relationship_attempts += 1
+                    if self._task_cancelled():
+                        hydration_safety_truncated = True
+                        break
+                if self._task_cancelled():
+                    break
         else:
             resolved_geo_accessions = self._geo_accessions(manifest, executions)
             soft_template = templates[ProviderExpansionMode.GEO_SERIES_SOFT]
@@ -3006,6 +3176,9 @@ class PreapprovalMetadataProvider:
                 executions.append(outcome)
                 ledger = outcome.ledger_record
                 geo_soft_attempts += 1
+                if self._task_cancelled():
+                    hydration_safety_truncated = True
+                    break
 
         return (
             executions,
@@ -3083,6 +3256,9 @@ class PreapprovalMetadataProvider:
                 )
                 executions.append(outcome)
                 ledger = outcome.ledger_record
+                if self._task_cancelled():
+                    safety_truncated = True
+                    break
         elif manifest.retrieval_mode is ProviderRetrievalMode.IDENTIFIER_BATCHES:
             if not identifiers:
                 raise ValueError("identifier-batch provider requires a complete upstream index")
@@ -3104,9 +3280,15 @@ class PreapprovalMetadataProvider:
                 )
                 executions.append(outcome)
                 ledger = outcome.ledger_record
+                if self._task_cancelled():
+                    safety_truncated = True
+                    break
         else:
             template = manifest.resources[0]
             cursor: str | None = None
+            seen_candidates: set[str] = set()
+            seen_stable_identifiers: set[str] = set()
+            consecutive_no_yield_pages = 0
             for page in range(1, manifest.maximum_pages + 1):
                 outcome = self._execute_resource(
                     manifest=manifest,
@@ -3122,11 +3304,30 @@ class PreapprovalMetadataProvider:
                 )
                 executions.append(outcome)
                 ledger = outcome.ledger_record
+                if self._task_cancelled():
+                    safety_truncated = True
+                    break
                 compact = next(iter(outcome.normalized_resources.values()), {})
+                page_candidates = set(self._candidate_ids(manifest, [outcome]))
+                new_candidates = page_candidates - seen_candidates
+                page_stable_identifiers = self._stable_identifiers(
+                    [compact, self._records_from_execution(outcome, template.operation_id)]
+                )
+                new_stable_identifiers = page_stable_identifiers - seen_stable_identifiers
+                seen_candidates.update(page_candidates)
+                seen_stable_identifiers.update(page_stable_identifiers)
+                consecutive_no_yield_pages = (
+                    0
+                    if new_candidates or new_stable_identifiers
+                    else consecutive_no_yield_pages + 1
+                )
                 next_cursor = _text(compact.get("next_cursor"))
                 terminal = bool(compact.get("terminal", not next_cursor))
                 if terminal and not next_cursor:
                     cursor_exhausted = True
+                    break
+                if consecutive_no_yield_pages >= 2:
+                    safety_truncated = True
                     break
                 cursor = next_cursor or str(page * (manifest.page_size or 1))
             else:
@@ -3797,6 +3998,7 @@ class PreapprovalMetadataProvider:
                 access_mode=request.access_mode,
                 optional_authenticated_api_available=authenticated_api_available,
                 capability_findings=capability_findings,
+                pagination_yield=self._pagination_yield(manifest, executions),
             )
         normalized, manifest_reference, normalization_ran = self._normalize(
             manifest=manifest,
@@ -3856,6 +4058,7 @@ class PreapprovalMetadataProvider:
             capability_findings=capability_findings,
             toxcast_public_activity=toxcast_public_activity,
             toxcast_public_activity_artifact=toxcast_public_activity_artifact,
+            pagination_yield=self._pagination_yield(manifest, executions),
         )
 
 

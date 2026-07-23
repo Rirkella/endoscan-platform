@@ -12,6 +12,7 @@ import json
 import re
 import sqlite3
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 from pydantic import Field
@@ -69,7 +70,16 @@ from .repository import (
     versioned_payload,
 )
 from .source_governor import ScientificSourceRequestGovernor
+from .source_scheduler import BuildFairRequestScheduler, TaskAllocationDecision
 from .tools import ToolRegistry
+from .toxcast_public_activity import (
+    TOXCAST_ARCHIVE_SHA256,
+    TOXCAST_RELEASE,
+    TOXCAST_RELEASE_CITATION,
+    TOXCAST_SOURCE_VERSION,
+    ToxCastActivityNormalizer,
+    ToxCastArchiveCache,
+)
 
 MAXIMUM_INLINE_DISCOVERY_RECORDS = 20_000
 CID = re.compile(r"^CID:[1-9][0-9]{0,11}$")
@@ -164,11 +174,164 @@ class SemanticsV2DiscoveryExecutor:
         tool_registry: ToolRegistry,
         *,
         source_request_governor: ScientificSourceRequestGovernor | None = None,
+        public_provider_cache_root: Path | None = None,
     ) -> None:
         self.database = database
         self.artifacts = artifacts
         self.tool_registry = tool_registry
         self.source_request_governor = source_request_governor
+        self.request_scheduler = (
+            source_request_governor.scheduler
+            if source_request_governor is not None
+            else BuildFairRequestScheduler(database)
+        )
+        self.public_provider_cache_root = (
+            Path(public_provider_cache_root).resolve()
+            if public_provider_cache_root is not None
+            else None
+        )
+
+    def _toxcast_prerequisite(self) -> dict[str, Any]:
+        relative_manifest = f"toxcast/{TOXCAST_RELEASE}/normalized-activity-manifest.json"
+        finding: dict[str, Any] = {
+            "prerequisite_id": "toxcast_public_activity_cache",
+            "release_id": TOXCAST_RELEASE,
+            "source_version": TOXCAST_SOURCE_VERSION,
+            "release_citation": TOXCAST_RELEASE_CITATION,
+            "expected_archive_sha256": TOXCAST_ARCHIVE_SHA256,
+            "expected_cache_manifest": relative_manifest,
+            "large_download_performed": False,
+        }
+        if self.public_provider_cache_root is None:
+            return {
+                **finding,
+                # Lightweight unit executors do not own the production cache
+                # boundary. Production construction always supplies the root.
+                "status": "not_evaluated_without_production_cache_root",
+                "cache_manifest_exists": False,
+                "cache_only_execution_possible": False,
+                "remediation": (
+                    "Configure ENDOSCAN_PROVIDER_CACHE_ROOT, then run the dedicated reviewed "
+                    "ToxCast cache-staging command after separate approval."
+                ),
+            }
+        cache = ToxCastArchiveCache(
+            self.public_provider_cache_root,
+            expected_archive_sha256=TOXCAST_ARCHIVE_SHA256,
+        )
+        try:
+            normalized = ToxCastActivityNormalizer(cache).load_cached()
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            return {
+                **finding,
+                "status": "prerequisite_blocked",
+                "cache_manifest_exists": cache.stage_manifest_path.is_file(),
+                "cache_only_execution_possible": False,
+                "validation_error_class": type(exc).__name__,
+                "remediation": (
+                    "Re-stage and validate the reviewed invitroDB v4.3 cache with "
+                    "`python scripts/stage_toxcast_public_cache.py --confirm-large-download` "
+                    "after separate approval."
+                ),
+            }
+        if normalized is None:
+            return {
+                **finding,
+                "status": "prerequisite_blocked",
+                "cache_manifest_exists": (
+                    cache.release_root / "normalized-activity-manifest.json"
+                ).is_file(),
+                "cache_only_execution_possible": False,
+                "remediation": (
+                    "Run `python scripts/stage_toxcast_public_cache.py "
+                    "--confirm-large-download` after separate approval; the bounded discovery "
+                    "workflow will not download the multi-gigabyte archive."
+                ),
+            }
+        return {
+            **finding,
+            "status": "ready",
+            "cache_manifest_exists": True,
+            "cache_only_execution_possible": True,
+            "normalized_sqlite_sha256": normalized.sqlite.sha256,
+            "normalized_manifest_sha256": normalized.manifest.sha256,
+            "bundle_fingerprint": normalized.bundle_fingerprint,
+            "remediation": None,
+        }
+
+    def _ensure_scheduler(self, workflow_id: str, plan: DiscoveryPlan) -> None:
+        toxcast = self._toxcast_prerequisite()
+        findings = {
+            task.task_id: toxcast
+            for task in plan.provider_specific_query_tasks
+            if task.provider == "toxcast"
+        }
+        policy_id = self.request_scheduler.ensure_policy(
+            plan,
+            prerequisite_findings=findings,
+        )
+        state = self.request_scheduler.state(workflow_id, plan.discovery_round)
+        if state is None:
+            raise WorkflowConflict("Fair request-allocation policy was not persisted.")
+        self.artifacts.put_json(
+            workflow_id=workflow_id,
+            value=state,
+            artifact_type="scientific_source_fair_allocation_policy",
+            logical_name=f"fair-request-allocation-policy-round-{plan.discovery_round}.json",
+            producer="deterministic-fair-request-scheduler",
+            idempotency_key=f"fair-request-allocation-policy:{policy_id}",
+        )
+
+    def _prerequisite_blocked(
+        self,
+        workflow_id: str,
+        plan: DiscoveryPlan,
+        running: DiscoveryExecutionRecord,
+        decision: TaskAllocationDecision,
+    ) -> DiscoveryTaskMaterialization:
+        finding = {
+            "workflow_id": workflow_id,
+            "discovery_round": plan.discovery_round,
+            "task_id": running.task_id,
+            "provider": running.provider,
+            "evidence_role": running.evidence_role.value,
+            "modality": running.modality,
+            **decision.prerequisite,
+        }
+        descriptor = self.artifacts.put_json(
+            workflow_id=workflow_id,
+            value=finding,
+            artifact_type="provider_prerequisite_finding",
+            logical_name=(
+                f"provider-prerequisite-round-{plan.discovery_round}-{running.task_id}.json"
+            ),
+            producer="deterministic-fair-request-scheduler",
+            idempotency_key=(f"provider-prerequisite:{plan.discovery_round}:{running.task_id}"),
+        )
+        reference = _reference(descriptor)
+        reason = str(
+            finding.get("remediation") or "The reviewed provider prerequisite is unavailable."
+        )
+        terminal = running.model_copy(
+            update={
+                "status": DiscoveryTaskStatus.BLOCKED,
+                "error_classification": "PUBLIC_TOXCAST_ACTIVITY_CACHE_NOT_STAGED",
+                "completion_reason": reason,
+                "source_response_artifacts": [reference],
+                "logical_tool_call_count": 0,
+                "scientific_source_request_count": 0,
+                "transport_attempt_count": 0,
+            }
+        )
+        return DiscoveryTaskMaterialization(
+            workflow_id=workflow_id,
+            discovery_round=plan.discovery_round,
+            plan_fingerprint=plan.plan_fingerprint,
+            task_id=running.task_id,
+            ledger_record=terminal,
+            provider_dataset_artifacts=[reference],
+            safe_failure_message=reason,
+        )
 
     @staticmethod
     def _task_result_name(round_number: int, task_id: str) -> str:
@@ -1216,6 +1379,11 @@ class SemanticsV2DiscoveryExecutor:
             allowed_output_contracts.add("LincsStreamingRetrievalOutput")
         if tool.definition.output_schema_name not in allowed_output_contracts:
             raise WorkflowConflict("Discovery task output contract differs from the typed tool.")
+        allocation = self.request_scheduler.decision(
+            workflow_id,
+            plan.discovery_round,
+            task.task_id,
+        )
         if task.provider == "lincs-l1000":
             arguments = LincsMetadataRetrievalInput(
                 release_id=str(task.query_parameters["release_id"]),
@@ -1248,6 +1416,17 @@ class SemanticsV2DiscoveryExecutor:
                     "discovery_round": plan.discovery_round,
                     "maximum_global_scientific_source_requests": (
                         plan.scientific_and_execution_budgets.maximum_scientific_source_requests
+                    ),
+                    "fair_request_allocation": (
+                        {
+                            "policy_version": "1.0.0",
+                            "execution_phase": allocation.execution_phase,
+                            "initial_allocation": allocation.initial_allocation,
+                            "allocated_requests": allocation.allocated_requests,
+                            "maximum_requests": allocation.maximum_requests,
+                        }
+                        if allocation is not None
+                        else None
                     ),
                 },
                 idempotency_key=(f"semantics-v2:{plan.discovery_round}:{task.task_id}:provider"),
@@ -1865,15 +2044,41 @@ class SemanticsV2DiscoveryExecutor:
         last_ledger_artifact: ArtifactReference | None = None
         while True:
             plan, ledger = self._load(workflow_id)
+            self._ensure_scheduler(workflow_id, plan)
             if any(item.status is DiscoveryTaskStatus.RUNNING for item in ledger.records):
                 return DiscoveryStageResult(ledger=ledger, ledger_artifact=last_ledger_artifact)
+            pending_records = [
+                item for item in ledger.records if item.status is DiscoveryTaskStatus.PENDING
+            ]
+            next_task_id = self.request_scheduler.next_task_id(
+                workflow_id,
+                plan.discovery_round,
+                {item.task_id for item in pending_records},
+            )
             pending = next(
-                (item for item in ledger.records if item.status is DiscoveryTaskStatus.PENDING),
+                (item for item in pending_records if item.task_id == next_task_id),
                 None,
             )
             if pending is None:
                 if not ledger.complete:
                     raise WorkflowConflict("Discovery ledger has no executable or terminal task.")
+                scheduler_state = self.request_scheduler.reconcile(
+                    workflow_id, plan.discovery_round
+                )
+                if scheduler_state is not None:
+                    self.artifacts.put_json(
+                        workflow_id=workflow_id,
+                        value=scheduler_state,
+                        artifact_type="scientific_source_fair_allocation_reconciliation",
+                        logical_name=(
+                            f"fair-request-allocation-reconciliation-round-"
+                            f"{plan.discovery_round}.json"
+                        ),
+                        producer="deterministic-fair-request-scheduler",
+                        idempotency_key=(
+                            f"fair-request-allocation-reconciliation:{plan.discovery_round}"
+                        ),
+                    )
                 (
                     candidate_set,
                     candidate_artifact,
@@ -1891,6 +2096,11 @@ class SemanticsV2DiscoveryExecutor:
                 for item in plan.provider_specific_query_tasks
                 if item.task_id == pending.task_id
             )
+            allocation = self.request_scheduler.prepare_task(
+                workflow_id,
+                plan.discovery_round,
+                task.task_id,
+            )
             running = pending.model_copy(update={"status": DiscoveryTaskStatus.RUNNING})
             last_ledger_artifact = self._checkpoint_ledger_record(
                 workflow_id,
@@ -1902,7 +2112,15 @@ class SemanticsV2DiscoveryExecutor:
             existing = self._load_task_result(workflow_id, plan.discovery_round, pending.task_id)
             evidence: list[ArtifactReference] = []
             try:
-                if existing is not None:
+                if allocation.status == "prerequisite_blocked":
+                    materialization = self._prerequisite_blocked(
+                        workflow_id,
+                        plan,
+                        running,
+                        allocation,
+                    )
+                    evidence = materialization.provider_dataset_artifacts
+                elif existing is not None:
                     materialization = existing[0]
                 else:
                     persisted_output = self._load_provider_output(workflow_id, plan, task)
@@ -1959,6 +2177,13 @@ class SemanticsV2DiscoveryExecutor:
                 )
             try:
                 last_ledger_artifact = self._terminalize(workflow_id, materialization)
+                self.request_scheduler.mark_terminal(
+                    workflow_id,
+                    plan.discovery_round,
+                    task.task_id,
+                    outcome=materialization.ledger_record.status.value,
+                    completion_reason=materialization.ledger_record.completion_reason,
+                )
             except StaleWorkflowVersion:
                 raise
             except Exception as error:
@@ -1979,6 +2204,13 @@ class SemanticsV2DiscoveryExecutor:
                     ),
                 )
                 last_ledger_artifact = self._terminalize(workflow_id, fallback)
+                self.request_scheduler.mark_terminal(
+                    workflow_id,
+                    plan.discovery_round,
+                    task.task_id,
+                    outcome=fallback.ledger_record.status.value,
+                    completion_reason=fallback.ledger_record.completion_reason,
+                )
 
     def execute_hydration(self, workflow_id: str) -> DiscoveryStageResult:
         plan, ledger = self._load(workflow_id)
@@ -2182,6 +2414,11 @@ class SemanticsV2DiscoveryExecutor:
                 ],
             ]
         )
+        fair_scheduler_state = (
+            self.request_scheduler.state(workflow_id, plan.discovery_round)
+            if self.request_scheduler is not None
+            else None
+        )
         return {
             "schema_version": "1.0.0",
             "current_stage": stage.value,
@@ -2203,4 +2440,5 @@ class SemanticsV2DiscoveryExecutor:
             "pending_task_count": statuses[DiscoveryTaskStatus.PENDING.value],
             "artifact_references": [item.model_dump(mode="json") for item in artifact_refs],
             "safe_failure_summary": failures,
+            "fair_request_scheduler": fair_scheduler_state,
         }

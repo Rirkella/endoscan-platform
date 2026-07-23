@@ -20,6 +20,7 @@ from .source_governor import (
     ScientificSourceExecutionCancelled,
     current_source_request_context,
 )
+from .source_scheduler import ScientificSourceTaskAllocationExhausted
 
 APPROVED_SOURCE_HOSTS = frozenset(
     {
@@ -650,6 +651,19 @@ class ScientificSourceClient:
                         tool_name=tool_name,
                         url=url,
                         category="global_request_budget_exhausted",
+                        retryable=False,
+                        attempt_number=attempt_number,
+                        duration_ms=self._elapsed_ms(started),
+                        exception_class=type(exc).__name__,
+                    ),
+                ) from exc
+            except ScientificSourceTaskAllocationExhausted as exc:
+                raise SourcePolicyError(
+                    str(exc),
+                    diagnostic=self._diagnostic(
+                        tool_name=tool_name,
+                        url=url,
+                        category="task_request_allocation_exhausted",
                         retryable=False,
                         attempt_number=attempt_number,
                         duration_ms=self._elapsed_ms(started),
