@@ -1510,7 +1510,19 @@ def test_completed_legacy_pubchem_result_is_compacted_without_provider_reexecuti
             return legacy, reference
         return original_load(workflow_id, round_number, task_id)
 
+    original_load_compact = executor._load_compact_materialization
+
+    def load_without_selected_compact_manifest(workflow_id, round_number, task_id):
+        if task_id == record.task_id:
+            return None
+        return original_load_compact(workflow_id, round_number, task_id)
+
     monkeypatch.setattr(executor, "_load_task_result", load_legacy_result)
+    monkeypatch.setattr(
+        executor,
+        "_load_compact_materialization",
+        load_without_selected_compact_manifest,
+    )
     external_calls_before = list(transport.calls)
     materializations = executor._materializations(authorized.id, plan, ledger)
     assert transport.calls == external_calls_before
@@ -1523,6 +1535,48 @@ def test_completed_legacy_pubchem_result_is_compacted_without_provider_reexecuti
         item.verified_metadata["scientific_source_unit"] == "assay_endpoint"
         for item in compacted.hydrated_sources
     )
+    assert compacted.ledger_record.raw_record_count >= len(compacted.candidates)
+    assert compacted.ledger_record.compact_source_candidate_count == len(compacted.candidates)
+    legacy_record = DiscoveryExecutionRecord.model_validate(
+        {
+            **record.model_dump(
+                mode="json",
+                exclude={
+                    "raw_record_count",
+                    "normalized_record_count",
+                    "provider_unique_record_count",
+                    "compact_source_candidate_count",
+                    "retained_row_count",
+                    "row_level_artifact_references",
+                    "deterministic_summary_artifacts",
+                },
+            ),
+            "search_result_count": 470,
+            "unique_candidate_count": 470,
+        }
+    )
+    legacy_ledger = ledger.model_copy(
+        update={
+            "records": [
+                legacy_record if item.task_id == record.task_id else item
+                for item in ledger.records
+            ]
+        }
+    )
+    reconciled = executor._materialized_ledger(legacy_ledger, materializations)
+    reconciled_record = next(
+        item for item in reconciled.records if item.task_id == record.task_id
+    )
+    assert reconciled_record.provider_unique_record_count > 0
+    assert reconciled_record.compact_source_candidate_count == len(compacted.candidates)
+    assert reconciled_record.unique_candidate_count == len(compacted.candidates)
+    assert reconciled_record.compact_source_candidate_count != 470
+    compact_manifest = store.find_by_logical_name(
+        authorized.id,
+        executor._compact_materialization_name(plan.discovery_round, record.task_id),
+    )
+    assert compact_manifest is not None
+    assert store.verify(compact_manifest.id)
 
 
 def test_pubchem_timeout_does_not_block_other_pubchem_or_tox21_tasks(

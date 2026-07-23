@@ -1044,7 +1044,7 @@ def validate_candidate_universe(
         if observed_counts.get(item.task_id, 0)
         != (
             item.compact_source_candidate_count
-            if item.compact_source_candidate_count
+            if "compact_source_candidate_count" in item.model_fields_set
             else item.unique_candidate_count
         )
     )

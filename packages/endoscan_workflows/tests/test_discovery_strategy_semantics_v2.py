@@ -771,6 +771,55 @@ def test_source_candidate_contract_has_no_selection_authority() -> None:
         )
 
 
+def test_explicit_zero_compact_candidates_does_not_reuse_provider_row_count() -> None:
+    evidence = ArtifactReference(
+        artifact_id="artifact-provider-rows",
+        sha256="a" * 64,
+        artifact_type="normalized_provider_rows",
+    )
+    ledger = DiscoveryExecutionLedger(
+        workflow_id="build-explicit-zero-compact",
+        discovery_round=0,
+        plan_fingerprint="b" * 64,
+        records=[
+            DiscoveryExecutionRecord(
+                task_id="task-explicit-zero-compact",
+                provider="provider-example",
+                evidence_role=EvidenceRole.ACTIVITY,
+                modality="binding",
+                status=DiscoveryTaskStatus.COMPLETED,
+                search_result_count=470,
+                raw_record_count=470,
+                normalized_record_count=470,
+                provider_unique_record_count=470,
+                compact_source_candidate_count=0,
+                retained_row_count=470,
+                unique_candidate_count=470,
+                source_response_artifacts=[evidence],
+                row_level_artifact_references=[evidence],
+                deterministic_summary_artifacts=[evidence],
+            )
+        ],
+    )
+    candidates = SourceCandidateSet(
+        workflow_id=ledger.workflow_id,
+        discovery_round=ledger.discovery_round,
+        plan_fingerprint=ledger.plan_fingerprint,
+        candidates=[],
+        all_planned_tasks_terminal=True,
+        complete_without_failures=True,
+        completed_task_ids=["task-explicit-zero-compact"],
+        provider_dataset_artifacts=[evidence],
+        raw_record_count=470,
+        normalized_record_count=470,
+        provider_unique_record_count=470,
+        compact_source_candidate_count=0,
+        retained_row_count=470,
+    )
+
+    validate_candidate_universe(ledger, candidates)
+
+
 def test_row_level_accounting_compacts_470_records_without_evidence_loss(
     workflow_runtime, tmp_path
 ) -> None:

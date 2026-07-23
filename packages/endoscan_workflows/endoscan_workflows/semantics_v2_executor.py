@@ -173,6 +173,10 @@ class SemanticsV2DiscoveryExecutor:
     def _provider_output_name(round_number: int, task_id: str) -> str:
         return f"semantics-v2-provider-output-round-{round_number}-{task_id}.json"
 
+    @staticmethod
+    def _compact_materialization_name(round_number: int, task_id: str) -> str:
+        return f"semantics-v2-compact-materialization-round-{round_number}-{task_id}.json"
+
     def _load(self, workflow_id: str) -> tuple[DiscoveryPlan, DiscoveryExecutionLedger]:
         with self.database.session() as session:
             row = session.get(TrainingDatasetWorkflowRow, workflow_id)
@@ -323,6 +327,63 @@ class SemanticsV2DiscoveryExecutor:
                 artifact_type=verified.artifact_type,
             ),
         )
+
+    def _persist_compact_materialization(
+        self, materialization: DiscoveryTaskMaterialization
+    ) -> ArtifactReference:
+        """Persist the deterministic compact view without replacing row-level evidence."""
+
+        descriptor = self.artifacts.put_json(
+            workflow_id=materialization.workflow_id,
+            value=materialization.model_dump(mode="json"),
+            artifact_type="semantics_v2_compact_materialization_manifest",
+            logical_name=self._compact_materialization_name(
+                materialization.discovery_round, materialization.task_id
+            ),
+            producer="semantics-v2-discovery-executor",
+            idempotency_key=(
+                f"semantics-v2-compact-materialization:{materialization.discovery_round}:"
+                f"{materialization.task_id}"
+            ),
+        )
+        return ArtifactReference(
+            artifact_id=descriptor.id,
+            sha256=descriptor.sha256,
+            artifact_type=descriptor.artifact_type,
+        )
+
+    @staticmethod
+    def _canonical_compact_materialization(
+        materialization: DiscoveryTaskMaterialization,
+    ) -> DiscoveryTaskMaterialization:
+        compact_count = len({item.candidate_id for item in materialization.candidates})
+        record = materialization.ledger_record.model_copy(
+            update={
+                "compact_source_candidate_count": compact_count,
+                "unique_candidate_count": compact_count,
+            }
+        )
+        return materialization.model_copy(update={"ledger_record": record})
+
+    def _load_compact_materialization(
+        self, workflow_id: str, round_number: int, task_id: str
+    ) -> tuple[DiscoveryTaskMaterialization, ArtifactReference] | None:
+        descriptor = self.artifacts.find_by_logical_name(
+            workflow_id, self._compact_materialization_name(round_number, task_id)
+        )
+        if descriptor is None:
+            return None
+        verified, content = self.artifacts.get(descriptor.id)
+        materialization = DiscoveryTaskMaterialization.model_validate_json(content)
+        if (
+            materialization.workflow_id != workflow_id
+            or materialization.discovery_round != round_number
+            or materialization.task_id != task_id
+        ):
+            raise WorkflowConflict("Compact materialization is not bound to the requested task.")
+        if materialization != self._canonical_compact_materialization(materialization):
+            raise WorkflowConflict("Compact materialization has inconsistent candidate accounting.")
+        return materialization, _reference(verified)
 
     def _persist_provider_output(
         self,
@@ -1202,6 +1263,17 @@ class SemanticsV2DiscoveryExecutor:
     ) -> list[DiscoveryTaskMaterialization]:
         values: list[DiscoveryTaskMaterialization] = []
         for record in ledger.records:
+            compact = self._load_compact_materialization(
+                workflow_id, plan.discovery_round, record.task_id
+            )
+            if compact is not None:
+                materialization, _reference_value = compact
+                if materialization.ledger_record.status != record.status:
+                    raise WorkflowConflict(
+                        "Compact materialization and execution ledger diverged."
+                    )
+                values.append(materialization)
+                continue
             loaded = self._load_task_result(workflow_id, plan.discovery_round, record.task_id)
             if loaded is None:
                 if record.status is DiscoveryTaskStatus.BLOCKED_PROVIDER_CAPABILITY_MISSING:
@@ -1254,8 +1326,135 @@ class SemanticsV2DiscoveryExecutor:
                     raise WorkflowConflict(
                         "Compacted legacy task result differs from its terminal ledger status."
                     )
+            materialization = self._canonical_compact_materialization(materialization)
+            self._persist_compact_materialization(materialization)
             values.append(materialization)
         return values
+
+    @staticmethod
+    def _materialized_ledger(
+        ledger: DiscoveryExecutionLedger,
+        materializations: list[DiscoveryTaskMaterialization],
+    ) -> DiscoveryExecutionLedger:
+        """Reconcile legacy row-count ledgers with persisted compact task manifests."""
+
+        by_task = {item.task_id: item.ledger_record for item in materializations}
+        records: list[DiscoveryExecutionRecord] = []
+        for current in ledger.records:
+            materialized = by_task.get(current.task_id)
+            if materialized is None:
+                records.append(current)
+                continue
+            if materialized.status != current.status:
+                raise WorkflowConflict("Materialized task status differs from its durable ledger.")
+            records.append(
+                current.model_copy(
+                    update={
+                        "raw_record_count": materialized.raw_record_count,
+                        "normalized_record_count": materialized.normalized_record_count,
+                        "provider_unique_record_count": (
+                            materialized.provider_unique_record_count
+                        ),
+                        "compact_source_candidate_count": (
+                            materialized.compact_source_candidate_count
+                        ),
+                        "retained_row_count": materialized.retained_row_count,
+                        "unique_candidate_count": materialized.unique_candidate_count,
+                        "source_response_artifacts": _deduplicated_references(
+                            [
+                                *current.source_response_artifacts,
+                                *materialized.source_response_artifacts,
+                            ]
+                        ),
+                        "row_level_artifact_references": _deduplicated_references(
+                            [
+                                *current.row_level_artifact_references,
+                                *materialized.row_level_artifact_references,
+                            ]
+                        ),
+                        "deterministic_summary_artifacts": _deduplicated_references(
+                            [
+                                *current.deterministic_summary_artifacts,
+                                *materialized.deterministic_summary_artifacts,
+                            ]
+                        ),
+                    }
+                )
+            )
+        return ledger.model_copy(update={"records": records})
+
+    def _persist_materialized_ledger(
+        self,
+        workflow_id: str,
+        plan: DiscoveryPlan,
+        original: DiscoveryExecutionLedger,
+        reconciled: DiscoveryExecutionLedger,
+        *,
+        compact_materialization_count: int,
+    ) -> ArtifactReference | None:
+        if reconciled == original:
+            return None
+        validate_execution_ledger(plan, reconciled)
+        serialized = canonical_json(
+            versioned_payload(document=reconciled.model_dump(mode="json"))
+        )
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None or not row.discovery_execution_ledger_json:
+                raise GuardNotSatisfied("Semantics-v2 discovery ledger is required.")
+            current = DiscoveryExecutionLedger.model_validate(
+                _document(row.discovery_execution_ledger_json)
+            )
+            if current != original:
+                raise StaleWorkflowVersion("Concurrent discovery ledger reconciliation detected.")
+            original_json = row.discovery_execution_ledger_json
+            result = session.execute(
+                update(TrainingDatasetWorkflowRow)
+                .where(
+                    TrainingDatasetWorkflowRow.workflow_id == workflow_id,
+                    TrainingDatasetWorkflowRow.discovery_execution_ledger_json == original_json,
+                )
+                .values(discovery_execution_ledger_json=serialized, updated_at=utc_text())
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise StaleWorkflowVersion("Concurrent discovery ledger reconciliation detected.")
+            payload = reconciled.model_dump(mode="json")
+            artifact = self.artifacts._put_bytes(
+                session,
+                workflow_id=workflow_id,
+                content=canonical_json(payload).encode(),
+                mime_type="application/json",
+                artifact_type="discovery_execution_ledger_reconciliation",
+                logical_name=(
+                    f"discovery-ledger-round-{reconciled.discovery_round}-"
+                    "materialization-reconciled.json"
+                ),
+                producer="semantics-v2-discovery-executor",
+                idempotency_key=(
+                    f"semantics-v2-ledger-reconciliation:{reconciled.discovery_round}:"
+                    f"{reconciled.plan_fingerprint[:16]}"
+                ),
+            )
+            append_event(
+                session,
+                build,
+                event_type="semantics_v2.discovery_ledger.materialization_reconciled",
+                actor_type=ActorType.ORCHESTRATOR.value,
+                actor_id="semantics-v2-discovery-executor",
+                idempotency_key=(
+                    f"semantics-v2-ledger-reconciliation:{reconciled.discovery_round}:"
+                    f"{artifact.sha256[:16]}"
+                ),
+                payload={
+                    "ledger_artifact_id": artifact.id,
+                    "ledger_sha256": artifact.sha256,
+                    "compact_materialization_count": compact_materialization_count,
+                },
+                from_state=build.current_stage,
+                to_state=build.current_stage,
+            )
+            return _reference(artifact)
 
     @staticmethod
     def _status_ids(
@@ -1479,8 +1678,21 @@ class SemanticsV2DiscoveryExecutor:
 
     def _candidate_set(
         self, workflow_id: str, plan: DiscoveryPlan, ledger: DiscoveryExecutionLedger
-    ) -> tuple[SourceCandidateSet, ArtifactReference]:
+    ) -> tuple[
+        SourceCandidateSet,
+        ArtifactReference,
+        DiscoveryExecutionLedger,
+        ArtifactReference | None,
+    ]:
         materializations = self._materializations(workflow_id, plan, ledger)
+        materialized_ledger = self._materialized_ledger(ledger, materializations)
+        ledger_artifact = self._persist_materialized_ledger(
+            workflow_id,
+            plan,
+            ledger,
+            materialized_ledger,
+            compact_materialization_count=len(materializations),
+        )
         candidates = self._merge_candidates(
             [candidate for item in materializations for candidate in item.candidates]
         )
@@ -1500,30 +1712,47 @@ class SemanticsV2DiscoveryExecutor:
             discovery_round=plan.discovery_round,
             plan_fingerprint=plan.plan_fingerprint,
             candidates=candidates,
-            all_planned_tasks_terminal=ledger.complete,
+            all_planned_tasks_terminal=materialized_ledger.complete,
             complete_without_failures=not bool(
-                self._status_ids(ledger, FAILED_STATUSES | PARTIAL_STATUSES | BLOCKED_STATUSES)
+                self._status_ids(
+                    materialized_ledger,
+                    FAILED_STATUSES | PARTIAL_STATUSES | BLOCKED_STATUSES,
+                )
             ),
-            failed_task_ids=self._status_ids(ledger, FAILED_STATUSES),
-            partial_task_ids=self._status_ids(ledger, PARTIAL_STATUSES),
-            blocked_task_ids=self._status_ids(ledger, BLOCKED_STATUSES),
-            completed_task_ids=self._status_ids(ledger, {DiscoveryTaskStatus.COMPLETED}),
+            failed_task_ids=self._status_ids(materialized_ledger, FAILED_STATUSES),
+            partial_task_ids=self._status_ids(materialized_ledger, PARTIAL_STATUSES),
+            blocked_task_ids=self._status_ids(materialized_ledger, BLOCKED_STATUSES),
+            completed_task_ids=self._status_ids(
+                materialized_ledger, {DiscoveryTaskStatus.COMPLETED}
+            ),
             completed_no_candidate_task_ids=self._status_ids(
-                ledger, {DiscoveryTaskStatus.COMPLETED_NO_CANDIDATES}
+                materialized_ledger, {DiscoveryTaskStatus.COMPLETED_NO_CANDIDATES}
             ),
-            running_task_ids=self._status_ids(ledger, {DiscoveryTaskStatus.RUNNING}),
-            pending_task_ids=self._status_ids(ledger, {DiscoveryTaskStatus.PENDING}),
-            missing_provider_modality_dimensions=self._missing_dimensions(ledger),
+            running_task_ids=self._status_ids(
+                materialized_ledger, {DiscoveryTaskStatus.RUNNING}
+            ),
+            pending_task_ids=self._status_ids(
+                materialized_ledger, {DiscoveryTaskStatus.PENDING}
+            ),
+            missing_provider_modality_dimensions=self._missing_dimensions(
+                materialized_ledger
+            ),
             provider_dataset_artifacts=dataset_refs,
-            raw_record_count=sum(item.raw_record_count for item in ledger.records),
-            normalized_record_count=sum(item.normalized_record_count for item in ledger.records),
+            raw_record_count=sum(
+                item.raw_record_count for item in materialized_ledger.records
+            ),
+            normalized_record_count=sum(
+                item.normalized_record_count for item in materialized_ledger.records
+            ),
             provider_unique_record_count=sum(
-                item.provider_unique_record_count for item in ledger.records
+                item.provider_unique_record_count for item in materialized_ledger.records
             ),
             compact_source_candidate_count=len(candidates),
-            retained_row_count=sum(item.retained_row_count for item in ledger.records),
+            retained_row_count=sum(
+                item.retained_row_count for item in materialized_ledger.records
+            ),
         )
-        validate_candidate_universe(ledger, candidate_set)
+        validate_candidate_universe(materialized_ledger, candidate_set)
         artifact = self._persist_final_document(
             workflow_id,
             document=candidate_set,
@@ -1531,7 +1760,7 @@ class SemanticsV2DiscoveryExecutor:
             artifact_type="source_candidates",
             logical_name=f"source-candidates-round-{plan.discovery_round}.json",
         )
-        return candidate_set, artifact
+        return candidate_set, artifact, materialized_ledger, ledger_artifact
 
     def execute_discovery(self, workflow_id: str) -> DiscoveryStageResult:
         last_ledger_artifact: ArtifactReference | None = None
@@ -1546,10 +1775,15 @@ class SemanticsV2DiscoveryExecutor:
             if pending is None:
                 if not ledger.complete:
                     raise WorkflowConflict("Discovery ledger has no executable or terminal task.")
-                candidate_set, candidate_artifact = self._candidate_set(workflow_id, plan, ledger)
+                (
+                    candidate_set,
+                    candidate_artifact,
+                    materialized_ledger,
+                    reconciled_ledger_artifact,
+                ) = self._candidate_set(workflow_id, plan, ledger)
                 return DiscoveryStageResult(
-                    ledger=ledger,
-                    ledger_artifact=last_ledger_artifact,
+                    ledger=materialized_ledger,
+                    ledger_artifact=reconciled_ledger_artifact or last_ledger_artifact,
                     candidate_set=candidate_set,
                     candidate_artifact=candidate_artifact,
                 )
