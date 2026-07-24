@@ -1736,4 +1736,66 @@ describe("bounded-discovery live discovery presentation", () => {
       approved_modality_aggregation: { human_approved: true },
     });
   });
+
+  it("renders a version-bound strategy rejection and prevents in-place approval", async () => {
+    const training: AdminTrainingDatasetWorkflow = {
+      schema_version: "1.0.0",
+      contract_version: "2.0.0",
+      workflow_semantics_version: "2.0.0",
+      workflow_id: buildId,
+      workflow_kind: "training_dataset_discovery",
+      legacy: false,
+      legacy_semantics_read_only: false,
+      discovery_round: 0,
+      discovery_plan: { discovery_round: 0, plan_fingerprint: "1".repeat(64) },
+      discovery_execution_ledger: { records: [] },
+      source_candidates: { candidates: [] },
+      hydrated_sources: { sources: [] },
+      combination_coverage: { combinations: [] },
+      strategy_proposals: {
+        proposals: [{
+          proposal_id: "proposal-binding-lincs",
+          proposal_status: "viable",
+          modalities: ["binding"],
+          expected_dataset_size: 36,
+          expected_unique_compounds: 1,
+          expected_class_balance: { active: 1, inactive: 0 },
+          identifier_losses: 20251,
+          proposed_label_policy: { operator: "source_backed_activity_call" },
+          exclusions: [],
+        }],
+      },
+      strategy_set_rejection: {
+        decision: "rejected",
+        reason: "One all-active compound cannot support grouped benchmarking.",
+        reason_category: "insufficient_compound_count_and_class_balance",
+        reviewed_workflow_version: 11,
+        technical_proof_classification: "TECHNICAL_PROOF_OF_JOINABILITY",
+      },
+      assembly_recipe: null,
+    };
+    installFetchMock({
+      ...detailRoutes(() => build("AWAITING_ASSEMBLY_STRATEGY_REVIEW", 11, {
+        workflow_kind: "training_dataset_discovery",
+        workflow_semantics_version: "2.0.0",
+        pending_approval_id: null,
+      })),
+      [`GET /api/admin/endpoint-builds/${buildId}/artifacts`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/approvals`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/agent-runs`]: { body: [] },
+      [`GET /api/admin/endpoint-builds/${buildId}/training-dataset-workflow`]: {
+        body: training,
+      },
+    });
+    renderApp(`/admin/endpoints/${buildId}`);
+
+    const rejection = await screen.findByTestId("v2-strategy-rejection");
+    expect(rejection).toHaveTextContent("One all-active compound cannot support grouped benchmarking.");
+    expect(rejection).toHaveTextContent("Insufficient compound count and class balance");
+    expect(rejection).toHaveTextContent("Technical proof of joinability");
+    expect(rejection).toHaveTextContent("11");
+    expect(screen.queryByRole("button", { name: "Approve this strategy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject all proposals" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request expanded discovery" })).toBeInTheDocument();
+  });
 });

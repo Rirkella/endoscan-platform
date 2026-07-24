@@ -246,6 +246,10 @@ def reject_assembly_strategies(
         expected_version=body.expected_version,
         actor=body.actor,
         idempotency_key=key,
+        reason_category=body.reason_category,
+        revision_objective=body.revision_objective,
+        technical_proof_classification=body.technical_proof_classification,
+        technical_proof_proposal_ids=body.technical_proof_proposal_ids,
     )
 
 

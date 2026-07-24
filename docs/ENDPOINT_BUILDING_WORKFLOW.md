@@ -42,6 +42,12 @@ All happy-path stages below are exercised by both prepared offline demonstration
 | `COMPUTING_COMBINATION_COVERAGE` | Hydrated sets → measure possible joins → `CombinationCoverageSet` | Entirely deterministic joins/counts/conflicts/missingness | `calculate-combination-coverage`; validation failure is durable/revisable |
 | `GENERATING_ASSEMBLY_STRATEGIES` | Coverage → compare defensible constructions → `StrategyProposalSet` | Deterministic feasibility plus optional agent synthesis | `generate-assembly-strategies`; insufficient evidence remains explicit |
 | `AWAITING_ASSEMBLY_STRATEGY_REVIEW` | Proposals → select exact policy → pending approval | Read-only rendering/validation | `approve-assembly-strategy` or reject/revise; no assembly before approval |
+
+A strategy-set rejection is version-bound and preserves references to the exact source
+candidate, hydration, combination-coverage, and proposal artifacts reviewed by the
+human. A rejected proposal set cannot later be approved in place. Scientifically useful
+but undersized joins may be retained as `TECHNICAL_PROOF_OF_JOINABILITY`; continuing
+requires a new versioned discovery round, while the rejected evidence remains immutable.
 | `ASSEMBLY_RECIPE_APPROVED` | Selected proposal/policies → pin execution → `AssemblyRecipe` | Deterministic recipe compilation and fingerprint | Approval consumed transactionally; changed inputs invalidate it |
 | `ASSEMBLING_APPROVED_DATASET` | Recipe + immutable source artifacts → build rows → dataset bundle, quality report, Explore artifacts | Deterministic jobs only; no model synthesis | `run-approved-assembly`; job failure retains partial trace and supports revision |
 | `AWAITING_DATASET_APPROVAL` | Bundle/preview/fingerprint → review data → dataset approval | Read-only quality and lineage views | `approve-dataset` or `review-dataset-revision`; fingerprint-bound decision |

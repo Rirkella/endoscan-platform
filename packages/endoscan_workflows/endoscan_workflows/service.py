@@ -1829,6 +1829,11 @@ class WorkflowService:
                 raise InvalidTransition("Strategy approval requires the v2 strategy review gate.")
             if row.assembly_recipe_json:
                 raise WorkflowConflict("An immutable assembly recipe already exists.")
+            if row.strategy_set_rejection_json:
+                raise GuardNotSatisfied(
+                    "The current strategy set was rejected; a versioned discovery revision "
+                    "is required before any strategy can be approved."
+                )
             if not row.strategy_proposals_json or not row.hydrated_sources_json:
                 raise GuardNotSatisfied("Strategy proposals and hydrated sources are required.")
             proposals = StrategyProposalSet.model_validate(
@@ -3453,6 +3458,10 @@ class WorkflowService:
         expected_version: int,
         actor: str,
         idempotency_key: str,
+        reason_category: str = "human_scientific_rejection",
+        revision_objective: str | None = None,
+        technical_proof_classification: str | None = None,
+        technical_proof_proposal_ids: list[str] | None = None,
     ) -> WorkflowSnapshot:
         """Reject the current proposal set without selecting or assembling anything."""
 
@@ -3478,11 +3487,74 @@ class WorkflowService:
             proposals = StrategyProposalSet.model_validate(
                 _load_training_document(row.strategy_proposals_json)
             )
+            proof_ids = technical_proof_proposal_ids or []
+            proposals_by_id = {item.proposal_id: item for item in proposals.proposals}
+            unknown_proof_ids = sorted(set(proof_ids) - set(proposals_by_id))
+            if unknown_proof_ids:
+                raise GuardNotSatisfied(
+                    "Technical-proof proposals must belong to the current proposal set.",
+                    detail={"unknown_proposal_ids": unknown_proof_ids},
+                )
+            nonviable_proof_ids = sorted(
+                proposal_id
+                for proposal_id in proof_ids
+                if proposals_by_id[proposal_id].proposal_status is not ProposalStatus.VIABLE
+            )
+            if nonviable_proof_ids:
+                raise GuardNotSatisfied(
+                    "Only viable proposals can be classified as a technical proof.",
+                    detail={"nonviable_proposal_ids": nonviable_proof_ids},
+                )
+            preserved_artifacts: list[ArtifactReference] = []
+            for artifact_type in (
+                "source_candidates",
+                "hydrated_sources",
+                "combination_coverage",
+                "strategy_proposals",
+            ):
+                descriptor = session.scalar(
+                    select(ArtifactRow)
+                    .where(
+                        ArtifactRow.workflow_id == workflow_id,
+                        ArtifactRow.artifact_type == artifact_type,
+                    )
+                    .order_by(ArtifactRow.created_at.desc())
+                    .limit(1)
+                )
+                if descriptor is None:
+                    raise GuardNotSatisfied(
+                        "Strategy rejection requires every reviewed evidence artifact.",
+                        detail={"missing_artifact_type": artifact_type},
+                    )
+                preserved_artifacts.append(
+                    ArtifactReference(
+                        artifact_id=descriptor.id,
+                        sha256=descriptor.sha256,
+                        artifact_type=descriptor.artifact_type,
+                    )
+                )
             rejection = StrategySetRejection(
                 discovery_round=row.discovery_round,
+                reviewed_workflow_version=expected_version,
                 proposal_ids=[item.proposal_id for item in proposals.proposals],
                 rejected_by=actor,
+                reason_category=reason_category,
                 reason=reason,
+                revision_objective=revision_objective,
+                technical_proof_classification=technical_proof_classification,
+                technical_proof_proposal_ids=proof_ids,
+                preserved_artifacts=preserved_artifacts,
+                proposal_strengths={
+                    proposal_id: proposals_by_id[proposal_id].scientific_strengths
+                    for proposal_id in proof_ids
+                },
+                proposal_limitations={
+                    proposal_id: [
+                        *proposals_by_id[proposal_id].limitations,
+                        *proposals_by_id[proposal_id].scientific_risks,
+                    ]
+                    for proposal_id in proof_ids
+                },
             )
             artifact = self._put_semantics_v2_document(
                 session,
@@ -3508,6 +3580,17 @@ class WorkflowService:
                     "artifact_id": artifact.id,
                     "sha256": artifact.sha256,
                     "proposal_ids": rejection.proposal_ids,
+                    "reviewed_workflow_version": rejection.reviewed_workflow_version,
+                    "decision": rejection.decision,
+                    "reason_category": rejection.reason_category,
+                    "technical_proof_classification": (
+                        rejection.technical_proof_classification
+                    ),
+                    "technical_proof_proposal_ids": rejection.technical_proof_proposal_ids,
+                    "preserved_artifact_ids": [
+                        reference.artifact_id
+                        for reference in rejection.preserved_artifacts
+                    ],
                 },
                 from_state=build.current_stage,
                 to_state=build.current_stage,

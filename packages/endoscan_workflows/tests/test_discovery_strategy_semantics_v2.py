@@ -1145,19 +1145,65 @@ def test_revision_and_rejection_create_new_round_without_overwriting_prior_artif
     )
     rejected = service.reject_semantics_v2_strategy_set(
         approved.id,
-        reason="All proposals need a narrower context policy.",
+        reason=(
+            "The proposal proves identity joinability but is insufficient for "
+            "compound-grouped benchmarking."
+        ),
         expected_version=review.version,
         actor="test-reviewer",
         idempotency_key="semantics-v2-reject",
+        reason_category="insufficient_compound_count_and_class_balance",
+        revision_objective="Expand source-declared active and inactive activity evidence.",
+        technical_proof_classification="TECHNICAL_PROOF_OF_JOINABILITY",
+        technical_proof_proposal_ids=[documents[4].proposals[0].proposal_id],
     )
     assert rejected.current_stage is WorkflowState.AWAITING_ASSEMBLY_STRATEGY_REVIEW
+    assert rejected.version == review.version
+    workflow_after_rejection = service.training_dataset_workflow(approved.id)
+    rejection = workflow_after_rejection["strategy_set_rejection"]
+    assert rejection["decision"] == "rejected"
+    assert rejection["reviewed_workflow_version"] == review.version
+    assert rejection["reason_category"] == "insufficient_compound_count_and_class_balance"
+    assert rejection["technical_proof_classification"] == "TECHNICAL_PROOF_OF_JOINABILITY"
+    assert rejection["technical_proof_proposal_ids"] == [
+        documents[4].proposals[0].proposal_id
+    ]
+    assert {item["artifact_type"] for item in rejection["preserved_artifacts"]} == {
+        "source_candidates",
+        "hydrated_sources",
+        "combination_coverage",
+        "strategy_proposals",
+    }
+    assert rejection["proposal_strengths"][documents[4].proposals[0].proposal_id]
+    assert rejection["proposal_limitations"][documents[4].proposals[0].proposal_id]
+    with pytest.raises(GuardNotSatisfied, match="current strategy set was rejected"):
+        service.approve_semantics_v2_strategy(
+            approved.id,
+            strategy_proposal_id=documents[4].proposals[0].proposal_id,
+            approved_modality_aggregation={"operator": "none"},
+            approved_context_filters={},
+            approved_dose_time_rules={},
+            approved_label_policy={"operator": "source_backed_activity_call"},
+            exclusion_rules=documents[4].proposals[0].exclusions,
+            required_extraction_fields=["canonical_compound_identifier"],
+            expected_version=rejected.version,
+            actor="test-reviewer",
+            idempotency_key="rejected-proposal-cannot-be-approved",
+        )
     rejection_artifacts = [(item.id, item.sha256) for item in store.list_artifacts(approved.id)]
     repeated_rejection = service.reject_semantics_v2_strategy_set(
         approved.id,
-        reason="All proposals need a narrower context policy.",
+        reason=(
+            "The proposal proves identity joinability but is insufficient for "
+            "compound-grouped benchmarking."
+        ),
         expected_version=review.version,
         actor="test-admin",
         idempotency_key="semantics-v2-reject",
+        reason_category="insufficient_compound_count_and_class_balance",
+        revision_objective="Expand source-declared active and inactive activity evidence.",
+        technical_proof_classification="TECHNICAL_PROOF_OF_JOINABILITY",
+        technical_proof_proposal_ids=[documents[4].proposals[0].proposal_id],
     )
     assert repeated_rejection.version == rejected.version
     assert [

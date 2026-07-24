@@ -167,6 +167,7 @@ function SemanticsV2ReviewWorkspace({
   const coverage = records(record(data.combination_coverage).combinations);
   const proposals = records(record(data.strategy_proposals).proposals);
   const recipe = record(data.assembly_recipe);
+  const rejection = record(data.strategy_set_rejection);
   const terminalLedger = ledger.filter((item) => [
     "completed",
     "completed_no_candidates",
@@ -222,10 +223,11 @@ function SemanticsV2ReviewWorkspace({
           <div><dt>Limitations</dt><dd>{textList(proposal.limitations).join("; ") || "None recorded"}</dd></div>
           <div><dt>Risks</dt><dd>{textList(proposal.scientific_risks).join("; ") || "None recorded"}</dd></div>
         </dl>
-        {proposal.proposal_status === "viable" && <button className="admin-primary" disabled={busy || Object.keys(recipe).length > 0} onClick={() => onApprove(proposal)}>{record(proposal.proposed_label_policy).operator === "functional_or" ? "Approve functional union" : "Approve this strategy"}</button>}
+        {proposal.proposal_status === "viable" && !Object.keys(rejection).length && <button className="admin-primary" disabled={busy || Object.keys(recipe).length > 0} onClick={() => onApprove(proposal)}>{record(proposal.proposed_label_policy).operator === "functional_or" ? "Approve functional union" : "Approve this strategy"}</button>}
       </article>) : <p>No assembly strategy has been proposed.</p>}
       {stage === "GENERATING_ASSEMBLY_STRATEGIES" && <button className="admin-primary" disabled={busy} onClick={onGenerateStrategies}>Generate coverage-bound strategies</button>}
-      {proposals.length > 0 && !Object.keys(recipe).length && <div className="admin-approval-actions"><button className="admin-secondary" disabled={busy} onClick={onRequestRevision}>Request expanded discovery</button><button className="admin-danger-outline" disabled={busy} onClick={onReject}>Reject all proposals</button></div>}
+      {Object.keys(rejection).length > 0 && <article className="admin-approval-card" data-testid="v2-strategy-rejection"><h3>Strategy set rejected</h3><p>{String(rejection.reason)}</p><dl className="admin-candidate-facts"><div><dt>Reason category</dt><dd>{humanizeMachineValue(String(rejection.reason_category))}</dd></div><div><dt>Classification</dt><dd>{humanizeMachineValue(String(rejection.technical_proof_classification ?? "not classified"))}</dd></div><div><dt>Reviewed build version</dt><dd>{String(rejection.reviewed_workflow_version)}</dd></div></dl></article>}
+      {proposals.length > 0 && !Object.keys(recipe).length && <div className="admin-approval-actions"><button className="admin-secondary" disabled={busy} onClick={onRequestRevision}>Request expanded discovery</button>{!Object.keys(rejection).length && <button className="admin-danger-outline" disabled={busy} onClick={onReject}>Reject all proposals</button>}</div>}
     </section>
     <section className="admin-panel" data-testid="v2-assembly-recipe">
       <div className="admin-panel-heading"><h2>Approved assembly recipe</h2><span>{Object.keys(recipe).length ? "Approved immutable" : "Not approved"}</span></div>

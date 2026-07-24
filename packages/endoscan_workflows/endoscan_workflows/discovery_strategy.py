@@ -702,9 +702,30 @@ class DiscoveryRevisionRequest(ImmutableV2Contract):
 
 class StrategySetRejection(ImmutableV2Contract):
     discovery_round: int = Field(ge=0)
+    reviewed_workflow_version: int = Field(ge=0)
+    decision: Literal["rejected"] = "rejected"
     proposal_ids: list[str] = Field(min_length=1, max_length=500)
     rejected_by: str = Field(min_length=2, max_length=120)
+    reason_category: str = Field(
+        default="human_scientific_rejection", min_length=3, max_length=160
+    )
     reason: str = Field(min_length=3, max_length=4000)
+    revision_objective: str | None = Field(default=None, min_length=3, max_length=4000)
+    technical_proof_classification: Literal["TECHNICAL_PROOF_OF_JOINABILITY"] | None = None
+    technical_proof_proposal_ids: list[str] = Field(default_factory=list, max_length=500)
+    preserved_artifacts: list[ArtifactReference] = Field(min_length=4, max_length=500)
+    proposal_strengths: dict[str, list[str]] = Field(default_factory=dict)
+    proposal_limitations: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_technical_proof_membership(self) -> StrategySetRejection:
+        proposal_ids = set(self.proposal_ids)
+        unknown = sorted(set(self.technical_proof_proposal_ids) - proposal_ids)
+        if unknown:
+            raise ValueError("technical-proof proposal IDs must belong to the reviewed set")
+        if self.technical_proof_classification and not self.technical_proof_proposal_ids:
+            raise ValueError("technical-proof classification requires at least one proposal")
+        return self
 
 
 def build_discovery_plan(
