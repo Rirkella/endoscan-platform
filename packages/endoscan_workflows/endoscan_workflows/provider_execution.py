@@ -27,6 +27,7 @@ from .discovery_strategy import (
     deterministic_fingerprint,
 )
 from .source_cache import SourceResponseCache
+from .source_governor import current_source_request_context
 from .source_security import ScientificResponse, SourcePolicyError, SourceToolError
 
 
@@ -291,6 +292,9 @@ class ProviderTaskExecutor:
         cache_entries: list[ProviderCacheEntry] = []
 
         for resource in task.resources:
+            request_context = current_source_request_context()
+            if request_context is not None and request_context.cancellation.cancelled:
+                break
             arguments = {
                 "task_fingerprint": task.task_fingerprint,
                 "resource_id": resource.resource_id,
@@ -450,6 +454,9 @@ class ProviderTaskExecutor:
                         ),
                     )
                 )
+                request_context = current_source_request_context()
+                if request_context is not None and request_context.cancellation.cancelled:
+                    break
                 continue
 
             observed_sha256 = hashlib.sha256(response.content).hexdigest()

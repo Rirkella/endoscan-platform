@@ -337,10 +337,20 @@ export const api = {
       },
       `approve-assembly-strategy-${String(proposal.proposal_id)}`,
     ),
-  adminRejectAssemblyStrategies: (id: string, version: number, reason: string) =>
+  adminRejectAssemblyStrategies: (
+    id: string,
+    version: number,
+    reason: string,
+    options: {
+      reason_category?: string;
+      revision_objective?: string;
+      technical_proof_classification?: "TECHNICAL_PROOF_OF_JOINABILITY";
+      technical_proof_proposal_ids?: string[];
+    } = {},
+  ) =>
     adminPost<AdminBuild>(
       `/admin/endpoint-builds/${encodeURIComponent(id)}/reject-assembly-strategies`,
-      { expected_version: version, actor: "local-admin", reason },
+      { expected_version: version, actor: "local-admin", reason, ...options },
       "reject-assembly-strategies",
     ),
   adminRunApprovedAssembly: (

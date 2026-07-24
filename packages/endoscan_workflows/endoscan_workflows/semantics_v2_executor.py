@@ -12,6 +12,7 @@ import json
 import re
 import sqlite3
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 from pydantic import Field
@@ -33,6 +34,8 @@ from .discovery_strategy import (
     DiscoveryExecutionRecord,
     DiscoveryPlan,
     DiscoveryTaskStatus,
+    EvidenceRole,
+    GlobalScientificSourceRequestAccounting,
     HydratedSource,
     HydratedSourceSet,
     HydrationCompleteness,
@@ -67,7 +70,17 @@ from .repository import (
     utc_text,
     versioned_payload,
 )
+from .source_governor import ScientificSourceRequestGovernor
+from .source_scheduler import BuildFairRequestScheduler, TaskAllocationDecision
 from .tools import ToolRegistry
+from .toxcast_public_activity import (
+    TOXCAST_ARCHIVE_SHA256,
+    TOXCAST_RELEASE,
+    TOXCAST_RELEASE_CITATION,
+    TOXCAST_SOURCE_VERSION,
+    ToxCastActivityNormalizer,
+    ToxCastArchiveCache,
+)
 
 MAXIMUM_INLINE_DISCOVERY_RECORDS = 20_000
 CID = re.compile(r"^CID:[1-9][0-9]{0,11}$")
@@ -160,10 +173,166 @@ class SemanticsV2DiscoveryExecutor:
         database: WorkflowDatabase,
         artifacts: LocalArtifactStore,
         tool_registry: ToolRegistry,
+        *,
+        source_request_governor: ScientificSourceRequestGovernor | None = None,
+        public_provider_cache_root: Path | None = None,
     ) -> None:
         self.database = database
         self.artifacts = artifacts
         self.tool_registry = tool_registry
+        self.source_request_governor = source_request_governor
+        self.request_scheduler = (
+            source_request_governor.scheduler
+            if source_request_governor is not None
+            else BuildFairRequestScheduler(database)
+        )
+        self.public_provider_cache_root = (
+            Path(public_provider_cache_root).resolve()
+            if public_provider_cache_root is not None
+            else None
+        )
+
+    def _toxcast_prerequisite(self) -> dict[str, Any]:
+        relative_manifest = f"toxcast/{TOXCAST_RELEASE}/normalized-activity-manifest.json"
+        finding: dict[str, Any] = {
+            "prerequisite_id": "toxcast_public_activity_cache",
+            "release_id": TOXCAST_RELEASE,
+            "source_version": TOXCAST_SOURCE_VERSION,
+            "release_citation": TOXCAST_RELEASE_CITATION,
+            "expected_archive_sha256": TOXCAST_ARCHIVE_SHA256,
+            "expected_cache_manifest": relative_manifest,
+            "large_download_performed": False,
+        }
+        if self.public_provider_cache_root is None:
+            return {
+                **finding,
+                # Lightweight unit executors do not own the production cache
+                # boundary. Production construction always supplies the root.
+                "status": "not_evaluated_without_production_cache_root",
+                "cache_manifest_exists": False,
+                "cache_only_execution_possible": False,
+                "remediation": (
+                    "Configure ENDOSCAN_PROVIDER_CACHE_ROOT, then run the dedicated reviewed "
+                    "ToxCast cache-staging command after separate approval."
+                ),
+            }
+        cache = ToxCastArchiveCache(
+            self.public_provider_cache_root,
+            expected_archive_sha256=TOXCAST_ARCHIVE_SHA256,
+        )
+        try:
+            normalized = ToxCastActivityNormalizer(cache).load_cached()
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            return {
+                **finding,
+                "status": "prerequisite_blocked",
+                "cache_manifest_exists": cache.stage_manifest_path.is_file(),
+                "cache_only_execution_possible": False,
+                "validation_error_class": type(exc).__name__,
+                "remediation": (
+                    "Re-stage and validate the reviewed invitroDB v4.3 cache with "
+                    "`python scripts/stage_toxcast_public_cache.py --confirm-large-download` "
+                    "after separate approval."
+                ),
+            }
+        if normalized is None:
+            return {
+                **finding,
+                "status": "prerequisite_blocked",
+                "cache_manifest_exists": (
+                    cache.release_root / "normalized-activity-manifest.json"
+                ).is_file(),
+                "cache_only_execution_possible": False,
+                "remediation": (
+                    "Run `python scripts/stage_toxcast_public_cache.py "
+                    "--confirm-large-download` after separate approval; the bounded discovery "
+                    "workflow will not download the multi-gigabyte archive."
+                ),
+            }
+        return {
+            **finding,
+            "status": "ready",
+            "cache_manifest_exists": True,
+            "cache_only_execution_possible": True,
+            "normalized_sqlite_sha256": normalized.sqlite.sha256,
+            "normalized_manifest_sha256": normalized.manifest.sha256,
+            "bundle_fingerprint": normalized.bundle_fingerprint,
+            "remediation": None,
+        }
+
+    def _ensure_scheduler(self, workflow_id: str, plan: DiscoveryPlan) -> None:
+        toxcast = self._toxcast_prerequisite()
+        findings = {
+            task.task_id: toxcast
+            for task in plan.provider_specific_query_tasks
+            if task.provider == "toxcast"
+        }
+        policy_id = self.request_scheduler.ensure_policy(
+            plan,
+            prerequisite_findings=findings,
+        )
+        state = self.request_scheduler.state(workflow_id, plan.discovery_round)
+        if state is None:
+            raise WorkflowConflict("Fair request-allocation policy was not persisted.")
+        self.artifacts.put_json(
+            workflow_id=workflow_id,
+            value=state,
+            artifact_type="scientific_source_fair_allocation_policy",
+            logical_name=f"fair-request-allocation-policy-round-{plan.discovery_round}.json",
+            producer="deterministic-fair-request-scheduler",
+            idempotency_key=f"fair-request-allocation-policy:{policy_id}",
+        )
+
+    def _prerequisite_blocked(
+        self,
+        workflow_id: str,
+        plan: DiscoveryPlan,
+        running: DiscoveryExecutionRecord,
+        decision: TaskAllocationDecision,
+    ) -> DiscoveryTaskMaterialization:
+        finding = {
+            "workflow_id": workflow_id,
+            "discovery_round": plan.discovery_round,
+            "task_id": running.task_id,
+            "provider": running.provider,
+            "evidence_role": running.evidence_role.value,
+            "modality": running.modality,
+            **decision.prerequisite,
+        }
+        descriptor = self.artifacts.put_json(
+            workflow_id=workflow_id,
+            value=finding,
+            artifact_type="provider_prerequisite_finding",
+            logical_name=(
+                f"provider-prerequisite-round-{plan.discovery_round}-{running.task_id}.json"
+            ),
+            producer="deterministic-fair-request-scheduler",
+            idempotency_key=(f"provider-prerequisite:{plan.discovery_round}:{running.task_id}"),
+        )
+        reference = _reference(descriptor)
+        reason = str(
+            finding.get("remediation") or "The reviewed provider prerequisite is unavailable."
+        )
+        terminal = running.model_copy(
+            update={
+                "status": DiscoveryTaskStatus.BLOCKED,
+                "error_classification": "PUBLIC_TOXCAST_ACTIVITY_CACHE_NOT_STAGED",
+                "completion_reason": reason,
+                "source_response_artifacts": [reference],
+                "logical_tool_call_count": 0,
+                "scientific_source_request_count": 0,
+                "transport_attempt_count": 0,
+            }
+        )
+        return DiscoveryTaskMaterialization(
+            workflow_id=workflow_id,
+            discovery_round=plan.discovery_round,
+            plan_fingerprint=plan.plan_fingerprint,
+            task_id=running.task_id,
+            ledger_record=terminal,
+            provider_dataset_artifacts=[reference],
+            safe_failure_message=reason,
+        )
 
     @staticmethod
     def _task_result_name(round_number: int, task_id: str) -> str:
@@ -172,6 +341,10 @@ class SemanticsV2DiscoveryExecutor:
     @staticmethod
     def _provider_output_name(round_number: int, task_id: str) -> str:
         return f"semantics-v2-provider-output-round-{round_number}-{task_id}.json"
+
+    @staticmethod
+    def _compact_materialization_name(round_number: int, task_id: str) -> str:
+        return f"semantics-v2-compact-materialization-round-{round_number}-{task_id}.json"
 
     def _load(self, workflow_id: str) -> tuple[DiscoveryPlan, DiscoveryExecutionLedger]:
         with self.database.session() as session:
@@ -323,6 +496,63 @@ class SemanticsV2DiscoveryExecutor:
                 artifact_type=verified.artifact_type,
             ),
         )
+
+    def _persist_compact_materialization(
+        self, materialization: DiscoveryTaskMaterialization
+    ) -> ArtifactReference:
+        """Persist the deterministic compact view without replacing row-level evidence."""
+
+        descriptor = self.artifacts.put_json(
+            workflow_id=materialization.workflow_id,
+            value=materialization.model_dump(mode="json"),
+            artifact_type="semantics_v2_compact_materialization_manifest",
+            logical_name=self._compact_materialization_name(
+                materialization.discovery_round, materialization.task_id
+            ),
+            producer="semantics-v2-discovery-executor",
+            idempotency_key=(
+                f"semantics-v2-compact-materialization:{materialization.discovery_round}:"
+                f"{materialization.task_id}"
+            ),
+        )
+        return ArtifactReference(
+            artifact_id=descriptor.id,
+            sha256=descriptor.sha256,
+            artifact_type=descriptor.artifact_type,
+        )
+
+    @staticmethod
+    def _canonical_compact_materialization(
+        materialization: DiscoveryTaskMaterialization,
+    ) -> DiscoveryTaskMaterialization:
+        compact_count = len({item.candidate_id for item in materialization.candidates})
+        record = materialization.ledger_record.model_copy(
+            update={
+                "compact_source_candidate_count": compact_count,
+                "unique_candidate_count": compact_count,
+            }
+        )
+        return materialization.model_copy(update={"ledger_record": record})
+
+    def _load_compact_materialization(
+        self, workflow_id: str, round_number: int, task_id: str
+    ) -> tuple[DiscoveryTaskMaterialization, ArtifactReference] | None:
+        descriptor = self.artifacts.find_by_logical_name(
+            workflow_id, self._compact_materialization_name(round_number, task_id)
+        )
+        if descriptor is None:
+            return None
+        verified, content = self.artifacts.get(descriptor.id)
+        materialization = DiscoveryTaskMaterialization.model_validate_json(content)
+        if (
+            materialization.workflow_id != workflow_id
+            or materialization.discovery_round != round_number
+            or materialization.task_id != task_id
+        ):
+            raise WorkflowConflict("Compact materialization is not bound to the requested task.")
+        if materialization != self._canonical_compact_materialization(materialization):
+            raise WorkflowConflict("Compact materialization has inconsistent candidate accounting.")
+        return materialization, _reference(verified)
 
     def _persist_provider_output(
         self,
@@ -537,6 +767,22 @@ class SemanticsV2DiscoveryExecutor:
             matched_source_identifiers = set(output.toxcast_public_activity.matched_aeids)
             modality_by_source = dict(output.toxcast_public_activity.modality_by_aeid)
             provider_summary = output.toxcast_public_activity.coverage.model_dump(mode="json")
+        if task.evidence_role is EvidenceRole.ACTIVITY:
+            proof = output.completion_proof
+            provider_summary.update(
+                {
+                    "activity_data_availability_inspected": (
+                        proof.activity_availability_attempt_count == proof.hydrated_candidate_count
+                    ),
+                    "assay_relationships_inspected": (
+                        proof.relationship_attempt_count == proof.hydrated_candidate_count
+                    ),
+                    "structural_validation_status": ("valid" if proof.completed else "incomplete"),
+                    "shortlisted_assay_ids": proof.shortlisted_candidate_ids,
+                    "excluded_assay_count": proof.excluded_candidate_count,
+                    "candidate_exclusion_reason": proof.candidate_exclusion_reason,
+                }
+            )
         units = compact_provider_dataset(
             path,
             provider=task.provider,
@@ -552,9 +798,29 @@ class SemanticsV2DiscoveryExecutor:
                 "Provider candidate metadata exceeds the versioned SourceCandidateSet bound."
             )
         dataset_refs.append(output.candidates.artifact)
+        structural_raw_ids_by_source: dict[str, set[str]] = {}
+        if task.evidence_role is EvidenceRole.ACTIVITY:
+            for execution in output.page_or_file_execution_preview:
+                for result in execution.page_or_file_results:
+                    if result.raw_artifact is None:
+                        continue
+                    match = re.search(r"aid-([0-9]+)", result.resource_id)
+                    if match is not None:
+                        structural_raw_ids_by_source.setdefault(match.group(1), set()).add(
+                            result.raw_artifact.artifact_id
+                        )
         raw_refs = self._artifact_references(
             workflow_id,
-            {artifact_id for unit in units for artifact_id in unit.raw_artifact_ids},
+            {
+                artifact_id
+                for unit in units
+                for artifact_id in (
+                    *unit.raw_artifact_ids,
+                    *structural_raw_ids_by_source.get(
+                        unit.source_identifier.removeprefix("AID:"), set()
+                    ),
+                )
+            },
         )
         raw_by_id = {item.artifact_id: item for item in raw_refs}
         candidates: list[SourceCandidate] = []
@@ -576,7 +842,14 @@ class SemanticsV2DiscoveryExecutor:
             )
             unit_raw_refs = [
                 raw_by_id[artifact_id]
-                for artifact_id in unit.raw_artifact_ids
+                for artifact_id in sorted(
+                    {
+                        *unit.raw_artifact_ids,
+                        *structural_raw_ids_by_source.get(
+                            unit.source_identifier.removeprefix("AID:"), set()
+                        ),
+                    }
+                )
                 if artifact_id in raw_by_id
             ]
             query_refs = _deduplicated_references(
@@ -662,6 +935,7 @@ class SemanticsV2DiscoveryExecutor:
             if item.raw_artifact is not None
         ]
         verified_metadata: dict[str, Any]
+        context: dict[str, Any]
         source_version = execution.task.source_version
         complete = execution.completion_proof.completed
         if isinstance(output, LincsStreamingRetrievalOutput):
@@ -691,6 +965,15 @@ class SemanticsV2DiscoveryExecutor:
                     for item in manifest.role_artifacts
                 },
                 "expression_values_retrieved": False,
+                "transcriptomic_source_class": "primary_lincs_l1000",
+                "stable_identity_bridge_available": (
+                    manifest.role("pert_info").included_row_count > 0
+                ),
+                "expression_extraction_path": "registered_post_approval_level5_gctx",
+                "joinability_eligible": (
+                    manifest.role("pert_info").included_row_count > 0
+                    and manifest.role("sig_info").included_row_count > 0
+                ),
             }
             compound_index_available = manifest.role("pert_info").included_row_count > 0
             context = {
@@ -701,6 +984,27 @@ class SemanticsV2DiscoveryExecutor:
             metadata = output.metadata
             if metadata is None:
                 return record, [], [], _deduplicated_references(evidence)
+            perturbagens_by_id = {
+                item.pert_id: item for item in metadata.perturbagens if item.pert_id
+            }
+            measured_perturbagen_ids = {
+                item.pert_id
+                for item in metadata.signatures
+                if item.pert_id and item.measured_chemical_perturbation
+            }
+            stable_compound_ids = sorted(
+                {
+                    value
+                    for pert_id in measured_perturbagen_ids
+                    if (perturbagen := perturbagens_by_id.get(pert_id)) is not None
+                    for value in (
+                        perturbagen.pubchem_cid,
+                        perturbagen.inchikey,
+                        perturbagen.pert_id,
+                    )
+                    if value
+                }
+            )
             verified_metadata = {
                 "release_id": metadata.release_id,
                 "source_release": metadata.source_release,
@@ -710,11 +1014,28 @@ class SemanticsV2DiscoveryExecutor:
                 "cell_count": len(metadata.cells),
                 "gene_count": len(metadata.genes),
                 "expression_values_retrieved": False,
+                "transcriptomic_source_class": "primary_lincs_l1000",
+                "stable_compound_ids": stable_compound_ids,
+                "stable_identity_bridge_available": any(
+                    (
+                        perturbagens_by_id[pert_id].pubchem_cid
+                        or perturbagens_by_id[pert_id].inchikey
+                    )
+                    for pert_id in measured_perturbagen_ids
+                    if pert_id in perturbagens_by_id
+                ),
+                "expression_extraction_path": "registered_post_approval_level5_gctx",
+                "joinability_eligible": bool(metadata.perturbagens and metadata.signatures),
             }
             compound_index_available = bool(metadata.perturbagens)
             context = {
                 "signature_metadata_rows": len(metadata.signatures),
                 "cell_metadata_rows": len(metadata.cells),
+                "cell": sorted({item.cell_id for item in metadata.signatures if item.cell_id}),
+                "dose": sorted({item.dose for item in metadata.signatures if item.dose}),
+                "time": sorted(
+                    {item.exposure_time for item in metadata.signatures if item.exposure_time}
+                ),
             }
         if not complete:
             return record, [], [], _deduplicated_references(evidence)
@@ -766,8 +1087,24 @@ class SemanticsV2DiscoveryExecutor:
             source_version=source_version,
             licence_and_provenance=list(execution.task.licence_and_provenance),
             completeness_status=HydrationCompleteness.COMPLETE,
-            explicit_missing_fields=[],
-            coverage_summary={"by_task": {task.task_id: context}},
+            explicit_missing_fields=(
+                []
+                if verified_metadata["joinability_eligible"]
+                else ["stable_perturbagen_index_or_signature_metadata"]
+            ),
+            exclusion_reason=(
+                None
+                if verified_metadata["joinability_eligible"]
+                else "LINCS metadata lacks a joinable perturbagen/signature index."
+            ),
+            coverage_summary={
+                "by_task": {
+                    task.task_id: {
+                        **context,
+                        "profile_count": context["signature_metadata_rows"],
+                    }
+                }
+            },
             evidence_artifacts=_deduplicated_references(evidence),
         )
         return record, [candidate], [hydrated], _deduplicated_references(evidence)
@@ -777,7 +1114,7 @@ class SemanticsV2DiscoveryExecutor:
         workflow_id: str,
         plan: DiscoveryPlan,
     ) -> tuple[ArtifactReference | None, int]:
-        identifiers: set[str] = set()
+        identifier_sources: dict[str, set[str]] = {}
         for task in plan.provider_specific_query_tasks:
             loaded = self._load_task_result(workflow_id, plan.discovery_round, task.task_id)
             if loaded is None:
@@ -802,7 +1139,9 @@ class SemanticsV2DiscoveryExecutor:
                         ):
                             value = str(cid or compound_identifier or "")
                             if CID.fullmatch(value):
-                                identifiers.add(value)
+                                identifier_sources.setdefault(value, set()).add(
+                                    f"{task.evidence_role.value}:{task.provider}"
+                                )
                     if "records" in tables:
                         columns = {
                             str(row[1]) for row in connection.execute("PRAGMA table_info(records)")
@@ -812,11 +1151,35 @@ class SemanticsV2DiscoveryExecutor:
                                 "SELECT pubchem_cid FROM records WHERE pubchem_cid IS NOT NULL"
                             ):
                                 if CID.fullmatch(str(cid)):
-                                    identifiers.add(str(cid))
-        ordered = sorted(identifiers, key=lambda value: int(value.removeprefix("CID:")))
+                                    value = str(cid)
+                                    identifier_sources.setdefault(value, set()).add(
+                                        f"{task.evidence_role.value}:{task.provider}"
+                                    )
+
+        def priority(value: str) -> tuple[int, int]:
+            roles = identifier_sources[value]
+            has_activity = any(item.startswith("activity:") for item in roles)
+            has_transcriptomic = any(item.startswith("transcriptomic:") for item in roles)
+            rank = 0 if has_activity and has_transcriptomic else 1 if has_activity else 2
+            return rank, int(value.removeprefix("CID:"))
+
+        ordered = sorted(identifier_sources, key=priority)
         if not ordered:
             return None, 0
-        content = ("\n".join(ordered) + "\n").encode()
+        content = (
+            "\n".join(
+                json.dumps(
+                    {
+                        "compound_identifier": value,
+                        "source_partitions": sorted(identifier_sources[value]),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                for value in ordered
+            )
+            + "\n"
+        ).encode()
         descriptor = self.artifacts.put_bytes(
             workflow_id=workflow_id,
             content=content,
@@ -1086,6 +1449,11 @@ class SemanticsV2DiscoveryExecutor:
             allowed_output_contracts.add("LincsStreamingRetrievalOutput")
         if tool.definition.output_schema_name not in allowed_output_contracts:
             raise WorkflowConflict("Discovery task output contract differs from the typed tool.")
+        allocation = self.request_scheduler.decision(
+            workflow_id,
+            plan.discovery_round,
+            task.task_id,
+        )
         if task.provider == "lincs-l1000":
             arguments = LincsMetadataRetrievalInput(
                 release_id=str(task.query_parameters["release_id"]),
@@ -1098,11 +1466,17 @@ class SemanticsV2DiscoveryExecutor:
                 upstream_artifact, upstream_count = self._upstream_identifiers(workflow_id, plan)
                 if upstream_artifact is None:
                     return self._blocked_dependency(workflow_id, plan, running)
+            maximum_hydration_candidates = None
+            if task.provider == "pubchem-bioassay" and allocation is not None:
+                # One search and one summary request are fixed overhead. Every retained
+                # assay then requires compound IDs, activity rows, and relationships.
+                maximum_hydration_candidates = max(1, (allocation.allocated_requests - 2) // 3)
             arguments = compile_provider_metadata_input(
                 task,
                 running,
                 upstream_identifier_artifact=upstream_artifact,
                 upstream_identifier_count=upstream_count,
+                maximum_hydration_candidates=maximum_hydration_candidates,
             ).model_dump(mode="json")
         result = self.tool_registry.invoke(
             ToolInvocation(
@@ -1115,6 +1489,21 @@ class SemanticsV2DiscoveryExecutor:
                     "agent_role": "semantics-v2-discovery-executor",
                     "discovery_task_id": task.task_id,
                     "provider": task.provider,
+                    "discovery_round": plan.discovery_round,
+                    "maximum_global_scientific_source_requests": (
+                        plan.scientific_and_execution_budgets.maximum_scientific_source_requests
+                    ),
+                    "fair_request_allocation": (
+                        {
+                            "policy_version": "1.0.0",
+                            "execution_phase": allocation.execution_phase,
+                            "initial_allocation": allocation.initial_allocation,
+                            "allocated_requests": allocation.allocated_requests,
+                            "maximum_requests": allocation.maximum_requests,
+                        }
+                        if allocation is not None
+                        else None
+                    ),
                 },
                 idempotency_key=(f"semantics-v2:{plan.discovery_round}:{task.task_id}:provider"),
             )
@@ -1177,8 +1566,36 @@ class SemanticsV2DiscoveryExecutor:
         workflow_id: str,
         materialization: DiscoveryTaskMaterialization,
     ) -> ArtifactReference:
+        record = materialization.ledger_record
+        if self.source_request_governor is not None:
+            accounting = self.source_request_governor.accounting(
+                workflow_id,
+                materialization.discovery_round,
+                task_id=record.task_id,
+            )
+            if accounting is not None:
+                record = record.model_copy(
+                    update={
+                        "request_reservation_count": accounting.reserved_requests,
+                        "scientific_source_request_count": (
+                            accounting.completed_transport_attempts
+                            + accounting.failed_transport_attempts
+                        ),
+                        "transport_attempt_count": (
+                            accounting.completed_transport_attempts
+                            + accounting.failed_transport_attempts
+                        ),
+                        "completed_http_response_count": (accounting.completed_transport_attempts),
+                        "cache_hit_count": accounting.cache_hits,
+                        "blocked_request_count": accounting.blocked_requests,
+                        "requests_prevented_by_cancellation": (
+                            accounting.prevented_by_cancellation
+                        ),
+                    }
+                )
+                materialization = materialization.model_copy(update={"ledger_record": record})
         result_artifact = self._persist_task_result(materialization)
-        record = materialization.ledger_record.model_copy(
+        record = record.model_copy(
             update={
                 "source_response_artifacts": _deduplicated_references(
                     [
@@ -1202,6 +1619,15 @@ class SemanticsV2DiscoveryExecutor:
     ) -> list[DiscoveryTaskMaterialization]:
         values: list[DiscoveryTaskMaterialization] = []
         for record in ledger.records:
+            compact = self._load_compact_materialization(
+                workflow_id, plan.discovery_round, record.task_id
+            )
+            if compact is not None:
+                materialization, _reference_value = compact
+                if materialization.ledger_record.status != record.status:
+                    raise WorkflowConflict("Compact materialization and execution ledger diverged.")
+                values.append(materialization)
+                continue
             loaded = self._load_task_result(workflow_id, plan.discovery_round, record.task_id)
             if loaded is None:
                 if record.status is DiscoveryTaskStatus.BLOCKED_PROVIDER_CAPABILITY_MISSING:
@@ -1254,8 +1680,156 @@ class SemanticsV2DiscoveryExecutor:
                     raise WorkflowConflict(
                         "Compacted legacy task result differs from its terminal ledger status."
                     )
+            materialization = self._canonical_compact_materialization(materialization)
+            self._persist_compact_materialization(materialization)
             values.append(materialization)
         return values
+
+    def _materialized_ledger(
+        self,
+        ledger: DiscoveryExecutionLedger,
+        materializations: list[DiscoveryTaskMaterialization],
+    ) -> DiscoveryExecutionLedger:
+        """Reconcile legacy row-count ledgers with persisted compact task manifests."""
+
+        by_task = {item.task_id: item.ledger_record for item in materializations}
+        records: list[DiscoveryExecutionRecord] = []
+        for current in ledger.records:
+            materialized = by_task.get(current.task_id)
+            if materialized is None:
+                records.append(current)
+                continue
+            if materialized.status != current.status:
+                raise WorkflowConflict("Materialized task status differs from its durable ledger.")
+            records.append(
+                current.model_copy(
+                    update={
+                        "raw_record_count": materialized.raw_record_count,
+                        "normalized_record_count": materialized.normalized_record_count,
+                        "provider_unique_record_count": (materialized.provider_unique_record_count),
+                        "compact_source_candidate_count": (
+                            materialized.compact_source_candidate_count
+                        ),
+                        "retained_row_count": materialized.retained_row_count,
+                        "unique_candidate_count": materialized.unique_candidate_count,
+                        "source_response_artifacts": _deduplicated_references(
+                            [
+                                *current.source_response_artifacts,
+                                *materialized.source_response_artifacts,
+                            ]
+                        ),
+                        "row_level_artifact_references": _deduplicated_references(
+                            [
+                                *current.row_level_artifact_references,
+                                *materialized.row_level_artifact_references,
+                            ]
+                        ),
+                        "deterministic_summary_artifacts": _deduplicated_references(
+                            [
+                                *current.deterministic_summary_artifacts,
+                                *materialized.deterministic_summary_artifacts,
+                            ]
+                        ),
+                    }
+                )
+            )
+        global_accounting = ledger.global_request_accounting
+        if self.source_request_governor is not None:
+            accounting = self.source_request_governor.reconcile(
+                ledger.workflow_id,
+                ledger.discovery_round,
+            )
+            if accounting is not None:
+                global_accounting = GlobalScientificSourceRequestAccounting(
+                    allowed_global_request_budget=accounting.maximum_requests,
+                    reserved_requests=accounting.reserved_requests,
+                    completed_transport_attempts=accounting.completed_transport_attempts,
+                    failed_transport_attempts=accounting.failed_transport_attempts,
+                    local_request_validation_failures=sum(
+                        item.local_request_validation_failure_count for item in records
+                    ),
+                    cache_hits=accounting.cache_hits,
+                    blocked_requests_after_budget_exhaustion=accounting.blocked_requests,
+                    requests_prevented_by_cancellation=(accounting.prevented_by_cancellation),
+                    remaining_requests=accounting.remaining_requests,
+                )
+        return ledger.model_copy(
+            update={
+                "records": records,
+                "global_request_accounting": global_accounting,
+            }
+        )
+
+    def _persist_materialized_ledger(
+        self,
+        workflow_id: str,
+        plan: DiscoveryPlan,
+        original: DiscoveryExecutionLedger,
+        reconciled: DiscoveryExecutionLedger,
+        *,
+        compact_materialization_count: int,
+    ) -> ArtifactReference | None:
+        if reconciled == original:
+            return None
+        validate_execution_ledger(plan, reconciled)
+        serialized = canonical_json(versioned_payload(document=reconciled.model_dump(mode="json")))
+        with self.database.session() as session:
+            build = require_build(session, workflow_id)
+            row = session.get(TrainingDatasetWorkflowRow, workflow_id)
+            if row is None or not row.discovery_execution_ledger_json:
+                raise GuardNotSatisfied("Semantics-v2 discovery ledger is required.")
+            current = DiscoveryExecutionLedger.model_validate(
+                _document(row.discovery_execution_ledger_json)
+            )
+            if current != original:
+                raise StaleWorkflowVersion("Concurrent discovery ledger reconciliation detected.")
+            original_json = row.discovery_execution_ledger_json
+            result = session.execute(
+                update(TrainingDatasetWorkflowRow)
+                .where(
+                    TrainingDatasetWorkflowRow.workflow_id == workflow_id,
+                    TrainingDatasetWorkflowRow.discovery_execution_ledger_json == original_json,
+                )
+                .values(discovery_execution_ledger_json=serialized, updated_at=utc_text())
+            )
+            if getattr(result, "rowcount", 0) != 1:
+                raise StaleWorkflowVersion("Concurrent discovery ledger reconciliation detected.")
+            payload = reconciled.model_dump(mode="json")
+            artifact = self.artifacts._put_bytes(
+                session,
+                workflow_id=workflow_id,
+                content=canonical_json(payload).encode(),
+                mime_type="application/json",
+                artifact_type="discovery_execution_ledger_reconciliation",
+                logical_name=(
+                    f"discovery-ledger-round-{reconciled.discovery_round}-"
+                    "materialization-reconciled.json"
+                ),
+                producer="semantics-v2-discovery-executor",
+                idempotency_key=(
+                    f"semantics-v2-ledger-reconciliation:{reconciled.discovery_round}:"
+                    f"{reconciled.plan_fingerprint[:16]}"
+                ),
+            )
+            append_event(
+                session,
+                build,
+                event_type="semantics_v2.discovery_ledger.materialization_reconciled",
+                actor_type=ActorType.ORCHESTRATOR.value,
+                actor_id="semantics-v2-discovery-executor",
+                idempotency_key=(
+                    f"semantics-v2-ledger-reconciliation:{reconciled.discovery_round}:"
+                    f"{artifact.sha256[:16]}"
+                ),
+                payload={
+                    "ledger_artifact_id": artifact.id,
+                    "ledger_sha256": artifact.sha256,
+                    "compact_materialization_count": compact_materialization_count,
+                },
+                from_state=build.current_stage,
+                to_state=build.current_stage,
+            )
+            return _reference(artifact)
 
     @staticmethod
     def _status_ids(
@@ -1479,8 +2053,21 @@ class SemanticsV2DiscoveryExecutor:
 
     def _candidate_set(
         self, workflow_id: str, plan: DiscoveryPlan, ledger: DiscoveryExecutionLedger
-    ) -> tuple[SourceCandidateSet, ArtifactReference]:
+    ) -> tuple[
+        SourceCandidateSet,
+        ArtifactReference,
+        DiscoveryExecutionLedger,
+        ArtifactReference | None,
+    ]:
         materializations = self._materializations(workflow_id, plan, ledger)
+        materialized_ledger = self._materialized_ledger(ledger, materializations)
+        ledger_artifact = self._persist_materialized_ledger(
+            workflow_id,
+            plan,
+            ledger,
+            materialized_ledger,
+            compact_materialization_count=len(materializations),
+        )
         candidates = self._merge_candidates(
             [candidate for item in materializations for candidate in item.candidates]
         )
@@ -1500,30 +2087,37 @@ class SemanticsV2DiscoveryExecutor:
             discovery_round=plan.discovery_round,
             plan_fingerprint=plan.plan_fingerprint,
             candidates=candidates,
-            all_planned_tasks_terminal=ledger.complete,
+            all_planned_tasks_terminal=materialized_ledger.complete,
             complete_without_failures=not bool(
-                self._status_ids(ledger, FAILED_STATUSES | PARTIAL_STATUSES | BLOCKED_STATUSES)
+                self._status_ids(
+                    materialized_ledger,
+                    FAILED_STATUSES | PARTIAL_STATUSES | BLOCKED_STATUSES,
+                )
             ),
-            failed_task_ids=self._status_ids(ledger, FAILED_STATUSES),
-            partial_task_ids=self._status_ids(ledger, PARTIAL_STATUSES),
-            blocked_task_ids=self._status_ids(ledger, BLOCKED_STATUSES),
-            completed_task_ids=self._status_ids(ledger, {DiscoveryTaskStatus.COMPLETED}),
+            failed_task_ids=self._status_ids(materialized_ledger, FAILED_STATUSES),
+            partial_task_ids=self._status_ids(materialized_ledger, PARTIAL_STATUSES),
+            blocked_task_ids=self._status_ids(materialized_ledger, BLOCKED_STATUSES),
+            completed_task_ids=self._status_ids(
+                materialized_ledger, {DiscoveryTaskStatus.COMPLETED}
+            ),
             completed_no_candidate_task_ids=self._status_ids(
-                ledger, {DiscoveryTaskStatus.COMPLETED_NO_CANDIDATES}
+                materialized_ledger, {DiscoveryTaskStatus.COMPLETED_NO_CANDIDATES}
             ),
-            running_task_ids=self._status_ids(ledger, {DiscoveryTaskStatus.RUNNING}),
-            pending_task_ids=self._status_ids(ledger, {DiscoveryTaskStatus.PENDING}),
-            missing_provider_modality_dimensions=self._missing_dimensions(ledger),
+            running_task_ids=self._status_ids(materialized_ledger, {DiscoveryTaskStatus.RUNNING}),
+            pending_task_ids=self._status_ids(materialized_ledger, {DiscoveryTaskStatus.PENDING}),
+            missing_provider_modality_dimensions=self._missing_dimensions(materialized_ledger),
             provider_dataset_artifacts=dataset_refs,
-            raw_record_count=sum(item.raw_record_count for item in ledger.records),
-            normalized_record_count=sum(item.normalized_record_count for item in ledger.records),
+            raw_record_count=sum(item.raw_record_count for item in materialized_ledger.records),
+            normalized_record_count=sum(
+                item.normalized_record_count for item in materialized_ledger.records
+            ),
             provider_unique_record_count=sum(
-                item.provider_unique_record_count for item in ledger.records
+                item.provider_unique_record_count for item in materialized_ledger.records
             ),
             compact_source_candidate_count=len(candidates),
-            retained_row_count=sum(item.retained_row_count for item in ledger.records),
+            retained_row_count=sum(item.retained_row_count for item in materialized_ledger.records),
         )
-        validate_candidate_universe(ledger, candidate_set)
+        validate_candidate_universe(materialized_ledger, candidate_set)
         artifact = self._persist_final_document(
             workflow_id,
             document=candidate_set,
@@ -1531,25 +2125,56 @@ class SemanticsV2DiscoveryExecutor:
             artifact_type="source_candidates",
             logical_name=f"source-candidates-round-{plan.discovery_round}.json",
         )
-        return candidate_set, artifact
+        return candidate_set, artifact, materialized_ledger, ledger_artifact
 
     def execute_discovery(self, workflow_id: str) -> DiscoveryStageResult:
         last_ledger_artifact: ArtifactReference | None = None
         while True:
             plan, ledger = self._load(workflow_id)
+            self._ensure_scheduler(workflow_id, plan)
             if any(item.status is DiscoveryTaskStatus.RUNNING for item in ledger.records):
                 return DiscoveryStageResult(ledger=ledger, ledger_artifact=last_ledger_artifact)
+            pending_records = [
+                item for item in ledger.records if item.status is DiscoveryTaskStatus.PENDING
+            ]
+            next_task_id = self.request_scheduler.next_task_id(
+                workflow_id,
+                plan.discovery_round,
+                {item.task_id for item in pending_records},
+            )
             pending = next(
-                (item for item in ledger.records if item.status is DiscoveryTaskStatus.PENDING),
+                (item for item in pending_records if item.task_id == next_task_id),
                 None,
             )
             if pending is None:
                 if not ledger.complete:
                     raise WorkflowConflict("Discovery ledger has no executable or terminal task.")
-                candidate_set, candidate_artifact = self._candidate_set(workflow_id, plan, ledger)
+                scheduler_state = self.request_scheduler.reconcile(
+                    workflow_id, plan.discovery_round
+                )
+                if scheduler_state is not None:
+                    self.artifacts.put_json(
+                        workflow_id=workflow_id,
+                        value=scheduler_state,
+                        artifact_type="scientific_source_fair_allocation_reconciliation",
+                        logical_name=(
+                            f"fair-request-allocation-reconciliation-round-"
+                            f"{plan.discovery_round}.json"
+                        ),
+                        producer="deterministic-fair-request-scheduler",
+                        idempotency_key=(
+                            f"fair-request-allocation-reconciliation:{plan.discovery_round}"
+                        ),
+                    )
+                (
+                    candidate_set,
+                    candidate_artifact,
+                    materialized_ledger,
+                    reconciled_ledger_artifact,
+                ) = self._candidate_set(workflow_id, plan, ledger)
                 return DiscoveryStageResult(
-                    ledger=ledger,
-                    ledger_artifact=last_ledger_artifact,
+                    ledger=materialized_ledger,
+                    ledger_artifact=reconciled_ledger_artifact or last_ledger_artifact,
                     candidate_set=candidate_set,
                     candidate_artifact=candidate_artifact,
                 )
@@ -1557,6 +2182,11 @@ class SemanticsV2DiscoveryExecutor:
                 item
                 for item in plan.provider_specific_query_tasks
                 if item.task_id == pending.task_id
+            )
+            allocation = self.request_scheduler.prepare_task(
+                workflow_id,
+                plan.discovery_round,
+                task.task_id,
             )
             running = pending.model_copy(update={"status": DiscoveryTaskStatus.RUNNING})
             last_ledger_artifact = self._checkpoint_ledger_record(
@@ -1569,7 +2199,15 @@ class SemanticsV2DiscoveryExecutor:
             existing = self._load_task_result(workflow_id, plan.discovery_round, pending.task_id)
             evidence: list[ArtifactReference] = []
             try:
-                if existing is not None:
+                if allocation.status == "prerequisite_blocked":
+                    materialization = self._prerequisite_blocked(
+                        workflow_id,
+                        plan,
+                        running,
+                        allocation,
+                    )
+                    evidence = materialization.provider_dataset_artifacts
+                elif existing is not None:
                     materialization = existing[0]
                 else:
                     persisted_output = self._load_provider_output(workflow_id, plan, task)
@@ -1626,6 +2264,13 @@ class SemanticsV2DiscoveryExecutor:
                 )
             try:
                 last_ledger_artifact = self._terminalize(workflow_id, materialization)
+                self.request_scheduler.mark_terminal(
+                    workflow_id,
+                    plan.discovery_round,
+                    task.task_id,
+                    outcome=materialization.ledger_record.status.value,
+                    completion_reason=materialization.ledger_record.completion_reason,
+                )
             except StaleWorkflowVersion:
                 raise
             except Exception as error:
@@ -1646,6 +2291,13 @@ class SemanticsV2DiscoveryExecutor:
                     ),
                 )
                 last_ledger_artifact = self._terminalize(workflow_id, fallback)
+                self.request_scheduler.mark_terminal(
+                    workflow_id,
+                    plan.discovery_round,
+                    task.task_id,
+                    outcome=fallback.ledger_record.status.value,
+                    completion_reason=fallback.ledger_record.completion_reason,
+                )
 
     def execute_hydration(self, workflow_id: str) -> DiscoveryStageResult:
         plan, ledger = self._load(workflow_id)
@@ -1849,6 +2501,11 @@ class SemanticsV2DiscoveryExecutor:
                 ],
             ]
         )
+        fair_scheduler_state = (
+            self.request_scheduler.state(workflow_id, plan.discovery_round)
+            if self.request_scheduler is not None
+            else None
+        )
         return {
             "schema_version": "1.0.0",
             "current_stage": stage.value,
@@ -1870,4 +2527,5 @@ class SemanticsV2DiscoveryExecutor:
             "pending_task_count": statuses[DiscoveryTaskStatus.PENDING.value],
             "artifact_references": [item.model_dump(mode="json") for item in artifact_refs],
             "safe_failure_summary": failures,
+            "fair_request_scheduler": fair_scheduler_state,
         }

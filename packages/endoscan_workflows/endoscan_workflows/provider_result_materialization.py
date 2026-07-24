@@ -8,6 +8,7 @@ into workflow JSON and never interprets endpoint-specific names.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -162,15 +163,19 @@ def _activity_sources(
                 continue
             source_modalities.add((normalized_identifier, source_modality))
 
+    collapsed_source_modalities = {
+        (
+            normalized_identifier,
+            modality_by_source.get(normalized_identifier) or task_modality or observed_modality,
+        )
+        for normalized_identifier, observed_modality in source_modalities
+    }
     values: list[CompactProviderSource] = []
     for normalized_identifier, observed_modality in sorted(
-        source_modalities, key=lambda item: (item[0], item[1] or "")
+        collapsed_source_modalities, key=lambda item: (item[0], item[1] or "")
     ):
         source_identifier = _activity_source_identifier(provider, normalized_identifier)
-        effective_modality = (
-            modality_by_source.get(normalized_identifier, observed_modality or task_modality or "")
-            or None
-        )
+        effective_modality = observed_modality or None
         identifiers = (normalized_identifier, source_identifier)
         annotation_count = (
             _count(
@@ -209,6 +214,32 @@ def _activity_sources(
                 """
                 SELECT COUNT(*) FROM activity_records WHERE assay_identifier IN (?,?)
                   AND (activity_call IS NOT NULL OR activity_value IS NOT NULL)
+                """,
+                identifiers,
+            )
+            if "activity_records" in tables
+            else 0
+        )
+        active_count = (
+            _count(
+                connection,
+                """
+                SELECT COUNT(*) FROM activity_records WHERE assay_identifier IN (?,?)
+                  AND LOWER(TRIM(activity_call)) IN
+                      ('active', 'agonist', 'antagonist', 'positive')
+                """,
+                identifiers,
+            )
+            if "activity_records" in tables
+            else 0
+        )
+        inactive_count = (
+            _count(
+                connection,
+                """
+                SELECT COUNT(*) FROM activity_records WHERE assay_identifier IN (?,?)
+                  AND LOWER(TRIM(activity_call)) IN
+                      ('inactive', 'negative', 'no activity')
                 """,
                 identifiers,
             )
@@ -256,9 +287,14 @@ def _activity_sources(
                 SELECT assay_name, component_name, endpoint_name, assay_source_name,
                        intended_target_type, intended_target_family, biological_process,
                        assay_design, assay_format, signal_direction, organism, tissue,
-                       cell_model, timepoint_hours, viability_annotation, pubchem_aid
+                       cell_model, timepoint_hours, viability_annotation, pubchem_aid,
+                       source_fields_json
                 FROM assay_annotations WHERE aeid IN (?,?)
-                ORDER BY annotation_id LIMIT 1
+                ORDER BY
+                    (assay_name IS NOT NULL) DESC,
+                    (intended_target_family IS NOT NULL) DESC,
+                    annotation_id
+                LIMIT 1
                 """,
                 identifiers,
             ).fetchone()
@@ -283,6 +319,7 @@ def _activity_sources(
                         "timepoint_hours",
                         "viability_annotation",
                         "pubchem_aid",
+                        "source_fields_json",
                     ),
                     annotation,
                     strict=True,
@@ -291,6 +328,36 @@ def _activity_sources(
             }
             if annotation is not None
             else {}
+        )
+        source_fields: dict[str, Any] = {}
+        source_fields_json = annotation_fields.pop("source_fields_json", None)
+        if isinstance(source_fields_json, str):
+            try:
+                parsed_source_fields = json.loads(source_fields_json)
+                if isinstance(parsed_source_fields, dict):
+                    source_fields = parsed_source_fields
+            except json.JSONDecodeError:
+                source_fields = {}
+        source_exclusion_reason = source_fields.get("exclusion_reason")
+        outcome_representation_available = active_count + inactive_count > 0
+        structural_validation_status = str(
+            provider_summary.get("structural_validation_status", "incomplete")
+        )
+        exclusion_reason = (
+            str(source_exclusion_reason)
+            if source_exclusion_reason
+            else (
+                "No source-declared active/inactive outcome representation was retained."
+                if activity_count and not outcome_representation_available
+                else None
+            )
+        )
+        scientifically_usable = (
+            annotation_count > 0
+            and compound_count > 0
+            and outcome_representation_available
+            and structural_validation_status == "valid"
+            and exclusion_reason is None
         )
         raw_selections: list[tuple[str, tuple[Any, ...]]] = []
         if "assay_annotations" in tables:
@@ -330,11 +397,25 @@ def _activity_sources(
             )
         raw_ids, raw_artifact_count = _raw_artifact_ids(connection, raw_selections)
         missing = [] if annotation_count else ["verified_assay_annotation"]
+        if compound_count == 0:
+            missing.append("stable_compound_identifier")
+        if not outcome_representation_available:
+            missing.append("source_declared_active_inactive_outcome")
+        if structural_validation_status != "valid":
+            missing.append("mandatory_structural_validation")
         coverage = {
             "assay_annotation_rows": annotation_count,
             "compound_activity_rows": activity_count,
             "tested_compounds_with_identifiers": compound_count,
             "label_or_value_rows": labelled_activity_count,
+            "active_rows": active_count,
+            "inactive_rows": inactive_count,
+            "ambiguous_rows": max(activity_count - active_count - inactive_count, 0),
+            "outcome_representation_status": (
+                "source_declared_active_inactive"
+                if outcome_representation_available
+                else "missing_active_inactive_representation"
+            ),
             "activity_summary_rows": summary_count,
             "raw_artifact_count": raw_artifact_count,
             **provider_summary,
@@ -348,17 +429,30 @@ def _activity_sources(
                 source_identifier=source_identifier,
                 evidence_role=EvidenceRole.ACTIVITY,
                 modality=effective_modality,
-                candidate_status=CandidateStatus.METADATA_CANDIDATE,
+                candidate_status=(
+                    CandidateStatus.METADATA_CANDIDATE
+                    if scientifically_usable
+                    else CandidateStatus.EXCLUDED
+                ),
                 verified_metadata={
                     "scientific_source_unit": "assay_endpoint",
                     **annotation_fields,
                     "annotation_variant_count": annotation_count,
+                    "activity_data_availability_inspected": bool(
+                        provider_summary.get("activity_data_availability_inspected")
+                    ),
+                    "assay_relationships_inspected": bool(
+                        provider_summary.get("assay_relationships_inspected")
+                    ),
+                    "structural_validation_status": structural_validation_status,
+                    "target_relevance_status": source_fields.get(
+                        "target_relevance_status", "unresolved"
+                    ),
+                    "activity_outcome_representation_available": (outcome_representation_available),
                     "row_level_data_embedded": False,
                 },
                 compound_index_available=compound_count > 0,
-                label_or_activity_fields_available=(
-                    labelled_activity_count > 0 or summary_count > 0
-                ),
+                label_or_activity_fields_available=outcome_representation_available,
                 organism=(
                     str(annotation_fields["organism"]) if "organism" in annotation_fields else None
                 ),
@@ -369,10 +463,11 @@ def _activity_sources(
                 },
                 completeness_status=(
                     HydrationCompleteness.COMPLETE
-                    if annotation_count
-                    else HydrationCompleteness.PARTIAL
+                    if scientifically_usable
+                    else HydrationCompleteness.SCIENTIFICALLY_UNUSABLE
                 ),
                 explicit_missing_fields=missing,
+                exclusion_reason=exclusion_reason,
                 raw_artifact_ids=raw_ids,
                 coverage_summary=coverage,
                 relationship_summary=relationships,
@@ -446,7 +541,11 @@ def _identity_sources(
     ]
 
 
-def _transcriptomic_sources(connection: sqlite3.Connection) -> list[CompactProviderSource]:
+def _transcriptomic_sources(
+    connection: sqlite3.Connection,
+    *,
+    provider: str,
+) -> list[CompactProviderSource]:
     if "transcriptomic_records" not in _tables(connection):
         return []
     identifiers = _all_distinct_values(
@@ -504,11 +603,46 @@ def _transcriptomic_sources(connection: sqlite3.Connection) -> list[CompactProvi
             """,
             parameters,
         )
+        doses = _distinct_values(
+            connection,
+            """
+            SELECT DISTINCT dose FROM transcriptomic_records
+            WHERE accession=? OR source_identifier=? ORDER BY dose
+            """,
+            parameters,
+        )
+        exposure_times = _distinct_values(
+            connection,
+            """
+            SELECT DISTINCT exposure_time FROM transcriptomic_records
+            WHERE accession=? OR source_identifier=? ORDER BY exposure_time
+            """,
+            parameters,
+        )
+        stable_compound_ids = _all_distinct_values(
+            connection,
+            """
+            SELECT DISTINCT compound_identifier FROM transcriptomic_records
+            WHERE (accession=? OR source_identifier=?)
+              AND compound_identifier IS NOT NULL
+              AND TRIM(compound_identifier) <> ''
+            ORDER BY compound_identifier
+            """,
+            parameters,
+        )
         compound_count = _count(
             connection,
             """
             SELECT COUNT(DISTINCT compound_identifier) FROM transcriptomic_records
             WHERE (accession=? OR source_identifier=?) AND compound_identifier IS NOT NULL
+            """,
+            parameters,
+        )
+        verified_perturbation_count = _count(
+            connection,
+            """
+            SELECT COUNT(*) FROM transcriptomic_records
+            WHERE (accession=? OR source_identifier=?) AND perturbation_verified=1
             """,
             parameters,
         )
@@ -539,6 +673,38 @@ def _transcriptomic_sources(connection: sqlite3.Connection) -> list[CompactProvi
             missing.append("stable_compound_identifier")
         if not matrix_locator_count:
             missing.append("processed_matrix_locator")
+        if not models:
+            missing.append("cell_or_tissue_model")
+        if not doses:
+            missing.append("dose")
+        if not exposure_times:
+            missing.append("exposure_duration")
+        if not verified_perturbation_count:
+            missing.append("verified_chemical_perturbation")
+        source_class = (
+            "geo_supplemental"
+            if provider == "ncbi-geo"
+            else "registered_perturbational_transcriptomics"
+        )
+        treatment_design_verified = outcome_counts.get("verified_compound_perturbation", 0) > 0
+        joinability_eligible = all(
+            (
+                bool(stable_compound_ids),
+                bool(matrix_locator_count),
+                bool(models),
+                bool(doses),
+                bool(exposure_times),
+                bool(verified_perturbation_count),
+                treatment_design_verified if provider == "ncbi-geo" else True,
+            )
+        )
+        exclusion_reason = None
+        if not joinability_eligible:
+            exclusion_reason = (
+                "Supplemental transcriptomic evidence is not assembly-eligible: "
+                + ", ".join(missing or ["treatment/control design not verified"])
+                + "."
+            )
         values.append(
             CompactProviderSource(
                 source_identifier=identifier,
@@ -552,21 +718,41 @@ def _transcriptomic_sources(connection: sqlite3.Connection) -> list[CompactProvi
                     "biological_models": models,
                     "processing_levels": processing_levels,
                     "processed_matrix_available": matrix_locator_count > 0,
+                    "transcriptomic_source_class": source_class,
+                    "stable_compound_ids": stable_compound_ids,
+                    "stable_identity_bridge_available": bool(stable_compound_ids),
+                    "treatment_control_design_verified": treatment_design_verified,
+                    "expression_extraction_path": (
+                        "approved_processed_matrix_locator"
+                        if matrix_locator_count
+                        else "unavailable"
+                    ),
+                    "joinability_eligible": joinability_eligible,
                     "row_level_data_embedded": False,
                 },
                 compound_index_available=compound_count > 0,
                 label_or_activity_fields_available=False,
                 organism=organisms[0] if len(organisms) == 1 else None,
-                experimental_context={"biological_models": models},
+                experimental_context={
+                    "cell": models,
+                    "dose": doses,
+                    "time": exposure_times,
+                    "biological_models": models,
+                },
                 completeness_status=(
-                    HydrationCompleteness.COMPLETE if not missing else HydrationCompleteness.PARTIAL
+                    HydrationCompleteness.COMPLETE
+                    if joinability_eligible
+                    else HydrationCompleteness.SCIENTIFICALLY_UNUSABLE
                 ),
                 explicit_missing_fields=missing,
+                exclusion_reason=exclusion_reason,
                 raw_artifact_ids=raw_ids,
                 coverage_summary={
                     "metadata_rows": record_count,
+                    "profile_count": record_count,
                     "compound_identifier_count": compound_count,
                     "processed_matrix_locator_count": matrix_locator_count,
+                    "verified_perturbation_count": verified_perturbation_count,
                     "raw_artifact_count": raw_artifact_count,
                 },
             )
@@ -666,7 +852,7 @@ def compact_provider_dataset(
         if evidence_role is EvidenceRole.IDENTITY:
             return _identity_sources(connection, release_id=release_id)
         if evidence_role is EvidenceRole.TRANSCRIPTOMIC:
-            return _transcriptomic_sources(connection)
+            return _transcriptomic_sources(connection, provider=provider)
         if evidence_role is EvidenceRole.SUPPORTING_METADATA:
             return _supporting_sources(connection)
     raise ValueError(f"Unsupported provider evidence role: {evidence_role.value}")

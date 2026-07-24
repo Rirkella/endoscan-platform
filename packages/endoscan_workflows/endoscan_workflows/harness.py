@@ -1200,6 +1200,10 @@ class AgentHarness:
                     "refresh_source_metadata": bool(
                         request.context.get("refresh_source_metadata", False)
                     ),
+                    "maximum_global_scientific_source_requests": request.context.get(
+                        "maximum_global_scientific_source_requests"
+                    ),
+                    "discovery_round": request.context.get("discovery_round"),
                 },
                 idempotency_key=key,
             )

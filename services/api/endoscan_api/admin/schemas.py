@@ -55,6 +55,12 @@ class StrategyApprovalBody(WorkflowCommandBody):
 
 class StrategySetRejectionBody(WorkflowCommandBody):
     reason: str = Field(min_length=3, max_length=4000)
+    reason_category: str = Field(
+        default="human_scientific_rejection", min_length=3, max_length=160
+    )
+    revision_objective: str | None = Field(default=None, min_length=3, max_length=4000)
+    technical_proof_classification: Literal["TECHNICAL_PROOF_OF_JOINABILITY"] | None = None
+    technical_proof_proposal_ids: list[str] = Field(default_factory=list, max_length=500)
 
 
 class AssemblyRunBody(WorkflowCommandBody):

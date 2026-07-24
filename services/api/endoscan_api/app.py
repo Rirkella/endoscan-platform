@@ -45,6 +45,7 @@ from endoscan_workflows.reviewed_source_adapters import (
 from endoscan_workflows.semantics_v2_executor import SemanticsV2DiscoveryExecutor
 from endoscan_workflows.service import WorkflowService
 from endoscan_workflows.source_cache import SourceResponseCache
+from endoscan_workflows.source_governor import ScientificSourceRequestGovernor
 from endoscan_workflows.source_probe import GeoValidationProbe
 from endoscan_workflows.source_security import ScientificSourceClient
 from endoscan_workflows.state_machine import WorkflowGraph, canonical_workflow_graph_path
@@ -192,6 +193,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     )
     workflow_database = WorkflowDatabase(workflow_db_path)
     workflow_database.migrate()
+    source_request_governor = ScientificSourceRequestGovernor(workflow_database)
     agent_configuration = AgentConfiguration.from_env()
     artifact_store = LocalArtifactStore(
         workflow_database,
@@ -254,6 +256,12 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         else None
     )
     preapproval_manifest_path = root / "registry" / "data" / "preapproval_provider_releases.json"
+    public_provider_cache_root = Path(
+        os.environ.get(
+            "ENDOSCAN_PROVIDER_CACHE_ROOT",
+            str(root / ".endoscan" / "provider-cache"),
+        )
+    )
     preapproval_provider_layer = (
         PreapprovalProviderLayer(
             PreapprovalMetadataProvider(
@@ -270,14 +278,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
                         )
                     ),
                 ),
-                public_provider_cache_root=(
-                    Path(
-                        os.environ.get(
-                            "ENDOSCAN_PROVIDER_CACHE_ROOT",
-                            str(root / ".endoscan" / "provider-cache"),
-                        )
-                    )
-                ),
+                public_provider_cache_root=public_provider_cache_root,
             )
         )
         if preapproval_manifest_path.is_file()
@@ -289,11 +290,14 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
         reviewed_source_adapters,
         lincs_metadata_provider=lincs_metadata_provider,
         preapproval_provider_layer=preapproval_provider_layer,
+        source_request_governor=source_request_governor,
     )
     semantics_v2_discovery_executor = SemanticsV2DiscoveryExecutor(
         workflow_database,
         artifact_store,
         tool_registry,
+        source_request_governor=source_request_governor,
+        public_provider_cache_root=public_provider_cache_root,
     )
     provider_registry = ProviderRegistry()
     provider_registry.register("offline_fixture", DeterministicOfflineProvider)
@@ -320,6 +324,7 @@ def create_app(repo_root: Path | None = None) -> FastAPI:
     app.state.provider_preflight = ProviderAccessPreflight(agent_configuration)
     app.state.adapter_boundary_probe = AdapterBoundaryProbe(agent_configuration, tool_registry)
     app.state.source_cache = source_cache
+    app.state.source_request_governor = source_request_governor
     app.state.source_client = source_client
     app.state.reviewed_source_adapters = reviewed_source_adapters
     app.state.preapproval_provider_layer = preapproval_provider_layer

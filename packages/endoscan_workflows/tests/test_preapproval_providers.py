@@ -42,11 +42,13 @@ from endoscan_workflows.preapproval_providers import (
     ProviderRecordKind,
     ProviderResourceTemplate,
     ProviderRetrievalMode,
+    _assay_summary_row,
     _render_locator,
     compile_provider_metadata_input,
     load_preapproval_provider_registry,
 )
 from endoscan_workflows.provider_execution import ProviderItemKind, ProviderTaskExecutor
+from endoscan_workflows.provider_result_materialization import compact_provider_dataset
 from endoscan_workflows.semantics_v2_executor import (
     PROVIDER_OPERATIONS,
     DiscoveryTaskMaterialization,
@@ -169,6 +171,19 @@ class ArbitraryCompoundTransport(FixtureTransport):
             ],
             "terminal": True,
         }
+
+
+class DuplicateCursorTransport(FixtureTransport):
+    """Return one useful page followed by the same cursor payload indefinitely."""
+
+    def _payload(self, url: str) -> dict:
+        provider = urlparse(url).path.strip("/").split("/")[0]
+        if provider != "ncbi-geo":
+            return super()._payload(url)
+        payload = json.loads(json.dumps(FIXTURE["geo_pages"][0]))
+        payload["next_cursor"] = "duplicate-page"
+        payload["terminal"] = False
+        return payload
 
 
 class LocalPolicyFailureTransport(FixtureTransport):
@@ -320,6 +335,131 @@ class HydrationTransport:
             content_type=content_type,
             status_code=200,
             headers={"content-type": content_type, "content-length": str(len(content))},
+            retrieved_at=time.time(),
+        )
+
+
+class ManyAssayHydrationTransport(HydrationTransport):
+    def get(self, url: str, **kwargs) -> ScientificResponse:
+        parsed = urlparse(url)
+        query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
+        if parsed.path.endswith("esearch.fcgi") and query.get("db") == "pcassay":
+            self.calls.append(url)
+            identifiers = [str(value) for value in range(2001, 2011)]
+            content = json.dumps(
+                {
+                    "esearchresult": {
+                        "count": str(len(identifiers)),
+                        "retstart": query.get("retstart", "0"),
+                        "idlist": identifiers,
+                    }
+                }
+            ).encode()
+            return ScientificResponse(
+                url=url,
+                content=content,
+                content_type="application/json",
+                status_code=200,
+                headers={"content-type": "application/json"},
+                retrieved_at=time.time(),
+            )
+        return super().get(url, **kwargs)
+
+
+class MissingRelationshipInspectionTransport(ManyAssayHydrationTransport):
+    def get(self, url: str, **kwargs) -> ScientificResponse:
+        if urlparse(url).path.endswith("/description/JSON"):
+            self.calls.append(url)
+            raise SourcePolicyError(
+                "Offline fixture deliberately withholds assay relationship evidence."
+            )
+        return super().get(url, **kwargs)
+
+
+class MixedTargetHydrationTransport(ManyAssayHydrationTransport):
+    def get(self, url: str, **kwargs) -> ScientificResponse:
+        parsed = urlparse(url)
+        query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
+        if parsed.path.endswith("esummary.fcgi") and query.get("db") == "pcassay":
+            self.calls.append(url)
+            identifiers = query["id"].split(",")
+            payload = {
+                "result": {
+                    "uids": identifiers,
+                    identifiers[0]: {
+                        "uid": identifiers[0],
+                        "aid": int(identifiers[0]),
+                        "assayname": "Binding at the example receptor",
+                        "assaydescription": "Reviewed source description.",
+                        "activityoutcomemethod": "Confirmatory",
+                        "proteintargetlist": [{"name": "Example receptor"}],
+                    },
+                    identifiers[1]: {
+                        "uid": identifiers[1],
+                        "aid": int(identifiers[1]),
+                        "assayname": "Binding at an unrelated receptor",
+                        "assaydescription": "Reviewed source description.",
+                        "activityoutcomemethod": "Confirmatory",
+                        "proteintargetlist": [{"name": "Unrelated receptor"}],
+                    },
+                }
+            }
+            content = json.dumps(payload).encode()
+            return ScientificResponse(
+                url=url,
+                content=content,
+                content_type="application/json",
+                status_code=200,
+                headers={"content-type": "application/json"},
+                retrieved_at=time.time(),
+            )
+        return super().get(url, **kwargs)
+
+
+class PubChemCompoundBatchTransport:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.batch_sizes: list[int] = []
+
+    def get(
+        self,
+        url: str,
+        *,
+        tool_name: str,
+        accepted_types: frozenset[str],
+        maximum_bytes: int,
+        maximum_attempts: int,
+        approved_request_hosts: frozenset[str] | None = None,
+        allow_official_geo_text: bool = False,
+    ) -> ScientificResponse:
+        del tool_name, accepted_types, approved_request_hosts, allow_official_geo_text
+        assert maximum_attempts == 1
+        parsed = urlparse(url)
+        identifiers = parsed.path.split("/cid/", 1)[1].split("/property/", 1)[0].split(",")
+        self.calls.append(url)
+        self.batch_sizes.append(len(identifiers))
+        content = json.dumps(
+            {
+                "PropertyTable": {
+                    "Properties": [
+                        {
+                            "CID": int(identifier),
+                            "Title": f"Compound {identifier}",
+                            "InChIKey": f"{int(identifier):014d}-ABCDEFGHIJ-K",
+                            "CanonicalSMILES": "C",
+                        }
+                        for identifier in identifiers
+                    ]
+                }
+            }
+        ).encode()
+        assert len(content) <= maximum_bytes
+        return ScientificResponse(
+            url=url,
+            content=content,
+            content_type="application/json",
+            status_code=200,
+            headers={"content-type": "application/json"},
             retrieved_at=time.time(),
         )
 
@@ -709,6 +849,37 @@ def test_complete_multi_provider_execution_and_cache_replay(workflow_runtime) ->
     assert replay_fingerprints == {
         provider: output.dataset_manifest.bundle_fingerprint for provider, output in outputs.items()
     }
+
+
+def test_cursor_provider_stops_after_two_duplicate_no_yield_pages(workflow_runtime) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    workflow_id = _workflow_id(service)
+    transport = DuplicateCursorTransport()
+    provider = PreapprovalMetadataProvider(
+        _registry(),
+        ProviderTaskExecutor(
+            transport=transport,
+            cache=SourceResponseCache(database),
+            artifacts=store,
+        ),
+    )
+
+    output = provider.execute(
+        "ncbi-geo",
+        ProviderMetadataExecutionInput(
+            ledger_record=_record("ncbi-geo", EvidenceRole.TRANSCRIPTOMIC, 1),
+            release_id="fixture-ncbi-geo-v1",
+            query=ProviderMetadataQuery(biological_target="example receptor"),
+        ),
+        _invocation(workflow_id, "ncbi-geo"),
+    )
+
+    assert len(transport.calls) == 3
+    assert output.completion_proof.safety_truncated
+    assert len(output.pagination_yield) == 3
+    assert output.pagination_yield[0].new_compact_candidates > 0
+    assert [item.new_compact_candidates for item in output.pagination_yield[1:]] == [0, 0]
+    assert all(item.transport_request_count == 1 for item in output.pagination_yield)
 
 
 def test_manifest_allowlist_is_endpoint_scoped_and_local_policy_failure_is_not_transport(
@@ -1510,7 +1681,19 @@ def test_completed_legacy_pubchem_result_is_compacted_without_provider_reexecuti
             return legacy, reference
         return original_load(workflow_id, round_number, task_id)
 
+    original_load_compact = executor._load_compact_materialization
+
+    def load_without_selected_compact_manifest(workflow_id, round_number, task_id):
+        if task_id == record.task_id:
+            return None
+        return original_load_compact(workflow_id, round_number, task_id)
+
     monkeypatch.setattr(executor, "_load_task_result", load_legacy_result)
+    monkeypatch.setattr(
+        executor,
+        "_load_compact_materialization",
+        load_without_selected_compact_manifest,
+    )
     external_calls_before = list(transport.calls)
     materializations = executor._materializations(authorized.id, plan, ledger)
     assert transport.calls == external_calls_before
@@ -1523,6 +1706,45 @@ def test_completed_legacy_pubchem_result_is_compacted_without_provider_reexecuti
         item.verified_metadata["scientific_source_unit"] == "assay_endpoint"
         for item in compacted.hydrated_sources
     )
+    assert compacted.ledger_record.raw_record_count >= len(compacted.candidates)
+    assert compacted.ledger_record.compact_source_candidate_count == len(compacted.candidates)
+    legacy_record = DiscoveryExecutionRecord.model_validate(
+        {
+            **record.model_dump(
+                mode="json",
+                exclude={
+                    "raw_record_count",
+                    "normalized_record_count",
+                    "provider_unique_record_count",
+                    "compact_source_candidate_count",
+                    "retained_row_count",
+                    "row_level_artifact_references",
+                    "deterministic_summary_artifacts",
+                },
+            ),
+            "search_result_count": 470,
+            "unique_candidate_count": 470,
+        }
+    )
+    legacy_ledger = ledger.model_copy(
+        update={
+            "records": [
+                legacy_record if item.task_id == record.task_id else item for item in ledger.records
+            ]
+        }
+    )
+    reconciled = executor._materialized_ledger(legacy_ledger, materializations)
+    reconciled_record = next(item for item in reconciled.records if item.task_id == record.task_id)
+    assert reconciled_record.provider_unique_record_count > 0
+    assert reconciled_record.compact_source_candidate_count == len(compacted.candidates)
+    assert reconciled_record.unique_candidate_count == len(compacted.candidates)
+    assert reconciled_record.compact_source_candidate_count != 470
+    compact_manifest = store.find_by_logical_name(
+        authorized.id,
+        executor._compact_materialization_name(plan.discovery_round, record.task_id),
+    )
+    assert compact_manifest is not None
+    assert store.verify(compact_manifest.id)
 
 
 def test_pubchem_timeout_does_not_block_other_pubchem_or_tox21_tasks(
@@ -1813,6 +2035,377 @@ def test_production_search_hydration_is_complete_disk_backed_and_replayable(
         assert not replay.normalization_ran
         assert replay.dataset_manifest.bundle_fingerprint == cold_fingerprints[provider_name]
     assert transport.calls == cold_calls
+
+
+def test_pubchem_assay_shortlist_preserves_capacity_for_structural_inspection(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    workflow_id = _workflow_id(service)
+    transport = ManyAssayHydrationTransport()
+    provider = PreapprovalMetadataProvider(
+        load_preapproval_provider_registry(REPO_ROOT),
+        ProviderTaskExecutor(
+            transport=transport,
+            cache=SourceResponseCache(database),
+            artifacts=store,
+        ),
+    )
+
+    output = provider.execute(
+        "pubchem-bioassay",
+        ProviderMetadataExecutionInput(
+            ledger_record=_record("pubchem-bioassay", EvidenceRole.ACTIVITY, 1),
+            release_id="pubchem-bioassay-reviewed-current",
+            query=ProviderMetadataQuery(
+                biological_target="example receptor",
+                modality="binding",
+            ),
+            maximum_hydration_candidates=2,
+        ),
+        _invocation(workflow_id, "pubchem-bioassay"),
+    )
+
+    assert output.completion_proof.completed
+    assert output.completion_proof.discovered_candidate_count == 10
+    assert output.completion_proof.shortlisted_candidate_ids == ["2001", "2002"]
+    assert output.completion_proof.excluded_candidate_ids == [
+        str(value) for value in range(2003, 2011)
+    ]
+    assert output.completion_proof.activity_availability_attempt_count == 2
+    assert output.completion_proof.relationship_attempt_count == 2
+    assert output.completion_proof.structural_validation_codes == []
+    assert len(transport.calls) == 8
+    assert output.dataset_manifest is not None
+    assert output.dataset_manifest.counts.activity_records == 4
+    assert output.dataset_manifest.counts.assay_relationships == 2
+
+
+def test_pubchem_official_esummary_shape_retains_target_and_excludes_unrelated_assay() -> None:
+    query = ProviderMetadataQuery(
+        biological_target="Thyroid hormone receptor",
+        modality="antagonism",
+    )
+    related = _assay_summary_row(
+        {
+            "uid": "1535307",
+            "aid": 1535307,
+            "assayname": "Antagonist activity at thyroid hormone receptor",
+            "assaydescription": "Source assay description.",
+            "activityoutcomemethod": "Confirmatory",
+            "proteintargetlist": [{"name": "Thyroid hormone receptor alpha"}],
+        },
+        provider="pubchem-bioassay",
+        query=query,
+    )
+    unrelated = _assay_summary_row(
+        {
+            "uid": "677155",
+            "aid": 677155,
+            "assayname": "Antagonist activity at PPAR-gamma",
+            "assaydescription": "Source assay description.",
+            "activityoutcomemethod": "Confirmatory",
+            "proteintargetlist": [{"name": "Peroxisome proliferator-activated receptor gamma"}],
+        },
+        provider="pubchem-bioassay",
+        query=query,
+    )
+
+    assert related["target"] == "Thyroid hormone receptor alpha"
+    assert related["target_relevance_status"] == "matched"
+    assert related["exclusion_reason"] is None
+    assert related["assay_format"] == "Confirmatory"
+    assert unrelated["target_relevance_status"] == "unrelated"
+    assert unrelated["exclusion_reason"] == (
+        "The source-declared assay target does not match the reviewed discovery target."
+    )
+
+
+def test_pubchem_compact_materialization_excludes_source_declared_unrelated_target(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    workflow_id = _workflow_id(service)
+    provider = PreapprovalMetadataProvider(
+        load_preapproval_provider_registry(REPO_ROOT),
+        ProviderTaskExecutor(
+            transport=MixedTargetHydrationTransport(),
+            cache=SourceResponseCache(database),
+            artifacts=store,
+        ),
+    )
+    output = provider.execute(
+        "pubchem-bioassay",
+        ProviderMetadataExecutionInput(
+            ledger_record=_record("pubchem-bioassay", EvidenceRole.ACTIVITY, 1),
+            release_id="pubchem-bioassay-reviewed-current",
+            query=ProviderMetadataQuery(
+                biological_target="example receptor",
+                modality="binding",
+            ),
+            maximum_hydration_candidates=2,
+        ),
+        _invocation(workflow_id, "pubchem-bioassay"),
+    )
+    assert output.candidates is not None
+    _descriptor, dataset_path = store.verified_path(output.candidates.artifact.artifact_id)
+    units = compact_provider_dataset(
+        dataset_path,
+        provider="pubchem-bioassay",
+        evidence_role=EvidenceRole.ACTIVITY,
+        task_modality="binding",
+        release_id=output.release_id,
+        matched_source_identifiers={"2001", "2002"},
+        provider_summary={
+            "activity_data_availability_inspected": True,
+            "assay_relationships_inspected": True,
+            "structural_validation_status": "valid",
+        },
+    )
+    by_source = {item.source_identifier: item for item in units}
+    assert by_source["AID:2001"].candidate_status.value == "metadata_candidate"
+    assert by_source["AID:2001"].exclusion_reason is None
+    assert by_source["AID:2002"].candidate_status.value == "excluded"
+    assert by_source["AID:2002"].exclusion_reason == (
+        "The source-declared assay target does not match the reviewed discovery target."
+    )
+
+
+def test_pubchem_assay_without_relationship_inspection_cannot_materialize_candidate(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    workflow_id = _workflow_id(service)
+    transport = MissingRelationshipInspectionTransport()
+    provider = PreapprovalMetadataProvider(
+        load_preapproval_provider_registry(REPO_ROOT),
+        ProviderTaskExecutor(
+            transport=transport,
+            cache=SourceResponseCache(database),
+            artifacts=store,
+        ),
+    )
+
+    output = provider.execute(
+        "pubchem-bioassay",
+        ProviderMetadataExecutionInput(
+            ledger_record=_record("pubchem-bioassay", EvidenceRole.ACTIVITY, 1),
+            release_id="pubchem-bioassay-reviewed-current",
+            query=ProviderMetadataQuery(
+                biological_target="example receptor",
+                modality="binding",
+            ),
+            maximum_hydration_candidates=1,
+        ),
+        _invocation(workflow_id, "pubchem-bioassay"),
+    )
+
+    assert not output.completion_proof.completed
+    assert output.completion_proof.activity_availability_attempt_count == 1
+    assert output.completion_proof.relationship_attempt_count == 0
+    assert output.completion_proof.structural_validation_codes == [
+        "ASSAY_RELATIONSHIPS_NOT_INSPECTED"
+    ]
+    assert output.dataset_manifest is None
+    assert output.candidates is None
+    assert output.hydrated_sources is None
+
+
+def test_pubchem_compound_normalizes_and_batches_nineteen_thousand_cids(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    store.maximum_bytes = 50 * 1024 * 1024
+    workflow_id = _workflow_id(service)
+    values = [f"CID:{value}" for value in range(1, 19_004)]
+    descriptor = store.put_bytes(
+        workflow_id=workflow_id,
+        content=("\n".join(values) + "\n").encode(),
+        mime_type="text/plain",
+        artifact_type="complete_upstream_compound_identifier_index",
+        logical_name="nineteen-thousand-identifiers.jsonl",
+        producer="offline-pubchem-batching-regression",
+        idempotency_key="nineteen-thousand-identifiers",
+    )
+    reference = ArtifactReference(
+        artifact_id=descriptor.id,
+        sha256=descriptor.sha256,
+        artifact_type=descriptor.artifact_type,
+    )
+    transport = PubChemCompoundBatchTransport()
+    provider = PreapprovalMetadataProvider(
+        load_preapproval_provider_registry(REPO_ROOT),
+        ProviderTaskExecutor(
+            transport=transport,
+            cache=SourceResponseCache(database),
+            artifacts=store,
+        ),
+    )
+
+    output = provider.execute(
+        "pubchem-compound",
+        ProviderMetadataExecutionInput(
+            ledger_record=_record("pubchem-compound", EvidenceRole.IDENTITY, 1),
+            release_id="pubchem-compound-reviewed-current",
+            query=ProviderMetadataQuery(),
+            upstream_identifier_artifact=reference,
+            upstream_identifier_count=len(values),
+        ),
+        _invocation(workflow_id, "pubchem-compound"),
+    )
+
+    assert output.completion_proof.completed
+    assert output.completion_proof.processed_identifier_count == 19_003
+    assert len(transport.calls) == 191
+    assert transport.batch_sizes == [100] * 190 + [3]
+    assert output.identifier_reconciliation is not None
+    assert output.identifier_reconciliation.normalized_unique_identifier_count == 19_003
+    assert output.identifier_reconciliation.invalid_identifier_count == 0
+    assert output.identifier_reconciliation.duplicate_identifier_count == 0
+    assert output.identifier_reconciliation.completed_identifier_count == 19_003
+    assert output.identifier_reconciliation.missing_identifier_count == 0
+    assert output.identifier_reconciliation.provider_batch_size == 100
+    assert output.identifier_reconciliation.provider_batch_count == 191
+    assert output.dataset_manifest is not None
+    assert output.dataset_manifest.counts.compound_mappings == 19_003
+
+
+def test_pubchem_compound_reconciles_invalid_and_duplicate_cids_before_transport(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    workflow_id = _workflow_id(service)
+    values = [
+        json.dumps(
+            {
+                "compound_identifier": "CID:101",
+                "source_partitions": [
+                    "transcriptomic:lincs-l1000",
+                    "activity:pubchem-bioassay",
+                ],
+            }
+        ),
+        "101",
+        "CID:101",
+        "",
+        "AID:101",
+    ]
+    descriptor = store.put_bytes(
+        workflow_id=workflow_id,
+        content=("\n".join(values) + "\n").encode(),
+        mime_type="text/plain",
+        artifact_type="complete_upstream_compound_identifier_index",
+        logical_name="mixed-identifiers.jsonl",
+        producer="offline-pubchem-validation-regression",
+        idempotency_key="mixed-identifiers",
+    )
+    reference = ArtifactReference(
+        artifact_id=descriptor.id,
+        sha256=descriptor.sha256,
+        artifact_type=descriptor.artifact_type,
+    )
+    transport = PubChemCompoundBatchTransport()
+    provider = PreapprovalMetadataProvider(
+        load_preapproval_provider_registry(REPO_ROOT),
+        ProviderTaskExecutor(
+            transport=transport,
+            cache=SourceResponseCache(database),
+            artifacts=store,
+        ),
+    )
+
+    output = provider.execute(
+        "pubchem-compound",
+        ProviderMetadataExecutionInput(
+            ledger_record=_record("pubchem-compound", EvidenceRole.IDENTITY, 1),
+            release_id="pubchem-compound-reviewed-current",
+            query=ProviderMetadataQuery(),
+            upstream_identifier_artifact=reference,
+            upstream_identifier_count=len(values),
+        ),
+        _invocation(workflow_id, "pubchem-compound"),
+    )
+
+    assert len(transport.calls) == 1
+    assert transport.batch_sizes == [1]
+    assert output.identifier_reconciliation is not None
+    assert output.identifier_reconciliation.received_identifier_count == 5
+    assert output.identifier_reconciliation.normalized_unique_identifier_count == 1
+    assert output.identifier_reconciliation.duplicate_identifier_count == 2
+    assert output.identifier_reconciliation.invalid_identifier_count == 2
+    assert output.identifier_reconciliation.provider_batch_size == 100
+    assert output.identifier_reconciliation.provider_batch_count == 1
+    assert output.identifier_reconciliation.completed_identifier_count == 1
+    assert output.identifier_reconciliation.missing_identifier_count == 0
+    assert output.ledger_record.local_request_validation_failure_count == 2
+    assert output.ledger_record.transport_attempt_count == 1
+
+    _descriptor, mapping_path = store.verified_path(
+        output.identifier_reconciliation.mapping_artifact.artifact_id
+    )
+    mapping = json.loads(mapping_path.read_text())
+    assert mapping["rows"][0]["provider_batch_index"] == 0
+    assert mapping["rows"][0]["provider_batch_position"] == 0
+    assert mapping["rows"][0]["source_partitions"] == [
+        "activity:pubchem-bioassay",
+        "transcriptomic:lincs-l1000",
+    ]
+
+
+def test_pubchem_compound_invalid_only_input_never_reaches_transport(
+    workflow_runtime,
+) -> None:
+    database, store, _providers, _harness, service = workflow_runtime
+    workflow_id = _workflow_id(service)
+    values = ["", "AID:2244", "CID:0", "not-a-compound"]
+    descriptor = store.put_bytes(
+        workflow_id=workflow_id,
+        content=("\n".join(values) + "\n").encode(),
+        mime_type="text/plain",
+        artifact_type="complete_upstream_compound_identifier_index",
+        logical_name="invalid-only-identifiers.jsonl",
+        producer="offline-pubchem-validation-regression",
+        idempotency_key="invalid-only-identifiers",
+    )
+    reference = ArtifactReference(
+        artifact_id=descriptor.id,
+        sha256=descriptor.sha256,
+        artifact_type=descriptor.artifact_type,
+    )
+    transport = PubChemCompoundBatchTransport()
+    provider = PreapprovalMetadataProvider(
+        load_preapproval_provider_registry(REPO_ROOT),
+        ProviderTaskExecutor(
+            transport=transport,
+            cache=SourceResponseCache(database),
+            artifacts=store,
+        ),
+    )
+
+    output = provider.execute(
+        "pubchem-compound",
+        ProviderMetadataExecutionInput(
+            ledger_record=_record("pubchem-compound", EvidenceRole.IDENTITY, 1),
+            release_id="pubchem-compound-reviewed-current",
+            query=ProviderMetadataQuery(),
+            upstream_identifier_artifact=reference,
+            upstream_identifier_count=len(values),
+        ),
+        _invocation(workflow_id, "pubchem-compound"),
+    )
+
+    assert transport.calls == []
+    assert output.exact_execution_count == 0
+    assert not output.completion_proof.completed
+    assert output.completion_proof.processed_identifier_count == 0
+    assert output.identifier_reconciliation is not None
+    assert output.identifier_reconciliation.invalid_identifier_count == len(values)
+    assert output.identifier_reconciliation.completed_identifier_count == 0
+    assert output.identifier_reconciliation.missing_identifier_count == 0
+    assert output.ledger_record.local_request_validation_failure_count == len(values)
+    assert output.ledger_record.request_reservation_count == 0
+    assert output.ledger_record.transport_attempt_count == 0
+    assert output.ledger_record.completed_http_response_count == 0
 
 
 def test_registered_capabilities_match_live_validated_readiness() -> None:

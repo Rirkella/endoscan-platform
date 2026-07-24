@@ -33,6 +33,12 @@ from .controlled_vocabulary import (
     canonicalize_geo_study_type,
 )
 from .errors import AgentPolicyError
+from .source_governor import (
+    ScientificSourceRequestGovernor,
+    SourceRequestExecutionContext,
+    SourceTaskCancellation,
+    activate_source_request_context,
+)
 from .source_security import SourceTimeoutError, SourceToolError
 
 logger = logging.getLogger("uvicorn.error.endoscan.workflow.source_tool")
@@ -294,8 +300,13 @@ class RegisteredTool:
 
 
 class ToolRegistry:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        source_request_governor: ScientificSourceRequestGovernor | None = None,
+    ) -> None:
         self._tools: dict[str, RegisteredTool] = {}
+        self.source_request_governor = source_request_governor
 
     def register(self, tool: RegisteredTool) -> None:
         if tool.definition.name in self._tools:
@@ -425,16 +436,57 @@ class ToolRegistry:
                 normalized_arguments=normalized.arguments,
                 normalization_warnings=list(normalized.warnings),
             )
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                tool.implementation,
-                *((typed_input, invocation) if tool.contextual else (typed_input,)),
+        source_context: SourceRequestExecutionContext | None = None
+        maximum_source_requests = invocation.run_context.get(
+            "maximum_global_scientific_source_requests"
+        )
+        discovery_round = invocation.run_context.get("discovery_round")
+        if (
+            self.source_request_governor is not None
+            and invocation.workflow_id is not None
+            and isinstance(maximum_source_requests, int)
+            and isinstance(discovery_round, int)
+        ):
+            self.source_request_governor.ensure_budget(
+                invocation.workflow_id,
+                discovery_round,
+                maximum_source_requests,
             )
+            source_context = SourceRequestExecutionContext(
+                governor=self.source_request_governor,
+                workflow_id=invocation.workflow_id,
+                discovery_round=discovery_round,
+                maximum_requests=maximum_source_requests,
+                task_id=str(
+                    invocation.run_context.get("discovery_task_id")
+                    or invocation.step_id
+                    or invocation.idempotency_key
+                    or invocation.tool_name
+                )[:160],
+                cancellation=SourceTaskCancellation(
+                    deadline_monotonic=(time.monotonic() + tool.definition.timeout_seconds)
+                ),
+            )
+
+        def execute_implementation() -> BaseModel | dict:
+            with activate_source_request_context(source_context):
+                return tool.implementation(
+                    *((typed_input, invocation) if tool.contextual else (typed_input,))
+                )
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(execute_implementation)
+        timed_out = False
+        try:
             try:
                 raw = future.result(timeout=tool.definition.timeout_seconds)
                 output = tool.output_model.model_validate(raw).model_dump(mode="json")
             except FutureTimeout:
+                timed_out = True
+                if source_context is not None:
+                    source_context.cancellation.cancel("tool_timeout")
                 future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
                 return ToolResult(
                     tool_name=invocation.tool_name,
                     status=ToolCallStatus.TIMED_OUT,
@@ -556,6 +608,9 @@ class ToolRegistry:
                     normalized_arguments=normalized.arguments,
                     normalization_warnings=list(normalized.warnings),
                 )
+        finally:
+            if not timed_out:
+                executor.shutdown(wait=True, cancel_futures=False)
         return ToolResult(
             tool_name=invocation.tool_name,
             status=ToolCallStatus.COMPLETED,
@@ -567,9 +622,13 @@ class ToolRegistry:
         )
 
 
-def offline_tool_registry(repo_root: Path) -> ToolRegistry:
+def offline_tool_registry(
+    repo_root: Path,
+    *,
+    source_request_governor: ScientificSourceRequestGovernor | None = None,
+) -> ToolRegistry:
     root = Path(repo_root).resolve()
-    registry = ToolRegistry()
+    registry = ToolRegistry(source_request_governor=source_request_governor)
     discovery = [WorkflowState.DISCOVERING_DATA]
 
     def inspect_registry(_request: RepositoryInput) -> RegistryInspection:
@@ -724,6 +783,7 @@ def production_tool_registry(
     *,
     lincs_metadata_provider=None,
     preapproval_provider_layer=None,
+    source_request_governor: ScientificSourceRequestGovernor | None = None,
 ) -> ToolRegistry:
     """Offline tools plus bounded compatibility and staged discovery tools."""
     from .discovery_tools import (
@@ -741,7 +801,10 @@ def production_tool_registry(
         SearchGeoSeriesOutput,
     )
 
-    registry = offline_tool_registry(repo_root)
+    registry = offline_tool_registry(
+        repo_root,
+        source_request_governor=source_request_governor,
+    )
     discovery = [WorkflowState.DISCOVERING_DATA]
     specs = [
         (

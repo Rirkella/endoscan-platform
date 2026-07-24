@@ -13,6 +13,7 @@ from sqlalchemy import delete
 from .database import WorkflowDatabase
 from .models import ArtifactRow, SourceCacheRow
 from .repository import canonical_json, parse_utc
+from .source_governor import current_source_request_context
 
 CACHE_POLICY_VERSION = "source-policy-v2-geo-text"
 
@@ -84,6 +85,9 @@ class SourceResponseCache:
             fresh = expires_at > datetime.now(UTC)
             if not fresh and not allow_stale:
                 return None
+            context = current_source_request_context()
+            if context is not None:
+                context.cache_hit(tool_name=tool_name, url=row.source_url)
             return CachedSourceResponse(
                 cache_key=row.cache_key,
                 parsed_output=json.loads(row.parsed_output_json),

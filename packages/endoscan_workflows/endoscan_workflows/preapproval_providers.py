@@ -17,6 +17,7 @@ import csv
 import gzip
 import io
 import json
+import math
 import re
 import sqlite3
 import tempfile
@@ -54,6 +55,7 @@ from .provider_execution import (
     ProviderRetrievalTask,
     ProviderTaskExecutor,
 )
+from .source_governor import current_source_request_context
 from .toxcast_public_activity import (
     TOXCAST_ARCHIVE_SHA256,
     ToxCastActivityNormalizer,
@@ -442,6 +444,7 @@ def compile_provider_metadata_input(
     *,
     upstream_identifier_artifact: ArtifactReference | None = None,
     upstream_identifier_count: int = 0,
+    maximum_hydration_candidates: int | None = None,
 ) -> ProviderMetadataExecutionInput:
     """Compile a semantics-v2 task into the exact typed provider input."""
 
@@ -470,6 +473,7 @@ def compile_provider_metadata_input(
         ),
         upstream_identifier_artifact=upstream_identifier_artifact,
         upstream_identifier_count=upstream_identifier_count,
+        maximum_hydration_candidates=maximum_hydration_candidates,
     )
 
 
@@ -495,7 +499,7 @@ class ProviderDatasetCompletionProof(ImmutableV2Contract):
     provider: str
     release_id: str
     task_id: str
-    declared_resource_count: int = Field(ge=1)
+    declared_resource_count: int = Field(ge=0)
     completed_resource_count: int = Field(ge=0)
     requested_identifier_count: int = Field(ge=0)
     processed_identifier_count: int = Field(ge=0)
@@ -511,11 +515,30 @@ class ProviderDatasetCompletionProof(ImmutableV2Contract):
     detail_aeid_count: int = Field(default=0, ge=0)
     discovered_candidate_count: int = Field(default=0, ge=0)
     hydrated_candidate_count: int = Field(default=0, ge=0)
+    shortlisted_candidate_ids: list[str] = Field(default_factory=list, max_length=500)
+    excluded_candidate_ids: list[str] = Field(default_factory=list, max_length=500)
+    excluded_candidate_count: int = Field(default=0, ge=0)
+    candidate_exclusion_reason: str | None = Field(default=None, max_length=500)
+    shortlist_decision_artifact: ArtifactReference | None = None
     activity_availability_attempt_count: int = Field(default=0, ge=0)
     relationship_attempt_count: int = Field(default=0, ge=0)
     resolved_geo_accession_count: int = Field(default=0, ge=0)
     geo_soft_attempt_count: int = Field(default=0, ge=0)
     structural_validation_codes: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ProviderPageYieldObservation(ImmutableV2Contract):
+    resource_id: str
+    operation: str
+    transport_request_count: int = Field(ge=0)
+    raw_rows: int = Field(ge=0)
+    normalized_rows: int = Field(ge=0)
+    provider_unique_records: int = Field(ge=0)
+    new_stable_compound_identifiers: int = Field(ge=0)
+    new_compact_candidates: int = Field(ge=0)
+    duplicates: int = Field(ge=0)
+    joinability_contribution: int = Field(ge=0)
+    continuation_token: str | None = None
 
 
 class DiskBackedSourceCandidateSet(ImmutableV2Contract):
@@ -576,12 +599,25 @@ class ToxCastPublicActivityCoverage(ImmutableV2Contract):
     final_source_selection_performed: Literal[False] = False
 
 
+class ProviderIdentifierReconciliation(ImmutableV2Contract):
+    received_identifier_count: int = Field(ge=0)
+    normalized_unique_identifier_count: int = Field(ge=0)
+    duplicate_identifier_count: int = Field(ge=0)
+    invalid_identifier_count: int = Field(ge=0)
+    invalid_identifiers_preview: list[str] = Field(default_factory=list, max_length=20)
+    provider_batch_size: int = Field(ge=1)
+    provider_batch_count: int = Field(ge=0)
+    completed_identifier_count: int = Field(default=0, ge=0)
+    missing_identifier_count: int = Field(default=0, ge=0)
+    mapping_artifact: ArtifactReference
+
+
 class ProviderMetadataExecutionOutput(ImmutableV2Contract):
     provider: str
     release_id: str
     ledger_record: DiscoveryExecutionRecord
     execution_manifest_artifact: ArtifactReference
-    exact_execution_count: int = Field(ge=1)
+    exact_execution_count: int = Field(ge=0)
     page_or_file_execution_preview: list[ProviderExecutionOutcome] = Field(
         default_factory=list, max_length=PREVIEW_LIMIT
     )
@@ -600,6 +636,10 @@ class ProviderMetadataExecutionOutput(ImmutableV2Contract):
     )
     toxcast_public_activity: ToxCastPublicActivityCoverage | None = None
     toxcast_public_activity_artifact: ArtifactReference | None = None
+    pagination_yield: list[ProviderPageYieldObservation] = Field(
+        default_factory=list, max_length=10_000
+    )
+    identifier_reconciliation: ProviderIdentifierReconciliation | None = None
 
 
 def _artifact_reference(descriptor: Any, artifact_type: str | None = None) -> ArtifactReference:
@@ -868,11 +908,56 @@ def _assay_summary_row(
     aid = str(_row_value(row, "aid", "uid", "source_identifier") or "").removeprefix("AID:")
     if not aid.isdigit():
         raise ValueError("PubChem assay summary lacks a numeric AID")
-    title = _text(_row_value(row, "title", "name"))
+    title = _text(_row_value(row, "title", "name", "assayname"))
     description = _text(_row_value(row, "description", "assaydescription", "summary"))
     target = _text(_row_value(row, "targetname", "target", "protein_target"))
-    assay_type = _text(_row_value(row, "assaytype", "assay_type"))
-    activity_outcome = _text(_row_value(row, "activityoutcome", "activity_outcome"))
+    protein_targets = row.get("proteintargetlist")
+    if target is None and isinstance(protein_targets, list):
+        target_names = sorted(
+            {
+                str(item.get("name")).strip()
+                for item in protein_targets
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            }
+        )
+        target = "; ".join(target_names) or None
+    assay_type = _text(
+        _row_value(
+            row,
+            "assaytype",
+            "assay_type",
+            "activityoutcomemethod",
+            "detectionmethod",
+        )
+    )
+    activity_outcome = _text(
+        _row_value(row, "activityoutcome", "activity_outcome", "activityoutcomemethod")
+    )
+    requested_targets = [
+        value.casefold()
+        for value in (
+            query.biological_target,
+            *query.target_identifiers,
+            *query.target_synonyms,
+        )
+        if value and len(value.strip()) >= 3
+    ]
+    target_relevance_status = "unresolved"
+    exclusion_reason = None
+    if target is not None and requested_targets:
+        observed_target = target.casefold()
+        target_relevance_status = (
+            "matched"
+            if any(
+                requested in observed_target or observed_target in requested
+                for requested in requested_targets
+            )
+            else "unrelated"
+        )
+        if target_relevance_status == "unrelated":
+            exclusion_reason = (
+                "The source-declared assay target does not match the reviewed discovery target."
+            )
     missing = [
         label
         for label, value in (
@@ -892,9 +977,13 @@ def _assay_summary_row(
         "assay_source_name": "Tox21" if provider == "tox21" else "PubChem BioAssay",
         "source_partition": provider,
         "target": target,
+        "intended_target_family": target,
+        "target_relevance_status": target_relevance_status,
+        "exclusion_reason": exclusion_reason,
         "assay_design": description,
         "assay_format": assay_type,
         "organism": _text(_row_value(row, "organism", "taxname")),
+        "pubchem_aid": aid,
         "modality": _modality_from_source(query, title, description, assay_type),
         "activity_field": activity_outcome,
         "compound_identifier_field": "PubChem CID/SID from public result table",
@@ -902,7 +991,11 @@ def _assay_summary_row(
         "completeness_status": (
             HydrationCompleteness.PARTIAL.value if missing else HydrationCompleteness.COMPLETE.value
         ),
-        "source_fields": row,
+        "source_fields": {
+            **row,
+            "target_relevance_status": target_relevance_status,
+            "exclusion_reason": exclusion_reason,
+        },
         "provenance": [
             "NCBI PubChem BioAssay ESummary",
             *(["Tox21[SourceName] source-constrained catalogue"] if provider == "tox21" else []),
@@ -2397,15 +2490,19 @@ class PreapprovalMetadataProvider:
         return self.executor.artifacts
 
     def _load_identifiers(
-        self, request: ProviderMetadataExecutionInput, workflow_id: str
-    ) -> list[str]:
+        self,
+        request: ProviderMetadataExecutionInput,
+        workflow_id: str,
+        *,
+        provider_batch_size: int,
+    ) -> tuple[list[str], ProviderIdentifierReconciliation | None]:
         reference = request.upstream_identifier_artifact
         if reference is None:
-            return []
+            return [], None
         descriptor, path = self.artifacts.verified_path(reference.artifact_id)
         if descriptor.workflow_id != workflow_id or descriptor.sha256 != reference.sha256:
             raise ValueError("upstream identifier artifact is not bound to this workflow")
-        identifiers: list[str] = []
+        received_identifiers: list[tuple[str, list[str]]] = []
         if path.read_bytes()[:16].startswith(b"SQLite format 3"):
             with sqlite3.connect(path) as connection:
                 tables = {
@@ -2424,15 +2521,19 @@ class PreapprovalMetadataProvider:
                     ORDER BY mapping_id
                     """
                 )
-                identifiers = [str(row[0]) for row in rows]
+                received_identifiers = [(str(row[0]), []) for row in rows]
         else:
             with path.open(encoding="utf-8-sig") as handle:
                 for line in handle:
                     value = line.strip()
-                    if not value:
-                        continue
                     parsed = json.loads(value) if value.startswith("{") else value
+                    source_partitions: list[str] = []
                     if isinstance(parsed, dict):
+                        partitions = parsed.get("source_partitions")
+                        if isinstance(partitions, list):
+                            source_partitions = sorted(
+                                {str(item).strip() for item in partitions if str(item).strip()}
+                            )
                         value = str(
                             parsed.get("compound_identifier")
                             or parsed.get("cid")
@@ -2442,14 +2543,84 @@ class PreapprovalMetadataProvider:
                         ).strip()
                     else:
                         value = str(parsed).strip()
-                    if value:
-                        identifiers.append(value)
-        identifiers = list(dict.fromkeys(identifiers))
-        if len(identifiers) != request.upstream_identifier_count:
+                    received_identifiers.append((value, source_partitions))
+        if len(received_identifiers) != request.upstream_identifier_count:
             raise ValueError(
                 "upstream identifier artifact count does not match its declared exact count"
             )
-        return identifiers
+        normalized: list[str] = []
+        seen: set[str] = set()
+        invalid: list[str] = []
+        duplicate_count = 0
+        mapping_rows: list[dict[str, Any]] = []
+        normalized_ordinals: dict[str, int] = {}
+        for ordinal, (original, source_partitions) in enumerate(received_identifiers, start=1):
+            value = original.strip()
+            match = re.fullmatch(r"CID:([1-9][0-9]{0,11})", value)
+            if match is None and re.fullmatch(r"[1-9][0-9]{0,11}", value):
+                match = re.fullmatch(r"([1-9][0-9]{0,11})", value)
+            canonical = f"CID:{int(match.group(1))}" if match is not None else None
+            if canonical is None:
+                invalid.append(value[:120])
+                status = "invalid"
+            elif canonical in seen:
+                duplicate_count += 1
+                status = "duplicate"
+            else:
+                seen.add(canonical)
+                normalized.append(canonical)
+                normalized_ordinals[canonical] = len(normalized)
+                status = "valid"
+            normalized_ordinal = (
+                normalized_ordinals.get(canonical) if canonical is not None else None
+            )
+            mapping_rows.append(
+                {
+                    "ordinal": ordinal,
+                    "original_identifier": value,
+                    "normalized_identifier": canonical,
+                    "normalized_ordinal": normalized_ordinal,
+                    "provider_batch_index": (
+                        (normalized_ordinal - 1) // provider_batch_size
+                        if normalized_ordinal is not None
+                        else None
+                    ),
+                    "provider_batch_position": (
+                        (normalized_ordinal - 1) % provider_batch_size
+                        if normalized_ordinal is not None
+                        else None
+                    ),
+                    "source_partitions": source_partitions,
+                    "status": status,
+                }
+            )
+        mapping = self.artifacts.put_json(
+            workflow_id=workflow_id,
+            value={
+                "source_artifact": reference.model_dump(mode="json"),
+                "received_identifier_count": len(received_identifiers),
+                "normalized_unique_identifier_count": len(normalized),
+                "duplicate_identifier_count": duplicate_count,
+                "invalid_identifier_count": len(invalid),
+                "provider_batch_size": provider_batch_size,
+                "provider_batch_count": math.ceil(len(normalized) / provider_batch_size),
+                "rows": mapping_rows,
+            },
+            artifact_type="provider_identifier_normalization_map",
+            logical_name=f"provider-identifier-normalization-{reference.sha256}.json",
+            producer="preapproval-provider:identifier-boundary",
+            idempotency_key=f"provider-identifier-normalization:{reference.sha256}",
+        )
+        return normalized, ProviderIdentifierReconciliation(
+            received_identifier_count=len(received_identifiers),
+            normalized_unique_identifier_count=len(normalized),
+            duplicate_identifier_count=duplicate_count,
+            invalid_identifier_count=len(invalid),
+            invalid_identifiers_preview=invalid[:20],
+            provider_batch_size=provider_batch_size,
+            provider_batch_count=math.ceil(len(normalized) / provider_batch_size),
+            mapping_artifact=_artifact_reference(mapping),
+        )
 
     def _execute_resource(
         self,
@@ -2525,6 +2696,127 @@ class PreapprovalMetadataProvider:
             _, path = self.artifacts.verified_path(result.raw_artifact.artifact_id)
             records.extend(_iter_source_records(path, operation_id))
         return records
+
+    @staticmethod
+    def _task_cancelled() -> bool:
+        context = current_source_request_context()
+        return context is not None and context.cancellation.cancelled
+
+    @staticmethod
+    def _stable_identifiers(value: Any) -> set[str]:
+        stable: set[str] = set()
+        stable_keys = {
+            "cid",
+            "pubchem_cid",
+            "inchikey",
+            "inchi_key",
+            "dtxsid",
+            "compound_identifier",
+            "perturbagen_id",
+            "pert_id",
+        }
+
+        def visit(item: Any, key: str | None = None) -> None:
+            if isinstance(item, dict):
+                for child_key, child in item.items():
+                    visit(child, str(child_key).casefold())
+                return
+            if isinstance(item, list):
+                for child in item:
+                    visit(child, key)
+                return
+            if key not in stable_keys or item in (None, ""):
+                return
+            text = str(item).strip()
+            if key in {"cid", "pubchem_cid"} and text.isdigit() and int(text) > 0:
+                stable.add(f"CID:{int(text)}")
+            elif key in {"inchikey", "inchi_key"} and re.fullmatch(
+                r"[A-Z]{14}-[A-Z]{10}-[A-Z]", text.upper()
+            ):
+                stable.add(f"InChIKey:{text.upper()}")
+            elif key == "dtxsid" and re.fullmatch(r"DTXSID[0-9]{7,12}", text.upper()):
+                stable.add(text.upper())
+            elif key == "compound_identifier":
+                if re.fullmatch(r"CID:[1-9][0-9]*", text, re.IGNORECASE):
+                    stable.add(f"CID:{int(text.split(':', maxsplit=1)[1])}")
+                elif re.fullmatch(r"(?:INCHIKEY:)?[A-Z]{14}-[A-Z]{10}-[A-Z]", text.upper()):
+                    stable.add(f"InChIKey:{text.upper().removeprefix('INCHIKEY:')}")
+                elif re.fullmatch(r"DTXSID[0-9]{7,12}", text.upper()):
+                    stable.add(text.upper())
+            elif key in {"perturbagen_id", "pert_id"}:
+                stable.add(f"PERT:{text}")
+
+        visit(value)
+        return stable
+
+    def _pagination_yield(
+        self,
+        manifest: PreapprovalProviderReleaseManifest,
+        executions: list[ProviderExecutionOutcome],
+    ) -> list[ProviderPageYieldObservation]:
+        observations: list[ProviderPageYieldObservation] = []
+        template_by_role = {item.logical_role: item for item in manifest.resources}
+        seen_stable: set[str] = set()
+        seen_candidates: set[str] = set()
+        for execution in executions:
+            for result in execution.page_or_file_results:
+                normalized = execution.normalized_resources.get(result.resource_id, {})
+                records: list[dict[str, Any]] = []
+                if result.raw_artifact is not None:
+                    _, path = self.artifacts.verified_path(result.raw_artifact.artifact_id)
+                    template = template_by_role[result.logical_role]
+                    records = list(_iter_source_records(path, template.operation_id))
+                stable = self._stable_identifiers([normalized, records])
+                candidate_values = {
+                    str(item)
+                    for item in [
+                        *(
+                            value
+                            for key in ("candidate_ids", "identifiers", "accessions")
+                            for value in (
+                                normalized.get(key, [])
+                                if isinstance(normalized, dict)
+                                and isinstance(normalized.get(key), list)
+                                else []
+                            )
+                        ),
+                        *(
+                            row.get("source_identifier")
+                            for row in records
+                            if row.get("source_identifier") not in (None, "")
+                        ),
+                    ]
+                    if isinstance(item, str | int)
+                }
+                new_stable = stable - seen_stable
+                new_candidates = candidate_values - seen_candidates
+                seen_stable.update(stable)
+                seen_candidates.update(candidate_values)
+                raw_rows = result.parsed_record_count
+                unique = len(stable | candidate_values)
+                observations.append(
+                    ProviderPageYieldObservation(
+                        resource_id=result.resource_id,
+                        operation=result.logical_role,
+                        transport_request_count=sum(
+                            int(item.request_left_process) for item in result.transport_attempts
+                        ),
+                        raw_rows=raw_rows,
+                        normalized_rows=raw_rows,
+                        provider_unique_records=unique,
+                        new_stable_compound_identifiers=len(new_stable),
+                        new_compact_candidates=len(new_candidates),
+                        duplicates=max(raw_rows - unique, 0),
+                        joinability_contribution=len(new_stable),
+                        continuation_token=(
+                            str(normalized.get("next_cursor"))
+                            if isinstance(normalized, dict)
+                            and normalized.get("next_cursor") not in (None, "")
+                            else None
+                        ),
+                    )
+                )
+        return observations
 
     def _cached_toxcast_normalization(self) -> ToxCastNormalizationResult | None:
         if self.public_provider_cache_root is None:
@@ -2663,7 +2955,7 @@ class PreapprovalMetadataProvider:
         DiscoveryExecutionRecord,
         bool,
         bool,
-        dict[str, int],
+        dict[str, Any],
     ]:
         executions: list[ProviderExecutionOutcome] = []
         ledger = request.ledger_record
@@ -2891,6 +3183,10 @@ class PreapprovalMetadataProvider:
         cursor: str | None = None
         cursor_exhausted = False
         search_safety_truncated = False
+        bounded_shortlist_satisfied = False
+        seen_search_candidates: set[str] = set()
+        seen_search_stable_identifiers: set[str] = set()
+        consecutive_no_yield_pages = 0
         for page in range(1, manifest.maximum_pages + 1):
             outcome = self._execute_resource(
                 manifest=manifest,
@@ -2906,11 +3202,37 @@ class PreapprovalMetadataProvider:
             )
             executions.append(outcome)
             ledger = outcome.ledger_record
+            if self._task_cancelled():
+                search_safety_truncated = True
+                break
             compact = next(iter(outcome.normalized_resources.values()), {})
+            page_candidates = set(self._candidate_ids(manifest, [outcome]))
+            new_candidates = page_candidates - seen_search_candidates
+            page_stable_identifiers = self._stable_identifiers(
+                [
+                    compact,
+                    self._records_from_execution(outcome, search_template.operation_id),
+                ]
+            )
+            new_stable_identifiers = page_stable_identifiers - seen_search_stable_identifiers
+            seen_search_candidates.update(page_candidates)
+            seen_search_stable_identifiers.update(page_stable_identifiers)
             next_cursor = _text(compact.get("next_cursor"))
             terminal = bool(compact.get("terminal", not next_cursor))
             if terminal and not next_cursor:
                 cursor_exhausted = True
+                break
+            if (
+                request.maximum_hydration_candidates is not None
+                and len(seen_search_candidates) >= request.maximum_hydration_candidates
+            ):
+                bounded_shortlist_satisfied = True
+                break
+            consecutive_no_yield_pages = (
+                0 if new_candidates or new_stable_identifiers else consecutive_no_yield_pages + 1
+            )
+            if consecutive_no_yield_pages >= 2:
+                search_safety_truncated = True
                 break
             cursor = next_cursor or str(page * (manifest.page_size or 1))
         else:
@@ -2918,13 +3240,14 @@ class PreapprovalMetadataProvider:
 
         discovered = self._candidate_ids(manifest, executions)
         hydration_ids = discovered
+        excluded_hydration_ids: list[str] = []
         hydration_safety_truncated = False
         if (
             request.maximum_hydration_candidates is not None
             and len(hydration_ids) > request.maximum_hydration_candidates
         ):
+            excluded_hydration_ids = hydration_ids[request.maximum_hydration_candidates :]
             hydration_ids = hydration_ids[: request.maximum_hydration_candidates]
-            hydration_safety_truncated = True
 
         templates: dict[ProviderExpansionMode, ProviderResourceTemplate] = {
             item.expansion_mode: item
@@ -2953,6 +3276,9 @@ class PreapprovalMetadataProvider:
             summary_record_count += sum(
                 item.parsed_record_count for item in outcome.page_or_file_results
             )
+            if self._task_cancelled():
+                hydration_safety_truncated = True
+                break
 
         activity_attempts = 0
         relationship_attempts = 0
@@ -2983,10 +3309,21 @@ class PreapprovalMetadataProvider:
                     )
                     executions.append(outcome)
                     ledger = outcome.ledger_record
-                    if expansion is ProviderExpansionMode.CANDIDATE_ACTIVITY_ROWS:
+                    if (
+                        expansion is ProviderExpansionMode.CANDIDATE_ACTIVITY_ROWS
+                        and outcome.completion_proof.completed
+                    ):
                         activity_attempts += 1
-                    elif expansion is ProviderExpansionMode.CANDIDATE_RELATIONSHIPS:
+                    elif (
+                        expansion is ProviderExpansionMode.CANDIDATE_RELATIONSHIPS
+                        and outcome.completion_proof.completed
+                    ):
                         relationship_attempts += 1
+                    if self._task_cancelled():
+                        hydration_safety_truncated = True
+                        break
+                if self._task_cancelled():
+                    break
         else:
             resolved_geo_accessions = self._geo_accessions(manifest, executions)
             soft_template = templates[ProviderExpansionMode.GEO_SERIES_SOFT]
@@ -3006,6 +3343,9 @@ class PreapprovalMetadataProvider:
                 executions.append(outcome)
                 ledger = outcome.ledger_record
                 geo_soft_attempts += 1
+                if self._task_cancelled():
+                    hydration_safety_truncated = True
+                    break
 
         return (
             executions,
@@ -3019,6 +3359,9 @@ class PreapprovalMetadataProvider:
                 "detail_aeid_count": 0,
                 "discovered_candidate_count": len(discovered),
                 "hydrated_candidate_count": len(hydration_ids),
+                "shortlisted_candidate_ids": list(hydration_ids),
+                "excluded_candidate_ids": excluded_hydration_ids,
+                "bounded_shortlist_satisfied": bounded_shortlist_satisfied,
                 "hydrated_summary_record_count": summary_record_count,
                 "activity_availability_attempt_count": activity_attempts,
                 "relationship_attempt_count": relationship_attempts,
@@ -3040,7 +3383,7 @@ class PreapprovalMetadataProvider:
         DiscoveryExecutionRecord,
         bool,
         bool,
-        dict[str, int],
+        dict[str, Any],
     ]:
         if manifest.retrieval_mode is ProviderRetrievalMode.TOXCAST_AUTHORITATIVE:
             if request.access_mode is ProviderAccessMode.PUBLIC_RELEASE:
@@ -3067,6 +3410,7 @@ class PreapprovalMetadataProvider:
         ledger = request.ledger_record
         cursor_exhausted = manifest.retrieval_mode is not ProviderRetrievalMode.CURSOR_PAGES
         safety_truncated = False
+        processed_identifier_count = 0
         if manifest.retrieval_mode is ProviderRetrievalMode.MANIFEST_FILES:
             for index, template in enumerate(manifest.resources, start=1):
                 outcome = self._execute_resource(
@@ -3083,9 +3427,26 @@ class PreapprovalMetadataProvider:
                 )
                 executions.append(outcome)
                 ledger = outcome.ledger_record
+                if self._task_cancelled():
+                    safety_truncated = True
+                    break
         elif manifest.retrieval_mode is ProviderRetrievalMode.IDENTIFIER_BATCHES:
             if not identifiers:
-                raise ValueError("identifier-batch provider requires a complete upstream index")
+                if request.upstream_identifier_artifact is None:
+                    raise ValueError("identifier-batch provider requires a complete upstream index")
+                return (
+                    executions,
+                    ledger,
+                    True,
+                    False,
+                    {
+                        "assay_catalogue_count": 0,
+                        "matched_aeid_count": 0,
+                        "summary_aeid_count": 0,
+                        "detail_aeid_count": 0,
+                        "processed_identifier_count": 0,
+                    },
+                )
             batch_size = manifest.identifier_batch_size or 1
             template = manifest.resources[0]
             for index, start in enumerate(range(0, len(identifiers), batch_size), start=1):
@@ -3104,9 +3465,17 @@ class PreapprovalMetadataProvider:
                 )
                 executions.append(outcome)
                 ledger = outcome.ledger_record
+                if outcome.completion_proof.completed:
+                    processed_identifier_count += len(batch)
+                if self._task_cancelled():
+                    safety_truncated = True
+                    break
         else:
             template = manifest.resources[0]
             cursor: str | None = None
+            seen_candidates: set[str] = set()
+            seen_stable_identifiers: set[str] = set()
+            consecutive_no_yield_pages = 0
             for page in range(1, manifest.maximum_pages + 1):
                 outcome = self._execute_resource(
                     manifest=manifest,
@@ -3122,11 +3491,30 @@ class PreapprovalMetadataProvider:
                 )
                 executions.append(outcome)
                 ledger = outcome.ledger_record
+                if self._task_cancelled():
+                    safety_truncated = True
+                    break
                 compact = next(iter(outcome.normalized_resources.values()), {})
+                page_candidates = set(self._candidate_ids(manifest, [outcome]))
+                new_candidates = page_candidates - seen_candidates
+                page_stable_identifiers = self._stable_identifiers(
+                    [compact, self._records_from_execution(outcome, template.operation_id)]
+                )
+                new_stable_identifiers = page_stable_identifiers - seen_stable_identifiers
+                seen_candidates.update(page_candidates)
+                seen_stable_identifiers.update(page_stable_identifiers)
+                consecutive_no_yield_pages = (
+                    0
+                    if new_candidates or new_stable_identifiers
+                    else consecutive_no_yield_pages + 1
+                )
                 next_cursor = _text(compact.get("next_cursor"))
                 terminal = bool(compact.get("terminal", not next_cursor))
                 if terminal and not next_cursor:
                     cursor_exhausted = True
+                    break
+                if consecutive_no_yield_pages >= 2:
+                    safety_truncated = True
                     break
                 cursor = next_cursor or str(page * (manifest.page_size or 1))
             else:
@@ -3141,6 +3529,7 @@ class PreapprovalMetadataProvider:
                 "matched_aeid_count": 0,
                 "summary_aeid_count": 0,
                 "detail_aeid_count": 0,
+                "processed_identifier_count": processed_identifier_count,
             },
         )
 
@@ -3156,7 +3545,7 @@ class PreapprovalMetadataProvider:
         self,
         manifest: PreapprovalProviderReleaseManifest,
         executions: list[ProviderExecutionOutcome],
-        metrics: dict[str, int],
+        metrics: dict[str, Any],
     ) -> list[str]:
         template_by_role = {item.logical_role: item for item in manifest.resources}
         scientific_hash_roles: dict[str, set[str]] = {}
@@ -3340,7 +3729,11 @@ class PreapprovalMetadataProvider:
                                 raw_record_id=raw_record_id,
                             )
                 if request.upstream_identifier_artifact is not None:
-                    requested_identifiers = self._load_identifiers(request, workflow_id)
+                    requested_identifiers, _ = self._load_identifiers(
+                        request,
+                        workflow_id,
+                        provider_batch_size=manifest.identifier_batch_size,
+                    )
                     observed_identifiers = {
                         str(row[0])
                         for row in connection.execute(
@@ -3666,7 +4059,11 @@ class PreapprovalMetadataProvider:
             if request.access_mode is ProviderAccessMode.PUBLIC_RELEASE
             else []
         )
-        identifiers = self._load_identifiers(request, invocation.workflow_id)
+        identifiers, identifier_reconciliation = self._load_identifiers(
+            request,
+            invocation.workflow_id,
+            provider_batch_size=manifest.identifier_batch_size,
+        )
         executions, ledger, cursor_exhausted, safety_truncated, metrics = self._retrieve(
             manifest=manifest,
             request=request,
@@ -3683,9 +4080,16 @@ class PreapprovalMetadataProvider:
         )
         completed_resources = sum(int(outcome.completion_proof.completed) for outcome in executions)
         all_resources_complete = completed_resources == len(executions)
+        processed_identifier_count = metrics.get("processed_identifier_count", len(identifiers))
         all_identifiers = (
             manifest.retrieval_mode is not ProviderRetrievalMode.IDENTIFIER_BATCHES
-            or len(identifiers) == request.upstream_identifier_count
+            or (
+                processed_identifier_count == len(identifiers)
+                and (
+                    identifier_reconciliation is None
+                    or identifier_reconciliation.invalid_identifier_count == 0
+                )
+            )
         )
         structural_codes = self._structural_validation_codes(manifest, executions, metrics)
         if (
@@ -3699,7 +4103,7 @@ class PreapprovalMetadataProvider:
             )
         completed = (
             all_resources_complete
-            and cursor_exhausted
+            and (cursor_exhausted or bool(metrics.get("bounded_shortlist_satisfied", False)))
             and not safety_truncated
             and all_identifiers
             and not structural_codes
@@ -3722,15 +4126,51 @@ class PreapprovalMetadataProvider:
                 "target discovery or select a source."
             )
         elif completed:
-            reason = (
-                "All reviewed resources/pages were exhausted and every upstream "
-                "identifier was processed."
-            )
+            if metrics.get("bounded_shortlist_satisfied") or metrics.get("excluded_candidate_ids"):
+                reason = (
+                    "The deterministic bounded assay shortlist completed every mandatory "
+                    "structural inspection; any observed but unselected search hits remain "
+                    "explicitly excluded and the provider search universe is not claimed "
+                    "as exhaustively enumerated."
+                )
+            else:
+                reason = (
+                    "All reviewed resources/pages were exhausted and every upstream "
+                    "identifier was processed."
+                )
         else:
             reason = (
                 "Provider task remains incomplete; resources, cursor, or full "
                 "identifier coverage were not reconciled."
             )
+        shortlist_decision_artifact: ArtifactReference | None = None
+        excluded_candidate_ids = list(metrics.get("excluded_candidate_ids", []))
+        if metrics.get("shortlisted_candidate_ids") or excluded_candidate_ids:
+            shortlist_descriptor = self.artifacts.put_json(
+                workflow_id=invocation.workflow_id,
+                value={
+                    "provider": provider,
+                    "release_id": manifest.release_id,
+                    "task_id": request.ledger_record.task_id,
+                    "ranking_policy": (
+                        "Retain the reviewed provider search order within the task's fair "
+                        "allocation; do not infer activity from assay titles."
+                    ),
+                    "shortlisted_candidate_ids": metrics.get("shortlisted_candidate_ids", []),
+                    "excluded_candidate_ids": excluded_candidate_ids,
+                    "exclusion_reason": (
+                        "Excluded by deterministic fair-allocation shortlist before "
+                        "mandatory structural inspection."
+                    ),
+                },
+                artifact_type="provider_candidate_shortlist",
+                logical_name=(f"provider-candidate-shortlist-{request.ledger_record.task_id}.json"),
+                producer=f"preapproval-provider:{provider}",
+                idempotency_key=(
+                    f"{invocation.idempotency_key or request.ledger_record.task_id}:shortlist"
+                ),
+            )
+            shortlist_decision_artifact = _artifact_reference(shortlist_descriptor)
         proof = ProviderDatasetCompletionProof(
             provider=provider,
             release_id=manifest.release_id,
@@ -3738,7 +4178,7 @@ class PreapprovalMetadataProvider:
             declared_resource_count=len(executions),
             completed_resource_count=completed_resources,
             requested_identifier_count=request.upstream_identifier_count,
-            processed_identifier_count=len(identifiers),
+            processed_identifier_count=processed_identifier_count,
             cursor_exhausted=cursor_exhausted,
             file_manifest_reconciled=all_resources_complete,
             safety_truncated=safety_truncated,
@@ -3751,6 +4191,15 @@ class PreapprovalMetadataProvider:
             detail_aeid_count=metrics["detail_aeid_count"],
             discovered_candidate_count=metrics.get("discovered_candidate_count", 0),
             hydrated_candidate_count=metrics.get("hydrated_candidate_count", 0),
+            shortlisted_candidate_ids=metrics.get("shortlisted_candidate_ids", []),
+            excluded_candidate_ids=excluded_candidate_ids[:500],
+            excluded_candidate_count=len(excluded_candidate_ids),
+            candidate_exclusion_reason=(
+                "Excluded by deterministic fair-allocation shortlist before hydration."
+                if excluded_candidate_ids
+                else None
+            ),
+            shortlist_decision_artifact=shortlist_decision_artifact,
             activity_availability_attempt_count=metrics.get(
                 "activity_availability_attempt_count", 0
             ),
@@ -3759,6 +4208,17 @@ class PreapprovalMetadataProvider:
             geo_soft_attempt_count=metrics.get("geo_soft_attempt_count", 0),
             structural_validation_codes=structural_codes,
         )
+        if identifier_reconciliation is not None:
+            identifier_reconciliation = identifier_reconciliation.model_copy(
+                update={
+                    "completed_identifier_count": processed_identifier_count,
+                    "missing_identifier_count": max(
+                        identifier_reconciliation.normalized_unique_identifier_count
+                        - processed_identifier_count,
+                        0,
+                    ),
+                }
+            )
         ledger = ledger.model_copy(
             update={
                 "status": (
@@ -3772,6 +4232,11 @@ class PreapprovalMetadataProvider:
                     if structural_codes
                     else failure_classification or "provider_discovery_incomplete"
                 ),
+                "local_request_validation_failure_count": (
+                    identifier_reconciliation.invalid_identifier_count
+                    if identifier_reconciliation is not None
+                    else 0
+                ),
             }
         )
         execution_manifest = self._persist_execution_manifest(
@@ -3782,7 +4247,10 @@ class PreapprovalMetadataProvider:
             executions=executions,
         )
         ledger = ledger.model_copy(update={"source_response_artifacts": [execution_manifest]})
-        if not completed:
+        partial_identity_normalization = provider == "pubchem-compound" and any(
+            item.completion_proof.completed for item in executions
+        )
+        if not completed and not partial_identity_normalization:
             return ProviderMetadataExecutionOutput(
                 provider=provider,
                 release_id=manifest.release_id,
@@ -3797,6 +4265,8 @@ class PreapprovalMetadataProvider:
                 access_mode=request.access_mode,
                 optional_authenticated_api_available=authenticated_api_available,
                 capability_findings=capability_findings,
+                pagination_yield=self._pagination_yield(manifest, executions),
+                identifier_reconciliation=identifier_reconciliation,
             )
         normalized, manifest_reference, normalization_ran = self._normalize(
             manifest=manifest,
@@ -3856,6 +4326,8 @@ class PreapprovalMetadataProvider:
             capability_findings=capability_findings,
             toxcast_public_activity=toxcast_public_activity,
             toxcast_public_activity_artifact=toxcast_public_activity_artifact,
+            pagination_yield=self._pagination_yield(manifest, executions),
+            identifier_reconciliation=(identifier_reconciliation),
         )
 
 

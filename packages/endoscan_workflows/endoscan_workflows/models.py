@@ -221,6 +221,167 @@ class SourceCacheRow(Base):
     expires_at: Mapped[str] = mapped_column(String(40), index=True)
 
 
+class ScientificSourceRequestBudgetRow(Base):
+    """One immutable-capacity request budget shared by every task in a discovery round."""
+
+    __tablename__ = "scientific_source_request_budgets"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "discovery_round",
+            name="uq_scientific_source_budget_workflow_round",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
+    )
+    discovery_round: Mapped[int] = mapped_column(Integer)
+    maximum_requests: Mapped[int] = mapped_column(Integer)
+    reserved_requests: Mapped[int] = mapped_column(Integer, default=0)
+    completed_transport_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    failed_transport_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_requests: Mapped[int] = mapped_column(Integer, default=0)
+    prevented_by_cancellation: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = mapped_column(String(40))
+    updated_at: Mapped[str] = mapped_column(String(40))
+
+
+class ScientificSourceRequestAttemptRow(Base):
+    """Durable request decision recorded before the common scientific transport boundary."""
+
+    __tablename__ = "scientific_source_request_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "budget_id",
+            "reservation_sequence",
+            name="uq_scientific_source_budget_reservation",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    budget_id: Mapped[str] = mapped_column(
+        ForeignKey("scientific_source_request_budgets.id", ondelete="CASCADE"), index=True
+    )
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
+    )
+    discovery_round: Mapped[int] = mapped_column(Integer)
+    task_id: Mapped[str] = mapped_column(String(160), index=True)
+    tool_name: Mapped[str] = mapped_column(String(80), index=True)
+    reservation_sequence: Mapped[int | None] = mapped_column(Integer)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    source_host: Mapped[str] = mapped_column(String(253))
+    safe_url_path: Mapped[str] = mapped_column(String(500))
+    outcome: Mapped[str] = mapped_column(String(80), index=True)
+    request_left_process: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[str | None] = mapped_column(String(40))
+    completed_at: Mapped[str | None] = mapped_column(String(40))
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    final_approved_host: Mapped[str | None] = mapped_column(String(253))
+    error_category: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[str] = mapped_column(String(40))
+
+
+class ScientificSourceAllocationPolicyRow(Base):
+    """Versioned fair-allocation policy for one build discovery round."""
+
+    __tablename__ = "scientific_source_allocation_policies"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "discovery_round",
+            name="uq_scientific_source_allocation_policy_workflow_round",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
+    )
+    discovery_round: Mapped[int] = mapped_column(Integer)
+    policy_version: Mapped[str] = mapped_column(String(40))
+    plan_fingerprint: Mapped[str] = mapped_column(String(64))
+    maximum_requests: Mapped[int] = mapped_column(Integer)
+    initial_shared_remainder: Mapped[int] = mapped_column(Integer)
+    available_shared_remainder: Mapped[int] = mapped_column(Integer)
+    policy_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(String(40))
+    updated_at: Mapped[str] = mapped_column(String(40))
+
+
+class ScientificSourceAllocationBucketRow(Base):
+    """Durable provider/role/source-family ceiling shared by multiple tasks."""
+
+    __tablename__ = "scientific_source_allocation_buckets"
+    __table_args__ = (
+        UniqueConstraint(
+            "policy_id",
+            "bucket_kind",
+            "bucket_key",
+            name="uq_scientific_source_allocation_bucket",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    policy_id: Mapped[str] = mapped_column(
+        ForeignKey("scientific_source_allocation_policies.id", ondelete="CASCADE"), index=True
+    )
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
+    )
+    discovery_round: Mapped[int] = mapped_column(Integer)
+    bucket_kind: Mapped[str] = mapped_column(String(40))
+    bucket_key: Mapped[str] = mapped_column(String(160))
+    maximum_requests: Mapped[int] = mapped_column(Integer)
+    consumed_requests: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = mapped_column(String(40))
+    updated_at: Mapped[str] = mapped_column(String(40))
+
+
+class ScientificSourceTaskAllocationRow(Base):
+    """Persisted first-pass reservation and hard ceiling for one provider task."""
+
+    __tablename__ = "scientific_source_task_allocations"
+    __table_args__ = (
+        UniqueConstraint(
+            "policy_id",
+            "task_id",
+            name="uq_scientific_source_task_allocation",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    policy_id: Mapped[str] = mapped_column(
+        ForeignKey("scientific_source_allocation_policies.id", ondelete="CASCADE"), index=True
+    )
+    workflow_id: Mapped[str] = mapped_column(
+        ForeignKey("endpoint_builds.id", ondelete="CASCADE"), index=True
+    )
+    discovery_round: Mapped[int] = mapped_column(Integer)
+    task_id: Mapped[str] = mapped_column(String(160), index=True)
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    source_family: Mapped[str] = mapped_column(String(120), index=True)
+    evidence_role: Mapped[str] = mapped_column(String(80), index=True)
+    modality: Mapped[str | None] = mapped_column(String(120), index=True)
+    execution_phase: Mapped[str] = mapped_column(String(80), index=True)
+    sequence: Mapped[int] = mapped_column(Integer, index=True)
+    initial_allocation: Mapped[int] = mapped_column(Integer)
+    allocated_requests: Mapped[int] = mapped_column(Integer)
+    maximum_requests: Mapped[int] = mapped_column(Integer)
+    consumed_requests: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_requests: Mapped[int] = mapped_column(Integer, default=0)
+    released_requests: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(80), index=True)
+    terminal_outcome: Mapped[str | None] = mapped_column(String(120))
+    prerequisite_json: Mapped[str] = mapped_column(Text)
+    completion_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(String(40))
+    updated_at: Mapped[str] = mapped_column(String(40))
+
+
 class TrainingDatasetWorkflowRow(Base):
     """Mutable latest-document pointers; every durable decision remains an artifact/event."""
 

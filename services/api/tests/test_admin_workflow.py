@@ -786,11 +786,25 @@ def test_semantics_v2_review_actions_are_thin_typed_and_idempotency_bound(
                 "expected_version": build["version"],
                 "actor": "local-admin",
                 "reason": "No current proposal is scientifically acceptable.",
+                "reason_category": "insufficient_compound_count_and_class_balance",
+                "revision_objective": "Expand source-declared activity evidence.",
+                "technical_proof_classification": "TECHNICAL_PROOF_OF_JOINABILITY",
+                "technical_proof_proposal_ids": ["proposal-1"],
             },
             "api-semantics-v2-reject",
         )
         assert rejection.status_code == 200, rejection.text
-        service.reject_semantics_v2_strategy_set.assert_called_once()
+        service.reject_semantics_v2_strategy_set.assert_called_once_with(
+            build["id"],
+            reason="No current proposal is scientifically acceptable.",
+            expected_version=build["version"],
+            actor="local-admin",
+            idempotency_key="api-semantics-v2-reject",
+            reason_category="insufficient_compound_count_and_class_balance",
+            revision_objective="Expand source-declared activity evidence.",
+            technical_proof_classification="TECHNICAL_PROOF_OF_JOINABILITY",
+            technical_proof_proposal_ids=["proposal-1"],
+        )
 
         invalid = post(
             client,
